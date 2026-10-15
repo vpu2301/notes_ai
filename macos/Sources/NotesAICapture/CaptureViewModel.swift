@@ -226,14 +226,14 @@ final class CaptureViewModel: ObservableObject {
     /// A system notification, when this process can post one: a bare `swift build` binary has no bundle and UNUserNotificationCenter would abort.
     private func notify(title: String, body: String) {
         guard Bundle.main.bundleIdentifier != nil else { return }
-        let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
             guard granted else { return }
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
             content.sound = .default
-            center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+            UNUserNotificationCenter.current()
+                .add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         }
     }
 
@@ -612,42 +612,67 @@ final class CaptureViewModel: ObservableObject {
 
     /// Everything typed offline, replayed. Safe to call repeatedly: note creation is idempotent on `clientCaptureId`, line times first-wins.
     func syncPendingMeetingNotes() async {
-        for pending in PendingMeetingNotes.all(identityId: app.identityId) {
-            // The capture in front of the user right now is not "pending".
-            guard pending.clientCaptureId != clientCaptureId || !isRecording else { continue }
-            guard await syncOne(pending) else { continue }
-            PendingMeetingNotes.remove(pending.clientCaptureId)
-        }
+        // The capture in front of the user right now is not "pending".
+        let refused = await Self.syncPendingMeetingNotes(
+            api: app.api, identityId: app.identityId,
+            skipping: isRecording ? clientCaptureId : nil)
+        app.setOrphanedMeetingNotes(refused)
     }
 
-    private func syncOne(_ pending: PendingMeetingNote) async -> Bool {
+    /// Each note goes to the workspace it was typed in: the session's token for the
+    /// active one, a borrowed token (`activate:false`, `APIClient.token(for:)`) for any
+    /// other. Returns the notes a workspace refused (`not_a_member`); their files stay.
+    static func syncPendingMeetingNotes(api: APIClient, identityId: String, skipping: String?,
+                                        in directory: URL = PendingMeetingNotes.directory) async -> [PendingMeetingNote] {
+        let pending = PendingMeetingNotes.all(identityId: identityId, in: directory)
+            .filter { $0.clientCaptureId != skipping }
+        let byTenant = Dictionary(grouping: pending) { $0.tenantId ?? "" }
+        var refused: [PendingMeetingNote] = []
+        for tenantId in byTenant.keys.sorted() {
+            let notes = byTenant[tenantId] ?? []
+            // No workspace recorded (older file): the active one, as before.
+            let tenant = tenantId.isEmpty ? nil : tenantId
+            for (index, note) in notes.enumerated() {
+                do {
+                    try await syncOne(note, api: api, tenant: tenant)
+                    PendingMeetingNotes.remove(note.clientCaptureId, in: directory)
+                } catch {
+                    guard (error as? APIError)?.code == "not_a_member" else { continue }
+                    // The whole workspace is gone, not this note: keep the rest of it too.
+                    refused += notes[index...]
+                    break
+                }
+            }
+        }
+        return refused.sorted { $0.startedAt < $1.startedAt }
+    }
+
+    /// Throws on anything short of done; the file is then kept for the next pass.
+    private static func syncOne(_ pending: PendingMeetingNote, api: APIClient, tenant: String?) async throws {
         var id = pending.noteId
         if id == nil {
-            guard let created = try? await app.api.startMeeting(
+            let created = try await api.startMeeting(
                 clientCaptureId: pending.clientCaptureId,
                 title: pending.title,
                 startedAt: pending.startedAt,
                 language: pending.language == Self.autoLanguage ? nil : pending.language,
                 meetingType: MeetingType(rawValue: pending.meetingType) ?? .auto,
-                calendar: pending.calendar)
-            else { return false }
+                calendar: pending.calendar,
+                tenant: tenant)
             id = created.id
         }
-        guard let id,
-              let env = try? await app.api.fetchNote(id: id),
-              var content = env.content
-        else { return false }
+        guard let id else { return }
+        let env = try await api.fetchNote(id: id, tenant: tenant)
+        guard var content = env.content else { throw APIError.http(status: 0, problem: nil) }
         var section = content.section(Self.userNotesSection)
         let merged = PendingMeetingNotes.merge(remote: section.text ?? "", local: pending.text)
         if merged != (section.text ?? "") {
             section.text = merged
             content.upsert(section)
-            guard (try? await app.api.updateDraft(id: id, content: content,
-                                                  expectedVersion: env.currentVersionNumber)) != nil
-            else { return false }
+            _ = try await api.updateDraft(id: id, content: content,
+                                          expectedVersion: env.currentVersionNumber, tenant: tenant)
         }
-        try? await app.api.putLineTimes(noteId: id, lines: pending.pendingLineTimes)
-        return true
+        try? await api.putLineTimes(noteId: id, lines: pending.pendingLineTimes, tenant: tenant)
     }
 
     private static func defaultTitle() -> String {

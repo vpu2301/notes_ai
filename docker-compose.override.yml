@@ -122,7 +122,7 @@ services:
       DB_AUDIT_READER_DSN: postgresql://audit_reader:audit_reader@postgres:5432/notes
       KEYCLOAK_BASE_URL: http://keycloak:8080
       KEYCLOAK_REALM: notes
-      MDX_IDP_MODE: "${MDX_IDP_MODE:-keycloak}"
+      MDX_IDP_MODE: "${MDX_IDP_MODE:-dual}"
       AUTH_ISSUER_URL: "${AUTH_ISSUER_URL:-http://localhost:8000}"
       AUTH_ACCESS_TTL_SECONDS: "${AUTH_ACCESS_TTL_SECONDS:-900}"
       # Refresh TTL slides on every rotation; the absolute cap does not.

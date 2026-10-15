@@ -268,6 +268,9 @@ _ENTITY_TABLES: tuple[str, ...] = (
     "note_share_links",  # share link (0016/0035)
     "note_action_items",  # action item projection (0037)
     "share_link_responses",  # recipient response (0037)
+    "tenant_invitations",  # workspace invitation (0072; app_role SELECT, tenant_writer writes)
+    "note_comments",  # comment on a note (0074; cascades with the note)
+    "note_collaborators",  # per-note role (0073; cascades with the note)
 )
 
 
@@ -386,6 +389,38 @@ async def test_every_entity_table_isolates_tenants(
                 note_id,
                 version_id,
             )
+            await c.execute(
+                "INSERT INTO note_comments (tenant_id, note_id, author_sub, anchor_kind, body) "
+                "VALUES ($1,$2,$3,'note','looks right')",
+                a,
+                note_id,
+                author_a,
+            )
+            await c.execute(
+                "INSERT INTO note_collaborators (note_id, tenant_id, user_sub, role, granted_by) "
+                "VALUES ($1, $2, $3, 'view', $4)",
+                note_id,
+                a,
+                uuid4(),
+                author_a,
+            )
+
+        # Invitations are written by tenant_writer only (auth-service), like memberships.
+        inviter = uuid4()
+        async with writer_pool.acquire() as w:
+            await w.execute(
+                "INSERT INTO identities (id, email) VALUES ($1, $2)",
+                inviter,
+                f"rls-{inviter}@example.test",
+            )
+            await w.execute(
+                "INSERT INTO tenant_invitations (tenant_id, email, role, invited_by, token_hash, "
+                "expires_at) VALUES ($1, 'invitee@example.test', 'member', $2, $3, "
+                "now() + interval '1 day')",
+                a,
+                inviter,
+                uuid4().bytes,
+            )
 
         # Tenant B sees none of tenant A's rows.
         async with tenant_connection(app_pool, b) as c:
@@ -426,6 +461,10 @@ async def test_every_entity_table_isolates_tenants(
             ):
                 await su.execute(f"DELETE FROM {tbl} WHERE tenant_id = ANY($1::uuid[])", [a, b])
             await su.execute("DELETE FROM users WHERE tenant_id = ANY($1::uuid[])", [a, b])
+            await su.execute(
+                "DELETE FROM tenant_invitations WHERE tenant_id = ANY($1::uuid[])", [a, b]
+            )
+            await su.execute("DELETE FROM identities WHERE email LIKE 'rls-%@example.test'")
             await su.execute("DELETE FROM tenants WHERE id = ANY($1::uuid[])", [a, b])
         finally:
             await su.close()

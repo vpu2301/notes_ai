@@ -43,6 +43,12 @@ _expansion_metric = _meter.create_counter(
     description="Query-expansion outcomes on /v1/notes/search (label hit)",
     unit="1",
 )
+# W3: which list people open (All / Mine / Shared with me), by guest or not.
+_scope_metric = _meter.create_counter(
+    "mdx_note_search_scope_total",
+    description="Note searches by scope (labels: scope, role)",
+    unit="1",
+)
 
 
 class SearchHitDTO(BaseModel):
@@ -62,6 +68,9 @@ class SearchHitDTO(BaseModel):
     shared_with_count: int | None = None
     has_public_link: bool | None = None
     open_disputes: int = 0
+    # W3: what the caller may do with it, and how many people hold a per-note grant.
+    my_level: str | None = None
+    collaborator_count: int | None = None
 
 
 class SearchResponse(BaseModel):
@@ -93,6 +102,13 @@ async def search_notes(
         default=True,
         description="Synonym query expansion (ADR-0038); false = exact terms only.",
     ),
+    scope: Annotated[
+        str,
+        Query(
+            pattern="^(all|mine|shared_with_me)$",
+            description="W3: all | mine (you are an author) | shared_with_me (visible to you, not yours)",
+        ),
+    ] = "all",
 ) -> SearchResponse:
     state = get_state()
     started = time.perf_counter()
@@ -114,7 +130,10 @@ async def search_notes(
         created_to=created_to,
         viewer_sub=claims.sub,
         viewer_sees_all=access.sees_whole_tenant(claims),
+        viewer_guest=access.is_guest(claims),
+        scope=scope,
     )
+    _scope_metric.add(1, {"scope": scope, "role": "guest" if filters.viewer_guest else "member"})
 
     expanded_terms: list[str] = []
     async with tenant_connection(state.app_pool, claims.tid) as conn:
@@ -179,6 +198,14 @@ async def search_notes(
                 shared_with_count=h.shared_with_count,
                 has_public_link=h.has_public_link,
                 open_disputes=h.open_disputes,
+                my_level=access.level_of(
+                    primary_author_id=h.primary_author_id,
+                    co_author_ids=h.co_author_ids,
+                    visibility=h.visibility,
+                    collaborator=h.my_collab_role,
+                    claims=claims,
+                ),
+                collaborator_count=h.shared_with_count,
             )
         )
 

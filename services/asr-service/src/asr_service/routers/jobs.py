@@ -126,6 +126,60 @@ _rediarize_requests_counter = _meter.create_counter(
     description="Speaker re-labelling requests by outcome (accepted, undone, or refusal code)",
     unit="1",
 )
+_transcript_refused_counter = _meter.create_counter(
+    "mdx_note_transcript_refused_total",
+    description="Transcript reads refused by the linked note's rule or an unavailable check (W3)",
+    unit="1",
+)
+
+
+def _job_not_found() -> HTTPException:
+    """One 404 for "no such job" and "the linked note hides it" (W3)."""
+    exc = HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    exc.problem_extras = {  # type: ignore[attr-defined]
+        "type_uri": "urn:mdx:asr:job_not_found",
+        "code": "job_not_found",
+    }
+    return exc
+
+
+async def require_note_access(
+    claims: Claims, job_id: UUID, need: Literal["transcript", "edit"]
+) -> None:
+    """W3 (ADR-0071): a note linked to the job decides who reads its
+    transcript and who changes it (``note_access_for_job``, migration 0075).
+    No row → asr-service's own rule, unchanged. A hidden transcript is a 404,
+    never a 403: the job's existence is the note's secret. An unavailable
+    check fails closed (404)."""
+    state = get_state()
+    try:
+        async with tenant_connection(state.app_pool, claims.tid) as conn:
+            access = await repository.note_access_for_job(
+                conn, job_id=job_id, sub=claims.sub, roles=list(claims.roles)
+            )
+    except repository.NoteAccessUnavailableError:
+        _transcript_refused_counter.add(1, {"service": "asr"})
+        raise _job_not_found() from None
+    if access is None:
+        return
+    if need == "transcript" and not access.transcript:
+        _transcript_refused_counter.add(1, {"service": "asr"})
+        raise _job_not_found()
+    if access.level is None:
+        # Linked to a note this person may not see: the job is the note's secret.
+        _transcript_refused_counter.add(1, {"service": "asr"})
+        raise _job_not_found()
+    if need == "edit" and access.level not in ("manage", "edit"):
+        exc = HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="your role on this note does not allow changing its transcript",
+        )
+        exc.problem_extras = {  # type: ignore[attr-defined]
+            "type_uri": "urn:mdx:asr:access:insufficient_role",
+            "code": "insufficient_role",
+            "required": "edit",
+        }
+        raise exc
 
 
 def _reject(
@@ -540,11 +594,13 @@ async def get_job(
     job_id: UUID,
     claims: Annotated[Claims, Depends(requires("asr.read", "asr_job"))] = ...,  # type: ignore[assignment]
 ) -> TranscriptionJobView:
+    # Carries the result URL and speaker names: the transcript rule.
+    await require_note_access(claims, job_id, "transcript")
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         found = await repository.get_job_and_result_uri(conn, job_id=job_id)
     if found is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        raise _job_not_found()
     view, uri = found
     if view.status == JobStatus.COMPLETE:
         # Short TTL; follows the current revision.
@@ -575,6 +631,7 @@ async def get_job_result(
     (dictated «крапка»→"." + punctuation/number normalization) with the
     caller's own bearer forwarded; on any NLP failure the raw transcript
     is returned with ``nlp_applied=false``."""
+    await require_note_access(claims, job_id, "transcript")
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         # One row read: a re-run swaps rev, names and artifact together.
@@ -601,7 +658,7 @@ async def get_job_result(
             else []
         )
     if view is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        raise _job_not_found()
     if view.status != JobStatus.COMPLETE:
         # RFC 9457: not ready (queued/running) or never will be (failed/cancelled).
         exc = HTTPException(
@@ -1127,6 +1184,7 @@ async def set_speaker_names(
     transcript — web, desktop, the note built from it — shows the same
     names. Works on any job (naming does not care about status); the
     view merges the names on the next read."""
+    await require_note_access(claims, job_id, "edit")
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         stored = await repository.set_speaker_names(conn, job_id=job_id, names=body.names)
@@ -1255,6 +1313,7 @@ async def merge_speakers(
     If ``from`` has a name and ``into`` has none, ``into`` takes the name."""
     if body.from_label == body.into:
         raise _problem(422, "same_label", "cannot merge a speaker into itself")
+    await require_note_access(claims, job_id, "edit")
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         found = await repository.get_job_and_result_uri(conn, job_id=job_id)
@@ -1413,6 +1472,7 @@ async def reassign_turns(
         raise _problem(
             422, "too_many_segments", f"at most {MAX_REASSIGN_SEGMENTS} segments per move"
         )
+    await require_note_access(claims, job_id, "edit")
     state = get_state()
     output, uri, rev_seen = await _locked_edit_context(state, claims, job_id)
     indices = sorted(set(body.segment_indices))
@@ -1543,6 +1603,7 @@ async def reset_speaker_edits(
 ) -> Response:
     """Back to what the diarizer produced for this revision. Idempotent;
     the stored transcript was never changed, so nothing else moves."""
+    await require_note_access(claims, job_id, "edit")
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         row = await repository.lock_job_for_edit(conn, job_id=job_id)
@@ -1583,6 +1644,7 @@ async def undo_speaker_edit(
     claims: Annotated[Claims, Depends(requires("asr.write", "asr_job"))] = ...,  # type: ignore[assignment]
 ) -> Response:
     """Only the latest live edit can be undone — keeps the fold deterministic."""
+    await require_note_access(claims, job_id, "edit")
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         row = await repository.lock_job_for_edit(conn, job_id=job_id)
@@ -1636,6 +1698,7 @@ async def dismiss_name_suggestion(
     body: DismissSuggestionRequest,
     claims: Annotated[Claims, Depends(requires("asr.write", "asr_job"))] = ...,  # type: ignore[assignment]
 ) -> Response:
+    await require_note_access(claims, job_id, "edit")
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         added = await repository.dismiss_suggestion(
@@ -1695,6 +1758,7 @@ async def rediarize(
     flight and ``rediarize_max_runs`` per job, plus a per-user hourly
     limit. Re-runs do not count against the tenant's concurrent-job cap.
     """
+    await require_note_access(claims, job_id, "edit")
     state = get_state()
     decision = await state.limiter.allow(
         "rediarize_user",
@@ -1797,6 +1861,7 @@ async def undo_rediarize(
     job_id: UUID,
     claims: Annotated[Claims, Depends(requires("asr.write", "asr_job"))] = ...,  # type: ignore[assignment]
 ) -> RediarizeStatusView:
+    await require_note_access(claims, job_id, "edit")
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         outcome = await repository.undo_rediarize(conn, job_id=job_id)
@@ -1849,10 +1914,33 @@ async def list_jobs(
     throughput for the business dashboard). The row carries no
     transcript content; the transcript itself stays behind `asr.read`
     on the result endpoint.
+
+    W3: a job whose linked note hides the transcript from the caller is
+    left out unless the caller requested it. If that check is unavailable
+    the list fails closed to the caller's own jobs.
     """
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        return await repository.list_jobs(conn, limit=limit, status=status_filter, since=since)
+        try:
+            return await repository.list_jobs(
+                conn,
+                limit=limit,
+                sub=claims.sub,
+                roles=list(claims.roles),
+                status=status_filter,
+                since=since,
+            )
+        except repository.NoteAccessUnavailableError:
+            _transcript_refused_counter.add(1, {"service": "asr"})
+            return await repository.list_jobs(
+                conn,
+                limit=limit,
+                sub=claims.sub,
+                roles=list(claims.roles),
+                status=status_filter,
+                since=since,
+                own_only=True,
+            )
 
 
 @router.delete(
@@ -1864,6 +1952,7 @@ async def cancel_job(
     job_id: UUID,
     claims: Annotated[Claims, Depends(requires("asr.cancel", "asr_job"))] = ...,  # type: ignore[assignment]
 ) -> dict[str, str]:
+    await require_note_access(claims, job_id, "edit")
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         outcome = await repository.request_cancel(conn, job_id=job_id)

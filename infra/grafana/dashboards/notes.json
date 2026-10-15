@@ -303,6 +303,114 @@
           "legendFormat": "{{outcome}}"
         }
       ]
+    },
+    {
+      "type": "row",
+      "title": "Collaboration (W3)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Shares by role",
+      "targets": [
+        {
+          "expr": "sum by (role, kind) (increase(mdx_note_share_total[1d]))",
+          "legendFormat": "{{role}} · {{kind}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 49,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Writes refused for too low a level",
+      "targets": [
+        {
+          "expr": "sum by (level_required) (increase(mdx_note_access_refused_total[1h]))",
+          "legendFormat": "needs {{level_required}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 49,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Transcript refusals",
+      "targets": [
+        {
+          "expr": "sum by (service) (increase(mdx_note_transcript_refused_total[1h]))",
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 57,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Comments (by anchor)",
+      "targets": [
+        {
+          "expr": "sum by (anchor_kind) (increase(mdx_note_comments_total[1d]))",
+          "legendFormat": "{{anchor_kind}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 57,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Search by scope",
+      "targets": [
+        {
+          "expr": "sum by (scope, role) (increase(mdx_note_search_scope_total[1d]))",
+          "legendFormat": "{{scope}} · {{role}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 65,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Viewers per open note (p95)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(mdx_note_presence_viewers_bucket[15m])))",
+          "legendFormat": "p95"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 65,
+        "w": 12,
+        "h": 8
+      }
     }
   ]
 }

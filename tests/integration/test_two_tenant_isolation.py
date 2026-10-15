@@ -553,6 +553,63 @@ async def test_b_cannot_open_anything_of_a_by_id(
     assert after == before, "B changed A's versions, glossary or links"
 
 
+async def test_b_cannot_reach_a_workspace_invitations(
+    world: World,
+    auth_app,  # noqa: F811
+    su,  # noqa: F811
+) -> None:
+    """W2: every invitation route of A's team workspace is 403/404 to B, and changes nothing."""
+    async with _client(auth_app, **world.bearer("a")) as auth:
+        created = await auth.post("/tenants", json={"name": "Isolation Team"})
+        assert created.status_code == 201, created.text
+        team = created.json()["id"]
+        switched = await auth.post("/auth/token", json={"tenant_id": team})
+        assert switched.status_code == 200, switched.text
+    a_team = {"Authorization": f"Bearer {switched.json()['access_token']}"}
+    async with _client(auth_app, **a_team) as auth:
+        invited = await auth.post(
+            f"/tenants/{team}/invitations", json={"email": _email(), "role": "member"}
+        )
+    if invited.status_code in (200, 201):
+        invitation = invited.json()["id"]
+    else:
+        # No Redis limiter in this harness (invites fail closed): seed the row directly.
+        invitation = await su.fetchval(
+            "INSERT INTO tenant_invitations (tenant_id, email, role, invited_by, token_hash,"
+            " expires_at) VALUES ($1, $2, 'member', $3, $4, now() + interval '1 day') RETURNING id",
+            uuid.UUID(team),
+            _email(),
+            uuid.UUID(world.a_user),
+            uuid.uuid4().bytes,
+        )
+    routes = [
+        ("GET", f"/tenants/{team}/invitations"),
+        ("POST", f"/tenants/{team}/invitations"),
+        ("POST", f"/tenants/{team}/invitations/{invitation}/resend"),
+        ("DELETE", f"/tenants/{team}/invitations/{invitation}"),
+        ("POST", f"/auth/invitations/{invitation}/accept"),
+        ("POST", f"/auth/invitations/{invitation}/decline"),
+        ("GET", f"/tenants/{team}/members"),
+        ("POST", f"/tenants/{team}/dissolve"),
+        ("DELETE", f"/tenants/{team}/members/me"),
+    ]
+    opened: list[str] = []
+    async with _client(auth_app, **world.bearer("b")) as client:
+        for method, url in routes:
+            body = {"email": _email(), "role": "member"} if url.endswith("/invitations") else {}
+            if url.endswith("/dissolve"):
+                body = {"confirm_name": "Isolation Team"}
+            response = await client.request(method, url, json=body if method == "POST" else None)
+            if response.status_code not in (403, 404, 422):
+                opened.append(f"{method} {url} → {response.status_code}")
+    assert not opened, "B reached A's workspace:\n" + "\n".join(opened)
+    row = await su.fetchrow(
+        "SELECT accepted_at, revoked_at FROM tenant_invitations WHERE id = $1", invitation
+    )
+    assert row["accepted_at"] is None and row["revoked_at"] is None
+    await su.execute("DELETE FROM tenant_invitations WHERE tenant_id = $1", uuid.UUID(team))
+
+
 # ── 5: search ─────────────────────────────────────────────────────────────
 
 

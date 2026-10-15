@@ -23,6 +23,12 @@ struct AccountView: View {
     @State private var members: [TenantMember] = []
     @State private var membersLoading = true
     @State private var membersError: String?
+    /// Leave / dissolve: the row asked about, the typed name, and the server's answer.
+    @State private var leaving: Workspace?
+    @State private var dissolving: Workspace?
+    @State private var dissolveName = ""
+    @State private var workspaceBusy: String?
+    @State private var workspaceError: String?
 
     var body: some View {
         ScrollView {
@@ -149,10 +155,59 @@ struct AccountView: View {
                 if index > 0 { DSDivider() }
                 workspaceRow(workspace)
             }
+            if let workspaceError {
+                DSNotice(tone: .danger, symbol: "exclamationmark.triangle.fill", text: workspaceError)
+            }
             Text("Notes, spaces and meetings belong to one workspace at a time. Recordings waiting to upload keep the workspace they were made for.")
                 .font(.dsMeta)
                 .foregroundStyle(DS.muted)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+        .confirmationDialog("Leave \(leaving?.title ?? "")?",
+                            isPresented: Binding(get: { leaving != nil }, set: { if !$0 { leaving = nil } }),
+                            titleVisibility: .visible) {
+            Button("Leave", role: .destructive) {
+                guard let workspace = leaving else { return }
+                runWorkspace(workspace) { await app.leave(workspace) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You lose access to its notes and meetings until someone invites you again.")
+        }
+        .alert("Dissolve \(dissolving?.title ?? "")?",
+               isPresented: Binding(get: { dissolving != nil }, set: { if !$0 { dissolving = nil } })) {
+            TextField("Workspace name", text: $dissolveName)
+            Button("Dissolve", role: .destructive) {
+                guard let workspace = dissolving else { return }
+                let typed = dissolveName
+                runWorkspace(workspace) { await app.dissolve(workspace, confirmName: typed) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Type the workspace name to confirm. Remove everyone else first; nobody can open it afterwards.")
+        }
+    }
+
+    /// Leave for any team workspace; dissolve for the open one when you own it. The server has the last word.
+    private func workspaceActions(_ workspace: Workspace) -> [DSMenuItem] {
+        var items: [DSMenuItem] = [
+            .item("Leave workspace…", symbol: "rectangle.portrait.and.arrow.right") { leaving = workspace },
+        ]
+        if workspace.myRole == "owner", workspace.id == app.tenantId {
+            items.append(.item("Dissolve…", symbol: "trash", danger: true) {
+                dissolveName = ""
+                dissolving = workspace
+            })
+        }
+        return items
+    }
+
+    private func runWorkspace(_ workspace: Workspace, _ work: @escaping () async -> String?) {
+        workspaceBusy = workspace.id
+        workspaceError = nil
+        Task {
+            workspaceError = await work()
+            workspaceBusy = nil
         }
     }
 
@@ -169,7 +224,7 @@ struct AccountView: View {
                     .foregroundStyle(DS.muted)
             }
             Spacer(minLength: 0)
-            if app.switchingTo == workspace.id {
+            if app.switchingTo == workspace.id || workspaceBusy == workspace.id {
                 ProgressView().controlSize(.small)
             } else if isActive {
                 DSChip(text: "Open", tint: DS.accentText, soft: DS.accentSoft)
@@ -178,6 +233,10 @@ struct AccountView: View {
                     .buttonStyle(DSButtonStyle(kind: .secondary, size: 14, height: 32))
                     // Native sessions only (ADR-0047).
                     .disabled(app.switchingTo != nil || !app.canSwitchWorkspace)
+            }
+            // Personal is never left or dissolved.
+            if !workspace.isPersonal {
+                DSMenu { workspaceActions(workspace) }
             }
         }
     }

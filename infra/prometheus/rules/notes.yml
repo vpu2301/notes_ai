@@ -37,3 +37,14 @@ groups:
         annotations:
           summary: "Amendment chain integrity anomaly detected — page security lead"
           runbook: "docs/runbooks/notes.md#version-chain-break"
+
+      # W3: a client offers editing to people whose level is comment/view (or a role regressed).
+      - alert: NoteEditRefusalsSpike
+        expr: sum(increase(mdx_note_access_refused_total{level_required="edit"}[15m])) > 30
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "More than 30 note edits refused for too low a level in 15 minutes"
+          runbook: "docs/runbooks/notes.md#collaboration-w3"

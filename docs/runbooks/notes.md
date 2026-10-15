@@ -916,3 +916,51 @@ usually a script, occasionally a big team. Raise
 `funnel_reader`; Grafana's "Funnel" datasource uses the same role
 (migration 0040). If the panel is empty, the role has no policy on a
 table the query touches — `check-rls` lists policies per table.
+
+## Collaboration (W3)
+
+Per-note roles live in `note_collaborators` (view | comment | edit; ADR-0071). The author team
+and workspace owners/admins always manage; a `workspace`-visible note gives members `edit` and
+viewers `comment`; guests reach only notes they were given. `notes.shared_with_ids` is no longer
+written (W4 drops it). Writes refused for too low a level are counted in
+`mdx_note_access_refused_total{level_required}` (alert `NoteEditRefusalsSpike`).
+
+**"I was shared a note but can't edit."** Check their role:
+
+```sql
+-- as app_role inside the tenant (or postgres), ids only
+SELECT user_sub, role, granted_by, updated_at FROM note_collaborators WHERE note_id = '<note>';
+```
+
+A grant only counts while the person's membership here is active.
+
+**Stuck guest** (a guest who still appears on someone's switcher). The daily auth-service job
+`sweep-guests` (`python -m auth_service.maintenance sweep-guests`) suspends guest memberships
+older than a day with no grant and no open note invitation; their session moves to Personal on
+the next refresh. Run it by hand if needed.
+
+**Revoke everything for a person in one workspace.**
+
+```sql
+DELETE FROM note_collaborators WHERE tenant_id = '<workspace>' AND user_sub = '<sub>';
+UPDATE tenant_invitations SET revoked_at = now()
+ WHERE tenant_id = '<workspace>' AND email = lower('<address>') AND accepted_at IS NULL;
+```
+
+Then remove their membership in Members (or let `sweep-guests` do it for a guest).
+
+**Transcript access.** asr-service asks `public.note_access_for_job(job, sub, roles)` (0075)
+for every job read: a linked note decides (edit or above, or "Include transcript" on); a linked
+note the caller cannot see answers like a missing job (404). If the function is missing after a
+partial deploy, every per-job read answers 404 (`asr.note_access_unavailable`) — fail closed.
+
+**Erase comments (DSAR).** Comment bodies are content; they cascade with the note.
+
+```sql
+UPDATE note_comments SET body = '[removed]', deleted_at = now(), deleted_by = author_sub
+ WHERE author_sub = '<sub>' AND tenant_id = '<workspace>';
+```
+
+(`body` has a 1-char minimum; the soft delete hides the row everywhere.) Include
+`SELECT anchor_kind, body, created_at FROM note_comments WHERE author_sub = '<sub>'` in an
+export.

@@ -1,0 +1,30 @@
+groups:
+  - name: workspaces
+    interval: 1m
+    rules:
+      # W2: invitation mail is not reaching the relay; pending rows show "Not sent — Resend".
+      - alert: InvitationMailFailing
+        expr: sum(increase(mdx_auth_invitation_total{action="mail_failed"}[1h])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "More than 5 workspace invitations could not be mailed in the last hour"
+          runbook: "docs/runbooks/auth.md#invitations-w2"
+
+      # W2 kill signal: people without an account are invited but almost none join —
+      # the mail or the landing page is broken. Quiet below 10 invitations a week.
+      - alert: InvitationAcceptanceLow
+        expr: |
+          (sum(increase(mdx_auth_invitation_total{action="auto_accepted"}[7d]))
+           / clamp_min(sum(increase(mdx_auth_invitation_total{action="created",has_account="false"}[7d])), 1))
+          < 0.2
+          and sum(increase(mdx_auth_invitation_total{action="created",has_account="false"}[7d])) >= 10
+        for: 1h
+        labels:
+          severity: warning
+          team: product
+        annotations:
+          summary: "Under 20% of invitations to new addresses were accepted over 7 days"
+          runbook: "docs/runbooks/auth.md#invitations-w2"

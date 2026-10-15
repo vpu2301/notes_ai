@@ -21,6 +21,8 @@ struct PendingMeetingNote: Codable, Equatable, Sendable {
     var identityId: String
     var tenantId: String?
     var updatedAt: Date
+    /// Why its workspace refused it (`not_a_member`, `tenant_dissolved`); nil while it can still sync.
+    var blockedReason: String?
 
     enum CodingKeys: String, CodingKey {
         case title, language, text, calendar
@@ -32,6 +34,7 @@ struct PendingMeetingNote: Codable, Equatable, Sendable {
         case identityId = "identity_id"
         case tenantId = "tenant_id"
         case updatedAt = "updated_at"
+        case blockedReason = "blocked_reason"
     }
 
     /// The timings the server has not seen, in the shape it takes.
@@ -103,6 +106,15 @@ enum PendingMeetingNotes {
     static func all(identityId: String,
                     in directory: URL = PendingMeetingNotes.directory) -> [PendingMeetingNote] {
         all(in: directory).filter { $0.identityId == identityId }
+    }
+
+    /// Point a note at another workspace (its own was refused). Never done automatically.
+    static func retarget(_ note: PendingMeetingNote, to tenantId: String,
+                         in directory: URL = PendingMeetingNotes.directory) {
+        var moved = note
+        moved.tenantId = tenantId
+        moved.blockedReason = nil
+        save(moved, in: directory)
     }
 
     static func remove(_ clientCaptureId: String, in directory: URL = PendingMeetingNotes.directory) {

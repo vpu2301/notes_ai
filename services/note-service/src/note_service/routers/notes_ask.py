@@ -130,6 +130,9 @@ async def ask_note(
         source_job_id = await conn.fetchval(
             "SELECT source_asr_job_id FROM notes WHERE id = $1", note_id
         )
+        if not access.can_read_transcript(row, claims):
+            # W3: answers come from the note alone when the transcript is not shared with them.
+            source_job_id = None
     if version is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note not found")
 

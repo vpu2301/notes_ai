@@ -171,3 +171,55 @@ struct WorkspaceLostBanner: View {
         .sheet(isPresented: $picking) { WorkspacePicker() }
     }
 }
+
+// MARK: - Meeting notes whose workspace refused them
+
+/// Typed offline for a workspace this identity is no longer in, or one that was dissolved. The file stays until moved or deleted.
+struct OrphanedMeetingNotesSection: View {
+    @EnvironmentObject private var app: AppState
+    let notes: [PendingMeetingNote]
+    @State private var deleting: PendingMeetingNote?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(notes.enumerated()), id: \.element.clientCaptureId) { index, note in
+                if index > 0 { DSDivider() }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(note.title.isEmpty ? "Meeting notes" : note.title)
+                        .font(.ds(15, .medium))
+                        .foregroundStyle(DS.text1)
+                        .lineLimit(1)
+                    DSNotice(tone: .warn, symbol: "person.crop.circle.badge.exclamationmark",
+                             text: "Workspace no longer available — move these notes to Personal, or delete them.")
+                    HStack(spacing: 8) {
+                        if app.personalWorkspace != nil {
+                            Button("Move to Personal") {
+                                Task { await app.moveMeetingNoteToPersonal(note) }
+                            }
+                            .buttonStyle(DSButtonStyle(kind: .secondary, size: 14, height: 32))
+                        }
+                        Button("Delete") { deleting = note }
+                            .buttonStyle(DSButtonStyle(kind: .ghost, size: 14, height: 32))
+                            .accessibilityLabel("Delete the notes typed for \(note.title.isEmpty ? "this meeting" : note.title)")
+                    }
+                }
+                .padding(14)
+            }
+        }
+        .dsCard(padding: 0)
+        .confirmationDialog(
+            "Delete these notes?",
+            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+            titleVisibility: .visible,
+            presenting: deleting
+        ) { note in
+            Button("Delete notes", role: .destructive) {
+                app.deleteMeetingNote(note)
+                deleting = nil
+            }
+            Button("Keep them", role: .cancel) { deleting = nil }
+        } message: { _ in
+            Text("What you typed during this meeting never reached the server. Deleting it here removes the only copy.")
+        }
+    }
+}

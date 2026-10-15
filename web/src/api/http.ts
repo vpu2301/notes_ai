@@ -153,6 +153,26 @@ export function setSessionListener(l: SessionListener): void {
   sessionListener = l;
 }
 
+// ── workspace moved ───────────────────────────────────────────────────
+
+/** Thrown locally, never sent: the session moved to another workspace and this tab has not followed. */
+export class WorkspaceMovedError extends Error {
+  readonly tenantId: string;
+
+  constructor(tenantId: string) {
+    super("This session switched to another workspace in another tab. Continue there to keep working.");
+    this.name = "WorkspaceMovedError";
+    this.tenantId = tenantId;
+  }
+}
+
+/** Where the session went, while this tab still shows the old workspace; null when they agree. */
+let movedTo: string | null = null;
+
+export function setWorkspaceMoved(tenantId: string | null): void {
+  movedTo = tenantId;
+}
+
 // ── correlation id ────────────────────────────────────────────────────
 
 /** UUID v4; `crypto.randomUUID` needs a secure context, so dev over LAN http needs the fallback. */
@@ -289,6 +309,9 @@ async function rawRequest(
   path: string,
   opts: RequestOptions,
 ): Promise<{ res: Response; requestId?: string }> {
+  // A write here would land in a workspace this tab is not showing; `/auth/*` still runs (refresh, switch, logout).
+  if (movedTo !== null && !path.startsWith("/auth/")) throw new WorkspaceMovedError(movedTo);
+
   const rid = requestId();
   let body: BodyInit | undefined;
   const staticHeaders: Record<string, string> = corsSafeHeaders(base, rid);

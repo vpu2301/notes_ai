@@ -28,8 +28,10 @@ struct NotesAICaptureApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New Meeting") { app.capture.startNew() }
-                    .keyboardShortcut("n", modifiers: .command)
+                if app.capabilities.canRecord {
+                    Button("New Meeting") { app.capture.startNew() }
+                        .keyboardShortcut("n", modifiers: .command)
+                }
                 OpenMainWindowButton(title: "Open Window")
                     .keyboardShortcut("n", modifiers: [.command, .shift])
                 Button("Open Note in Web App") {

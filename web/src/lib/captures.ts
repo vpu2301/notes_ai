@@ -1,23 +1,39 @@
 // Per-browser capture bookkeeping: jobs this browser started (only those
-// auto-convert), pre-typed titles, resolved job → note links.
+// auto-convert), pre-typed titles, resolved job → note links. Kept per
+// workspace (`notesai.{tenantId}.capture.…`): job ids mean nothing in another one.
 
-const TITLES = "notesai.capture.titles";
-const MINE = "notesai.capture.mine";
-const LINKS = "notesai.capture.links";
-const DISMISSED = "notesai.capture.dismissed";
+import { migrateToWorkspace, workspaceKey } from "./storageKeys";
 
-function read<T>(key: string, fallback: T): T {
+const TITLES = "capture.titles";
+const MINE = "capture.mine";
+const LINKS = "capture.links";
+const DISMISSED = "capture.dismissed";
+
+let tenant: string | null = null;
+
+/** Set before the signed-in tree renders (`WorkspaceScope`); the first call also moves pre-workspace keys. */
+export function scopeCaptures(tenantId: string): void {
+  if (tenant === tenantId) return;
+  tenant = tenantId;
+  migrateToWorkspace(tenantId, [TITLES, MINE, LINKS, DISMISSED]);
+}
+
+function storageKey(name: string): string {
+  return tenant ? workspaceKey(tenant, name) : `notesai.${name}`;
+}
+
+function read<T>(name: string, fallback: T): T {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = localStorage.getItem(storageKey(name));
     return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
     return fallback;
   }
 }
 
-function write(key: string, value: unknown): void {
+function write(name: string, value: unknown): void {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    localStorage.setItem(storageKey(name), JSON.stringify(value));
   } catch {
     /* private mode / quota — bookkeeping is best-effort */
   }

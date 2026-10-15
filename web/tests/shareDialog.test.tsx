@@ -184,7 +184,7 @@ describe("share sheet — client links (Sprint 19)", () => {
       },
     });
     sheet();
-    const list = await screen.findByLabelText(/people with access/i);
+    const list = await screen.findByLabelText(/^links$/i);
     expect(list).toHaveTextContent("Tom @ Client");
     expect(list).toHaveTextContent("Not opened");
     expect(list).toHaveTextContent(/Opened (17 Sep|Sep 17)/);
@@ -216,9 +216,11 @@ describe("share sheet — send from the product (Sprint 22)", () => {
         recipients: ["tom@client.com"],
         message: "See you Friday",
         expires_in_days: 30,
+        // Outsiders get a link only when the sender asked for one (W3).
+        mode: "link",
       }),
     );
-    const list = await screen.findByLabelText(/people with access/i);
+    const list = await screen.findByLabelText(/^links$/i);
     expect(list).toHaveTextContent("Tom @ Client");
     expect(list).toHaveTextContent(/Sent/);
   });
@@ -230,7 +232,7 @@ describe("share sheet — send from the product (Sprint 22)", () => {
       },
     });
     sheet();
-    const list = await screen.findByLabelText(/people with access/i);
+    const list = await screen.findByLabelText(/^links$/i);
     expect(list).toHaveTextContent("Opted out");
     expect(within(list).queryByRole("button", { name: /^(send|resend|retry)$/i })).not.toBeInTheDocument();
     expect(within(list).getByRole("button", { name: /^copy$/i })).toBeInTheDocument();
@@ -249,7 +251,7 @@ describe("share sheet — send from the product (Sprint 22)", () => {
       },
     });
     sheet();
-    await screen.findByLabelText(/people with access/i);
+    await screen.findByLabelText(/^links$/i);
     expect(screen.getByRole("button", { name: /^retry$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^resend$/i })).toBeInTheDocument();
   });

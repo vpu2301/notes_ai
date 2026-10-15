@@ -32,6 +32,7 @@ from ..deps import get_state, requires
 from ..domain import access, code_sequence, generation_service, series_service, template_match
 from ..domain import meetings_repository as meetings
 from ..domain import notes_repository as repo
+from ..domain import visibility as visibility_defaults
 from ..domain.conflicts import OptimisticLockMismatchError
 from ..domain.meeting_doc import agenda as agenda_rules
 from ..domain.meeting_doc import user_notes as user_notes_rules
@@ -331,6 +332,12 @@ async def start_meeting(
             content=content,
             # Only the placeholder is for the generation job to replace.
             title_source="user" if chosen_title else "default",
+            visibility=await visibility_defaults.default_for_new_note(
+                conn,
+                tenant_id=claims.tid,
+                template_id=template_id,
+                meeting_type=body.meeting_type,
+            ),
         )
         try:
             await meetings.create(
@@ -410,7 +417,7 @@ async def put_line_times(
     """
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        access.require_manage(await repo.fetch_note(conn, note_id=note_id), claims)
+        access.require_edit(await repo.fetch_note(conn, note_id=note_id), claims)
         await meetings.put_line_times(
             conn,
             tenant_id=claims.tid,

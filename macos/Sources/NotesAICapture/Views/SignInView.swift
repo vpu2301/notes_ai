@@ -38,6 +38,12 @@ struct SignInView: View {
                 DSWordmark(size: 18)
             }
             heading
+            if step == .email, let invite = app.pendingInvitation?.state.lookup {
+                // From an invitation link: only that address can accept it (the link shows it masked).
+                DSNotice(tone: .info, symbol: "envelope.open",
+                         text: "Sign in or sign up as \(invite.emailMasked) to join \(invite.workspaceName).")
+                    .onTapGesture { app.forgetPendingInvitation() }
+            }
             content
             if let message = errorMessage {
                 DSNotice(tone: .danger, symbol: "exclamationmark.triangle.fill", text: message)

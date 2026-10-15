@@ -196,6 +196,12 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     monkeypatch.setattr(rft.repo, "create_note_with_v1", _create)
 
+    # W3 default visibility reads the tenant kind + template code; covered in test_note_access.
+    async def _default_visibility(conn, *, tenant_id, template_id, meeting_type=None):  # noqa: ANN001
+        return "private"
+
+    monkeypatch.setattr(rft.visibility_defaults, "default_for_new_note", _default_visibility)
+
     app = create_app()
     app.dependency_overrides[deps.current_user] = _member_claims
     return SimpleNamespace(
@@ -338,21 +344,64 @@ def test_assign_diarized_job_creates_dialogue_note(rig: SimpleNamespace) -> None
     assert "Speaker 3" not in text
 
 
+def _source_note(note_id: UUID, author: UUID) -> object:
+    from datetime import UTC, datetime
+
+    from note_models import NoteStatus
+    from note_service.domain.notes_repository import NoteRow
+
+    now = datetime.now(UTC)
+    return NoteRow(
+        id=note_id,
+        tenant_id=uuid4(),
+        code="NOTE-2026-00042",
+        status=NoteStatus.DRAFT,
+        current_version_id=uuid4(),
+        current_version_number=1,
+        primary_author_id=author,
+        co_author_ids=[],
+        title="t",
+        created_at=now,
+        updated_at=now,
+        finalized_at=None,
+        cancelled_at=None,
+        visibility="private",
+    )
+
+
 def test_by_source_job_bulk_lookup(rig: SimpleNamespace) -> None:
+    other_job, hidden_note = uuid4(), uuid4()
+
     async def _fetch_links(conn, *, asr_job_ids):  # noqa: ANN001
-        assert asr_job_ids == [JOB_ID]
+        assert asr_job_ids == [JOB_ID, other_job]
         return [
             {
                 "source_asr_job_id": JOB_ID,
                 "id": NOTE_ID,
                 "code": "NOTE-2026-00042",
                 "status": "draft",
-            }
+            },
+            {
+                "source_asr_job_id": other_job,
+                "id": hidden_note,
+                "code": "NOTE-2026-00043",
+                "status": "draft",
+            },
         ]
 
+    notes = {
+        NOTE_ID: _source_note(NOTE_ID, REQUESTER_SUB),
+        hidden_note: _source_note(hidden_note, uuid4()),
+    }
+
+    async def _fetch_note(conn, *, note_id):  # noqa: ANN001
+        return notes.get(note_id)
+
     rig.monkeypatch.setattr(rig.module.repo, "fetch_notes_by_source_jobs", _fetch_links)
-    resp = rig.client.get(f"/v1/notes/by-source-job?ids={JOB_ID}")
+    rig.monkeypatch.setattr(rig.module.repo, "fetch_note", _fetch_note)
+    resp = rig.client.get(f"/v1/notes/by-source-job?ids={JOB_ID},{other_job}")
     assert resp.status_code == 200
+    # W3: a colleague's private note is not revealed by its job id.
     (link,) = resp.json()
     assert link["note_id"] == str(NOTE_ID)
     assert link["asr_job_id"] == str(JOB_ID)

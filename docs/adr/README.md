@@ -69,6 +69,9 @@ medical vertical; the numbers are retired, not reused.
 | 0055  | The meeting note is created at record start, not after transcription (amended Sprint 35: linkage by `item_key`, corrections, glossary) | Accepted |
 | 0057  | One client document, and meetings that remember the last one | Accepted |
 | 0058  | The meeting document engine: extract, verify, compose (amended Sprint 37: workspace model settings, acknowledged processors, budgets, fair claim, snapshot retention) | Accepted |
+| 0069  | A workspace is a tenant; one identity holds many, and the session carries which (W1) | Accepted |
+| 0070  | Invitations: one entity, an authenticated accept, auto-accept at sign-up (W2) | Accepted |
+| 0071  | Per-note roles, workspace-visibility grants, guest memberships, the transcript rule (W3) | Accepted |
 
 ## Template
 

@@ -254,7 +254,7 @@ async def regenerate(
     auth_header = request.headers.get("authorization") or ""
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        note = access.require_manage(await repo.fetch_note(conn, note_id=note_id), claims)
+        note = access.require_edit(await repo.fetch_note(conn, note_id=note_id), claims)
         if note.status != NoteStatus.DRAFT:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,

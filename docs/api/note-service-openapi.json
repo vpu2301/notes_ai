@@ -3445,11 +3445,8 @@
           "source": {
             "anyOf": [
               {
-                "enum": [
-                  "glossary",
-                  "candidate",
-                  "model"
-                ],
+                "maxLength": 32,
+                "pattern": "^[a-z_]+$",
                 "type": "string"
               },
               {

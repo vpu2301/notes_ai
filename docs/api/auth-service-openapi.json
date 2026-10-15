@@ -53,6 +53,42 @@
         "title": "ChangeRequest",
         "type": "object"
       },
+      "DissolveOut": {
+        "additionalProperties": false,
+        "properties": {
+          "restore_until": {
+            "format": "date-time",
+            "title": "Restore Until",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "restore_until"
+        ],
+        "title": "DissolveOut",
+        "type": "object"
+      },
+      "DissolveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Confirm Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirm_name"
+        ],
+        "title": "DissolveRequest",
+        "type": "object"
+      },
       "EnrolResponse": {
         "additionalProperties": false,
         "properties": {
@@ -253,6 +289,26 @@
         "title": "LeadRequest",
         "type": "object"
       },
+      "LeaveOut": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "LeaveOut",
+        "type": "object"
+      },
       "LockdownRequest": {
         "additionalProperties": false,
         "properties": {
@@ -359,6 +415,16 @@
             },
             "title": "Items",
             "type": "array"
+          },
+          "seat_meter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeatMeter"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -396,6 +462,18 @@
               }
             ],
             "title": "Email"
+          },
+          "left_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Left At"
           },
           "platform_role": {
             "anyOf": [
@@ -641,6 +719,32 @@
           "roles"
         ],
         "title": "RolesResponse",
+        "type": "object"
+      },
+      "SeatMeter": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "integer"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          }
+        },
+        "required": [
+          "active",
+          "limit"
+        ],
+        "title": "SeatMeter",
         "type": "object"
       },
       "SessionSummary": {
@@ -934,6 +1038,23 @@
         "title": "TenantCreate",
         "type": "object"
       },
+      "TenantCreateShort": {
+        "additionalProperties": false,
+        "description": "Self-serve (W2): a name is all it takes; the long form stays for admin onboarding.",
+        "properties": {
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "TenantCreateShort",
+        "type": "object"
+      },
       "TenantListOut": {
         "additionalProperties": false,
         "properties": {
@@ -1116,6 +1237,11 @@
           "is_active": {
             "title": "Is Active",
             "type": "boolean"
+          },
+          "kind": {
+            "default": "team",
+            "title": "Kind",
+            "type": "string"
           },
           "logo_url": {
             "title": "Logo Url",
@@ -3490,7 +3616,15 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TenantCreate"
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TenantCreateShort"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TenantCreate"
+                  }
+                ],
+                "title": "Body"
               }
             }
           },
@@ -3518,7 +3652,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Onboard a new company/tenant; the caller becomes its owner",
+        "summary": "Create a workspace: `{name}` for anyone signed in (self-serve), or the long admin form",
         "tags": [
           "tenants"
         ]
@@ -3694,6 +3828,75 @@
           }
         },
         "summary": "Update tenant profile / branding / contact fields",
+        "tags": [
+          "tenants"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/dissolve": {
+      "post": {
+        "operationId": "dissolve_workspace_tenants__tenant_id__dissolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DissolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DissolveOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dissolve an empty team workspace (owner; type its name). Restorable for 30 days",
         "tags": [
           "tenants"
         ]
@@ -3944,6 +4147,65 @@
           }
         },
         "summary": "Link a principal to the tenant with a management role",
+        "tags": [
+          "tenants"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/members/me": {
+      "delete": {
+        "operationId": "leave_workspace_tenants__tenant_id__members_me_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaveOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Leave this workspace (your row is kept as \"Left\" for 30 days); you land in Personal",
         "tags": [
           "tenants"
         ]

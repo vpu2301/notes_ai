@@ -41,18 +41,28 @@ struct HomeView: View {
                 if app.isFirstRun {
                     FirstRunCard()
                 }
+                // Once, right after "New workspace…" from this phone.
+                if let created = app.inviteFirstTeammate, created == app.tenantId, app.canManageMembers {
+                    FirstTeammateCard()
+                }
                 if let notice = app.linkNotice {
                     DSNotice(tone: .info, symbol: "link", text: notice)
                         .onTapGesture { app.linkNotice = nil }
                 }
                 if app.workspaceLost { WorkspaceLostBanner() }
-                SpacesBar(add: { addingSpace = true }, rename: { space in
-                    renameDraft = space.name
-                    renamingSpace = space
-                })
+                // A guest's list is what was shared with them: no filters, no spaces.
+                if !app.capabilities.isGuest {
+                    SpacesBar(add: { addingSpace = true }, rename: { space in
+                        renameDraft = space.name
+                        renamingSpace = space
+                    })
+                }
                 // Recordings that never reached the server come first: they exist nowhere else.
                 if app.selectedSpaceId == nil, searchQuery.isEmpty, !app.pending.isEmpty {
                     PendingUploadsSection(captures: app.pending)
+                }
+                if app.selectedSpaceId == nil, searchQuery.isEmpty, !app.orphanedMeetingNotes.isEmpty {
+                    OrphanedMeetingNotesSection(notes: app.orphanedMeetingNotes)
                 }
                 if app.selectedSpaceId == nil, searchQuery.isEmpty, showComingUp {
                     ComingUpCard(calendar: calendar, google: google)
@@ -95,17 +105,19 @@ struct HomeView: View {
                 DSWordmark(size: 15)
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
-                // The + menu: a note without a recording (blank, template, file).
-                DSMenu(items: newItems) {
-                    if creatingBlank {
-                        ProgressView().controlSize(.small).frame(width: 34, height: 34)
-                    } else {
-                        Image(systemName: "plus")
-                            .font(.dsSymbol(16, .semibold))
-                            .foregroundStyle(DS.text3)
-                            .frame(width: 34, height: 34)
-                            .contentShape(Rectangle())
-                            .accessibilityLabel("New")
+                // The + menu: a note without a recording (blank, template, file). None for a guest.
+                if app.capabilities.canCreateNotes {
+                    DSMenu(items: newItems) {
+                        if creatingBlank {
+                            ProgressView().controlSize(.small).frame(width: 34, height: 34)
+                        } else {
+                            Image(systemName: "plus")
+                                .font(.dsSymbol(16, .semibold))
+                                .foregroundStyle(DS.text3)
+                                .frame(width: 34, height: 34)
+                                .contentShape(Rectangle())
+                                .accessibilityLabel("New")
+                        }
                     }
                 }
                 NotificationBell(model: app.notifications) { app.notificationsPresented = true }
@@ -271,13 +283,18 @@ struct HomeView: View {
 
     private func accountItems() -> [DSMenuItem] {
         var items: [DSMenuItem] = [
-            .header(app.email.isEmpty ? "Not signed in" : app.email, hint: app.activeWorkspace?.title),
+            .header(app.email.isEmpty ? "Not signed in" : app.email, hint: app.activeWorkspace?.switcherTitle),
             .separator,
             .item("Settings…", symbol: "gearshape") {
                 app.settingsTab = .general
                 app.settingsPresented = true
             },
-            .item("Connectors…", symbol: "puzzlepiece.extension", hint: connectorsHint) { app.showConnectors() },
+        ]
+        // A guest's Settings is Account only: no connectors to manage there.
+        if !app.capabilities.isGuest {
+            items.append(.item("Connectors…", symbol: "puzzlepiece.extension", hint: connectorsHint) { app.showConnectors() })
+        }
+        items += [
             .item("Open web app", symbol: "safari") { app.openWebApp() },
             .item("Account & workspaces…", symbol: "person.crop.circle") {
                 app.settingsTab = .account
@@ -299,7 +316,9 @@ struct HomeView: View {
 
     /// Hidden only when there is nothing to offer (no Google client, nothing connected, no EventKit).
     private var showComingUp: Bool {
-        google.isConnected || google.available != false || google.linkAvailable || calendar.access != .unavailable
+        // Its rows start recordings; a guest cannot record here.
+        guard app.capabilities.canRecord else { return false }
+        return google.isConnected || google.available != false || google.linkAvailable || calendar.access != .unavailable
     }
 
     // MARK: - Meetings in flight
@@ -356,12 +375,16 @@ struct HomeView: View {
     private var emptyTitle: String {
         if !searchQuery.isEmpty { return "Nothing matches “\(searchQuery)”" }
         if app.selectedSpaceId != nil { return "Nothing in this space yet" }
+        if app.capabilities.isGuest || app.noteScope == .sharedWithMe { return "Nothing shared with you yet" }
         return "No notes yet"
     }
 
     private var emptyHint: String {
         if !searchQuery.isEmpty { return "Try other words — the search also looks inside the notes." }
         if app.selectedSpaceId != nil { return "Use “Move to …” in a note's ⋯ menu to file it here." }
+        if app.capabilities.isGuest || app.noteScope == .sharedWithMe {
+            return "Notes people share with you, and notes everyone in the workspace can open, show up here."
+        }
         return "Tap New meeting when one starts. Stop when it ends and the note is drafted for you."
     }
 
@@ -443,14 +466,19 @@ private struct SpacesBar: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                chip("All notes", symbol: "doc.text", on: app.selectedSpaceId == nil) {
-                    app.selectedSpaceId = nil
+                ForEach(app.capabilities.scopes, id: \.self) { scope in
+                    chip(scope.label, symbol: scope.symbol,
+                         on: app.selectedSpaceId == nil && app.noteScope == scope) {
+                        app.selectedSpaceId = nil
+                        app.noteScope = scope
+                    }
                 }
                 ForEach(app.spaces) { space in
                     let count = app.notes.filter { app.spaceOf[$0.noteId] == space.id }.count
                     chip(space.name, symbol: "folder",
                          count: count, on: app.selectedSpaceId == space.id) {
                         app.selectedSpaceId = space.id
+                        app.noteScope = .all
                     }
                     .contextMenu {
                         Button { rename(space) } label: { Label("Rename", systemImage: "pencil") }
@@ -528,6 +556,12 @@ private struct NoteRow: View {
                             if let status = note.status, status != .draft {
                                 DSChip(text: status.label, tint: status.tint, soft: status.soft)
                             }
+                            // Someone else's note: what this person may do with it ("Guest · can view" for a guest).
+                            if let level = note.myLevel, !level.canManage {
+                                let text = app.capabilities.isGuest ? "Guest · \(level.label.lowercased())" : level.label
+                                DSChip(text: text, tint: DS.text3, soft: DS.surface2)
+                                    .accessibilityLabel(text)
+                            }
                         }
                         HStack(spacing: 6) {
                             if let spaceId = app.spaceOf[note.noteId],
@@ -559,7 +593,7 @@ private struct NoteRow: View {
             .buttonStyle(.plain)
             .accessibilityValue(note.access?.help ?? "")
             // Beside the row's button: a menu nested in a button's label loses its tap on iOS.
-            if let access = note.access {
+            if canManage, let access = note.access {
                 DSMenu(items: { accessItems(access) }) {
                     AccessPill(access: access, expanded: hover)
                 }
@@ -569,6 +603,9 @@ private struct NoteRow: View {
         .onHover { hover = $0 }
         .contextMenu { DSMenuContent(items: menuItems()) }
     }
+
+    /// Visibility, links and the trash belong to the note's author team. Unknown (older server): as before.
+    private var canManage: Bool { note.myLevel?.canManage ?? true }
 
     /// The pill's menu: who can open the note; a server refusal comes back as an alert.
     private func accessItems(_ access: NoteAccess) -> [DSMenuItem] {
@@ -611,7 +648,7 @@ private struct NoteRow: View {
                 if let url = app.noteURL(note.noteId) { copyToPasteboard(url.absoluteString) }
             },
         ]
-        if !app.spaces.isEmpty {
+        if app.capabilities.showsSpaces, !app.spaces.isEmpty {
             items.append(.separator)
             let current = app.spaceOf[note.noteId]
             for space in app.spaces {
@@ -620,8 +657,10 @@ private struct NoteRow: View {
                 })
             }
         }
-        items.append(.separator)
-        items.append(.item("Move to trash", symbol: "trash", danger: true) { trash() })
+        if canManage {
+            items.append(.separator)
+            items.append(.item("Move to trash", symbol: "trash", danger: true) { trash() })
+        }
         return items
     }
 }
@@ -990,6 +1029,39 @@ private struct ComingUpRow: View {
         let start = item.start.formatted(date: .omitted, time: .shortened)
         let end = item.end.formatted(date: .omitted, time: .shortened)
         return "\(start)\n– \(end)"
+    }
+}
+
+/// "Invite your first teammate" — once, on the home page of a workspace just created here.
+struct FirstTeammateCard: View {
+    @EnvironmentObject private var app: AppState
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "person.badge.plus")
+                .foregroundStyle(DS.accent)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Invite your first teammate")
+                    .font(.ds(15, .semibold))
+                    .foregroundStyle(DS.text1)
+                Text("\(app.activeWorkspace?.title ?? "This workspace") is ready. Nothing is shared until they accept.")
+                    .font(.dsMeta)
+                    .foregroundStyle(DS.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Invite people") {
+                    app.inviteFirstTeammate = nil
+                    app.invitePresented = true
+                }
+                .buttonStyle(DSButtonStyle(kind: .primary, size: 14, height: 34))
+            }
+            Spacer(minLength: 8)
+            Button("Not now") { app.inviteFirstTeammate = nil }
+                .buttonStyle(.plain)
+                .font(.dsMeta)
+                .foregroundStyle(DS.muted)
+        }
+        .dsCard()
     }
 }
 

@@ -21,3 +21,24 @@ export function migrateStorageKeys(): void {
     }
   }
 }
+
+/** `notesai.{tenantId}.{name}`: bookkeeping that belongs to one workspace. */
+export function workspaceKey(tenantId: string, name: string): string {
+  return `notesai.${tenantId}.${name}`;
+}
+
+/** Unscoped `notesai.{name}` values predate workspaces, so they can only be the active one's: move them once. */
+export function migrateToWorkspace(tenantId: string, names: readonly string[]): void {
+  for (const name of names) {
+    try {
+      const old = `notesai.${name}`;
+      const value = localStorage.getItem(old);
+      if (value === null) continue;
+      const next = workspaceKey(tenantId, name);
+      if (localStorage.getItem(next) === null) localStorage.setItem(next, value);
+      localStorage.removeItem(old);
+    } catch {
+      /* storage unavailable */
+    }
+  }
+}

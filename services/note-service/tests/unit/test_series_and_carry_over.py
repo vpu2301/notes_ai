@@ -180,7 +180,8 @@ def _note(visibility: str, author: UUID, shared: list[UUID] | None = None) -> Si
         status=NoteStatus.DRAFT,
         primary_author_id=author,
         co_author_ids=[],
-        shared_with_ids=shared or [],
+        collaborators=dict.fromkeys(shared or [], "view"),
+        transcript_shared=False,
         visibility=visibility,
         deleted_at=None,
     )

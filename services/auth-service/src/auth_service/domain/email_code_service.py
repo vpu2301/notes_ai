@@ -7,6 +7,7 @@ refuses a dead challenge before comparing the code; nothing logs an address or a
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn, Protocol
@@ -102,6 +103,8 @@ class VerifyResult:
     reactivated: bool
     challenge_id: UUID
     mfa_challenge: Any = None
+    # W2: workspaces joined by accepting open invitations at sign-up (landing = the first).
+    joined_tenant_ids: tuple[UUID, ...] = ()
 
 
 class AccountLockedHook(Protocol):
@@ -192,6 +195,7 @@ class EmailCodeService:
         on_account_locked: AccountLockedHook | None = None,
         mfa: MfaGate | None = None,
         clock: Any = None,
+        accept_invitations: Callable[[Identity], Awaitable[list[Membership]]] | None = None,
     ) -> None:
         self._identities = identities
         self._challenges = challenges
@@ -203,6 +207,7 @@ class EmailCodeService:
         self._on_account_locked = on_account_locked
         self._mfa = mfa
         self._now = clock or (lambda: datetime.now(UTC))
+        self._accept_invitations = accept_invitations
 
     # ── start ────────────────────────────────────────────────────────
 
@@ -513,6 +518,7 @@ class EmailCodeService:
         identity = await self._resolve_identity(challenge)
         is_new_identity = identity is None
         reactivated = False
+        joined_ids: tuple[UUID, ...] = ()
 
         if identity is None:
             identity, membership = await self._identities.create_with_personal_workspace(
@@ -520,6 +526,13 @@ class EmailCodeService:
             )
             memberships = [membership]
             _signup_counter.add(1, {"source": "email_code"})
+            if self._accept_invitations is not None:
+                # The person came from an invitation mail: land where they were invited.
+                joined = await self._accept_invitations(identity)
+                if joined:
+                    memberships = [membership, *joined]
+                    membership = joined[0]
+                    joined_ids = tuple(m.tenant_id for m in joined)
         else:
             if identity.status == "disabled":
                 _otp_verify_counter.add(1, {"result": "disabled"})
@@ -598,6 +611,7 @@ class EmailCodeService:
             is_new_identity=is_new_identity,
             reactivated=reactivated,
             challenge_id=challenge.id,
+            joined_tenant_ids=joined_ids,
         )
 
     async def _resolve_identity(self, challenge: ec.Challenge) -> Identity | None:

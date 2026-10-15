@@ -251,3 +251,35 @@ struct MeetingsEmptyState: View {
         .padding(.vertical, compact ? 28 : 56)
     }
 }
+
+/// The popover's header row: which workspace this Mac is in ("Acme Inc ▾"); a click opens the switcher.
+struct WorkspaceHeaderRow: View {
+    @EnvironmentObject private var app: AppState
+    @State private var picking = false
+
+    var body: some View {
+        if !app.activeWorkspaceName.isEmpty {
+            Button { picking = true } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: app.activeWorkspace?.isPersonal == true ? "house" : "building.2")
+                        .font(.ds(10.5, .semibold))
+                    Text(app.activeWorkspaceName)
+                        .font(.ds(12.5, .semibold))
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.ds(8.5, .semibold))
+                }
+                .foregroundStyle(DS.text1)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Switch workspace")
+            .popover(isPresented: $picking, arrowEdge: .bottom) {
+                WorkspaceList(onSwitch: { picking = false })
+                    .padding(8)
+                    .frame(width: 240)
+                    .task { await app.refreshWorkspaces(force: true) }
+            }
+        }
+    }
+}

@@ -17,7 +17,11 @@ struct RootView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            DSWordmark(size: 12)
+            if app.authState == .signedIn {
+                WorkspaceHeaderRow()
+            } else {
+                DSWordmark(size: 12)
+            }
             Spacer()
             if app.authState == .signedIn {
                 DSMenu(width: 224) {
@@ -72,7 +76,7 @@ struct RootView: View {
                         .padding(.horizontal, -12)
                         .padding(.top, -12)
                 }
-                if case .idle = capture.phase {
+                if case .idle = capture.phase, app.capabilities.canRecord {
                     // The six kinds don't fit across the popover as a pill; a menu keeps it one row.
                     HStack(spacing: 6) {
                         NewMeetingButton(fill: true, height: 32)

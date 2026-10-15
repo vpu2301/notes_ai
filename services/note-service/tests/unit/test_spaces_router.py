@@ -21,6 +21,7 @@ USER = UUID("11111111-1111-1111-1111-111111111111")
 TENANT = UUID("22222222-2222-2222-2222-222222222222")
 SPACE = UUID("33333333-3333-3333-3333-333333333333")
 NOTE = UUID("44444444-4444-4444-4444-444444444444")
+HIDDEN_NOTE = UUID("55555555-5555-5555-5555-555555555555")
 NOW = datetime(2026, 9, 4, 12, 0, tzinfo=UTC)
 
 
@@ -48,6 +49,28 @@ def _space(**over) -> repo.SpaceRow:  # noqa: ANN003
     }
     base.update(over)
     return repo.SpaceRow(**base)
+
+
+def _note(author: UUID) -> object:
+    from note_models import NoteStatus
+    from note_service.domain.notes_repository import NoteRow
+
+    return NoteRow(
+        id=NOTE,
+        tenant_id=TENANT,
+        code="NOTE-2026-00001",
+        status=NoteStatus.DRAFT,
+        current_version_id=uuid4(),
+        current_version_number=1,
+        primary_author_id=author,
+        co_author_ids=[],
+        title="t",
+        created_at=NOW,
+        updated_at=NOW,
+        finalized_at=None,
+        cancelled_at=None,
+        visibility="private",
+    )
 
 
 @pytest.fixture
@@ -123,6 +146,18 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         "set_note_space": _file,
     }.items():
         monkeypatch.setattr(repo, name, fn)
+
+    # W3: filing checks the note is visible; the caller's own note, or a colleague's private one.
+    from note_service.domain import notes_repository as notes_repo
+
+    async def _fetch_note(conn, *, note_id):  # noqa: ANN001
+        if note_id == NOTE:
+            return _note(USER)
+        if note_id == HIDDEN_NOTE:
+            return _note(uuid4())
+        return None
+
+    monkeypatch.setattr(notes_repo, "fetch_note", _fetch_note)
 
     app = create_app()
     app.dependency_overrides[deps.current_user] = _claims
@@ -209,6 +244,14 @@ def test_file_into_someone_elses_space_404s(client: TestClient) -> None:
     r = client.put(f"/v1/notes/{NOTE}/space", json={"space_id": str(uuid4())})
     assert r.status_code == 404
     assert client.items == {}
+
+
+def test_filing_a_note_you_cannot_see_404s(client: TestClient) -> None:
+    client.spaces.append(_space())
+    r = client.put(f"/v1/notes/{HIDDEN_NOTE}/space", json={"space_id": str(SPACE)})
+    assert r.status_code == 404
+    assert client.items == {}
+    assert client.calls == []
 
 
 def test_file_body_must_carry_space_id(client: TestClient) -> None:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -269,6 +269,15 @@ class SessionService:
 
             memberships = await self._identities.list_memberships(identity.id)
             membership = next((m for m in memberships if m.tenant_id == row.tenant_id), None)
+            if membership is None and memberships:
+                # W2: the workspace was left, removed from under them or dissolved. The
+                # person is still signed in; the session moves to Personal (listed first)
+                # and the refresh answers with the new `tenant_id` — clients treat that as a move.
+                membership = memberships[0]
+                if not await self._sessions.set_tenant(row.id, tenant_id=membership.tenant_id):
+                    raise session_expired()
+                await self._identities.set_last_tenant(identity.id, tenant_id=membership.tenant_id)
+                row = replace(row, tenant_id=membership.tenant_id)
             if membership is None:
                 await self._sessions.revoke(
                     row.id, identity_id=row.identity_id, reason="membership_lost"

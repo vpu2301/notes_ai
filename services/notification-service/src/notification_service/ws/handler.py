@@ -29,6 +29,9 @@ from .upgrade import UpgradeContext
 
 logger = logging.getLogger(__name__)
 
+# Frames without a tenant cannot be routed to a workspace's socket (none are expected).
+_warned_untenanted = False
+
 
 async def run_session(websocket: WebSocket, *, upgrade: UpgradeContext, state: Any) -> None:
     """Serve one authenticated socket until the peer goes away."""
@@ -38,7 +41,8 @@ async def run_session(websocket: WebSocket, *, upgrade: UpgradeContext, state: A
 
     # Browsers fail the connection if the offered subprotocol is not echoed.
     await websocket.accept(subprotocol=SUBPROTOCOL)
-    await state.socket_registry.add(user_id, websocket)
+    # The workspace the token was minted for; frames of any other workspace never reach it.
+    await state.socket_registry.add(user_id, tenant_id, websocket)
 
     try:
         async with tenant_connection(state.app_pool, tenant_id) as conn:
@@ -55,7 +59,7 @@ async def run_session(websocket: WebSocket, *, upgrade: UpgradeContext, state: A
     except Exception as exc:  # noqa: BLE001
         logger.warning("ws.session_error", extra={"error": str(exc)})
     finally:
-        await state.socket_registry.remove(user_id, websocket)
+        await state.socket_registry.remove(user_id, tenant_id, websocket)
 
 
 async def _handle_command(
@@ -90,16 +94,22 @@ def make_fanout_handler(state: Any):
     """Callback for the pub/sub bridge; re-reads the row under the recipient's tenant scope."""
 
     async def handle(payload: dict[str, Any]) -> None:
+        global _warned_untenanted
         raw_user = payload.get("recipient_user_id")
         raw_tenant = payload.get("tenant_id")
-        if not raw_user or not raw_tenant:
+        if not raw_user:
+            return
+        if not raw_tenant:
+            if not _warned_untenanted:
+                _warned_untenanted = True
+                logger.warning("ws.fanout.untenanted_frame_dropped")
             return
 
         user_id = UUID(raw_user)
         tenant_id = UUID(raw_tenant)
 
         # Fast path: no local socket, no DB read.
-        if not await state.socket_registry.sockets_for(user_id):
+        if not await state.socket_registry.sockets_for(user_id, tenant_id):
             return
 
         async with tenant_connection(state.app_pool, tenant_id) as conn:
@@ -122,6 +132,6 @@ def make_fanout_handler(state: Any):
         else:
             frame = UnreadCountFrame(unread_count=count)
 
-        await state.socket_registry.send_to_user(user_id, frame.model_dump_json())
+        await state.socket_registry.send_to_user(user_id, tenant_id, frame.model_dump_json())
 
     return handle

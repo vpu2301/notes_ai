@@ -135,3 +135,95 @@ async def test_a_broken_identity_store_costs_a_name_not_a_session() -> None:
 
     assert identity is None
     assert memberships == []
+
+
+# ── W1: `db_user` derived from the active membership in dual/native mode ──
+
+
+TEAM_ID = UUID("33333333-3333-4333-8333-333333333333")
+
+
+class TwoWorkspaces(FakeIdentities):
+    async def list_memberships(self, identity_id: UUID) -> list[Membership]:
+        return [
+            Membership(
+                tenant_id=TENANT_ID, name="Olena K", kind="personal", role="owner", status="active"
+            ),
+            Membership(
+                tenant_id=TEAM_ID, name="Acme Inc", kind="team", role="viewer", status="active"
+            ),
+        ]
+
+
+def _request() -> Any:
+    from starlette.requests import Request
+
+    return Request({"type": "http", "headers": [(b"x-client-type", b"macos")]})
+
+
+@pytest.fixture
+def _no_reminders(monkeypatch: pytest.MonkeyPatch) -> None:
+    import contextlib
+
+    from auth_service.routers import me as me_mod
+
+    class _Conn:
+        async def fetchrow(self, *_: Any) -> None:
+            return None
+
+    @contextlib.asynccontextmanager
+    async def _fake_conn(pool: Any, tenant_id: Any):  # noqa: ANN202
+        yield _Conn()
+
+    monkeypatch.setattr(me_mod, "tenant_connection", _fake_conn)
+
+
+@pytest.mark.asyncio
+async def test_me_outside_the_home_tenant_derives_db_user(
+    monkeypatch: pytest.MonkeyPatch, _no_reminders: None
+) -> None:
+    from auth_service.routers import me as me_mod
+
+    monkeypatch.setattr(me_mod.settings, "idp_mode", "dual")
+    deps.install_state(  # type: ignore[arg-type]
+        SimpleNamespace(
+            account_services=SimpleNamespace(identities=TwoWorkspaces(identity=_identity())),
+            app_pool=object(),
+        )
+    )
+    claims = SimpleNamespace(
+        sub=IDENTITY_ID, tid=TEAM_ID, roles=["viewer"], scope="", mfa=False, iss="native"
+    )
+
+    body = await me_mod.me(_request(), claims)  # type: ignore[arg-type]
+
+    assert body["db_user"]["tenant_id"] == str(TEAM_ID)
+    assert body["db_user"]["role"] == "viewer"
+    assert body["db_user"]["email"] == "olena@acme.example"
+    assert body["active_membership"] == {
+        "tenant_id": str(TEAM_ID),
+        "name": "Acme Inc",
+        "kind": "team",
+        "role": "viewer",
+        "status": "active",
+    }
+    assert body["personal_tenant_id"] == str(TENANT_ID)
+
+
+@pytest.mark.asyncio
+async def test_keycloak_mode_keeps_the_users_row_path(
+    monkeypatch: pytest.MonkeyPatch, _no_reminders: None
+) -> None:
+    from auth_service.routers import me as me_mod
+
+    monkeypatch.setattr(me_mod.settings, "idp_mode", "keycloak")
+    deps.install_state(SimpleNamespace(account_services=None, app_pool=object()))  # type: ignore[arg-type]
+    claims = SimpleNamespace(
+        sub=IDENTITY_ID, tid=TEAM_ID, roles=["member"], scope="", mfa=False, iss="kc"
+    )
+
+    body = await me_mod.me(_request(), claims)  # type: ignore[arg-type]
+
+    # No `users` row in this tenant → null, exactly as before W1.
+    assert body["db_user"] is None
+    assert body["active_membership"] is None

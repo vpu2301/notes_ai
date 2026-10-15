@@ -12,16 +12,21 @@ struct SettingsView: View {
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    general
-                    appearance
-                    if app.authState == .signedIn {
-                        vocabulary
-                        connectorsRow
-                        dataRow
+                    if app.authState == .signedIn, app.capabilities.isGuest {
+                        // A guest reaches a few shared notes: nothing to record, tune or connect here.
                         account
+                    } else {
+                        general
+                        appearance
+                        if app.authState == .signedIn {
+                            vocabulary
+                            connectorsRow
+                            dataRow
+                            account
+                        }
+                        // Last: the server is set once and left alone.
+                        advanced
                     }
-                    // Last: the server is set once and left alone.
-                    advanced
                 }
                 .padding(.horizontal, DS.gutter)
                 .padding(.vertical, 12)
@@ -50,6 +55,10 @@ struct SettingsView: View {
             }
         }
         .tint(DS.accentText)
+        // Step-up asked from in here (sessions, dissolving a workspace): the root's sheet cannot present over this one.
+        .sheet(item: $app.reauth) { prompt in
+            ReauthSheet(prompt: prompt)
+        }
         .onAppear {
             if app.settingsTab == .connectors { path = [.connectors] }
             if app.settingsTab == .account { path = [.account] }

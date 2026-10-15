@@ -647,3 +647,101 @@ purging the identity.
 (links viewed → CTA → signup → verified → first finalized note) from the
 audit and referral tables; run it against a read replica, not the app
 role.
+
+## Dual mode and workspaces (W1, ADR-0069)
+
+Dev and staging run `MDX_IDP_MODE=dual`; prod pins `keycloak` in `values-prod.yaml` until W4.
+In `dual`, e-mail-code sign-in mints native tokens (`/auth/email/*`, `POST /auth/token` for
+switching), and password sign-in still goes through Keycloak.
+
+**Issuers.** Every service that verifies tokens trusts both entries in `AUTH_ISSUERS_JSON`
+(`x-auth-env` in compose, `commonEnv` in the chart); `make check-auth-issuer-config` is the gate:
+
+```json
+[{"issuer":"http://keycloak:8080/realms/notes",
+  "jwks_url":"http://keycloak:8080/realms/notes/protocol/openid-connect/certs","audience":"mdx-api"},
+ {"issuer":"<AUTH_ISSUER_URL of auth-service>",
+  "jwks_url":"http://auth-service:8000/.well-known/jwks.json","audience":"mdx-api"}]
+```
+
+The native `issuer` must equal auth-service's `AUTH_ISSUER_URL` (compose: `http://localhost:8000`;
+staging: `http://auth-service:8000`). auth-service needs `AUTH_SIGNING_KEYS_JSON` (staging: the
+`mdx-auth-signing` secret, created by `scripts/k8s/staging-up.sh`) or it refuses to start.
+
+**Smoke.** `make workspace-smoke` (also part of `make smoke`) signs in with an e-mail code on the
+web, macos and ios transports, switches to a team workspace, refreshes, borrows a Personal token,
+logs out and expects 401 on the next refresh. Mail must go to Mailpit (`make web-e2e-stack`
+shape); the default account is `member@tenant-a.example` (`SMOKE_EMAIL=` to change).
+
+**Personal-workspace backfill.** Once per environment after deploy:
+
+```bash
+python -m auth_service.ops.ensure_personal --dry-run   # how many identities lack one
+python -m auth_service.ops.ensure_personal             # heal; idempotent, prints ids only
+make check-identity-bridge                             # exactly one owned Personal per identity
+```
+
+A failure for one identity is logged and counted; the others continue, and the bridge check
+stays red until it is fixed. "Two personal workspaces" is never created by code — investigate
+before touching either row.
+
+**Admin endpoints in dual/native.** `POST /admin/users/invite` answers `410 use_invitations`
+(W2 replaces it). Deactivate/reactivate set the membership `suspended`/`active` in the caller's
+workspace and push the sub-level deny; roles collapse to one membership role
+(`tenant_admin→admin`, an owner stays owner) and never strip the last owner.
+
+**Demo tenants.** `infra/postgres/migrations/DEV_ONLY` lists dev fixtures (`0013`). The k8s
+migrate job sets `MDX_ENV` from `jobs.migrate.mdxEnv`; with `prod` they are recorded in
+`schema_migrations` as `skipped` (`make migrate-status` shows it) and never run.
+
+**Realm export.** `infra/keycloak/realm-export.json` carries a password only for `dev-*` users
+(`make check-dev-keys` enforces it). The `notes-ai-owner` password that used to be in the file is
+in git history: rotate it in every Keycloak that imported the export.
+
+## Invitations (W2)
+
+An invitation (`tenant_invitations`, ADR-0070) is one row per (workspace, address); the token in
+the mail is stored only as a sha256 hash, so **nobody — including an operator — can re-show a
+link**: Resend mints a new one and the old link stops working.
+
+**"They never got the mail."** Owners and admins see it in Members › Pending: "Not sent — Resend"
+means the relay refused (`auth.invitation.mail_failed` in the logs, alert
+`InvitationMailFailing`). Fix the relay (see *Email send failures*), then Resend (≤ 3 per
+invitation per day). If it was sent, ask them to check spam for "Join <workspace> on Notes AI".
+Invitations to new addresses must reach Mailpit in dev (`make web-e2e-stack` shape).
+
+**Stuck invitations.**
+
+```sql
+-- as tenant_writer or postgres; ids only, never paste the address into a ticket
+SELECT id, role, sent_count, last_sent_at, expires_at, accepted_at, revoked_at
+  FROM tenant_invitations WHERE tenant_id = '<workspace>' ORDER BY created_at DESC;
+```
+
+Expired rows stay "live" for the unique index until re-invited or revoked; re-inviting re-arms
+them. `invite_unavailable` (503) means Redis is down: invitation sends fail closed.
+
+**Wrong person joined?** They could only join by signing in as the invited address. Remove them
+from Members (step-up) and revoke any other open invitation to that address.
+
+**Dissolved by mistake (within 30 days).**
+
+```sql
+UPDATE tenants SET status = 'active', is_active = true WHERE id = '<workspace>' AND kind = 'team';
+UPDATE tenant_memberships SET status = 'active' WHERE tenant_id = '<workspace>' AND left_at IS NULL;
+```
+
+Invitations revoked by the dissolve stay revoked; invite again.
+
+**Erase (DSAR).** The address lives only in `tenant_invitations.email`:
+
+```sql
+DELETE FROM tenant_invitations WHERE email = lower('<address>');   -- open and accepted rows
+```
+
+Account deletion already revokes invitations the person sent; the daily `sweep-invitations`
+maintenance job deletes revoked/expired rows after 90 days and "Left" memberships after 30.
+
+**Leaving / sessions.** A session whose workspace was left, removed or dissolved moves to
+Personal on its next refresh (`tenant_id` changes in the refresh response) instead of being
+signed out.

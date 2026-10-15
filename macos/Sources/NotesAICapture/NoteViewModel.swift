@@ -107,7 +107,7 @@ final class NoteViewModel: ObservableObject {
     var textTurns: [TranscriptText.Turn] {
         transcriptSections.flatMap { TranscriptText.turns(content?.section($0.id).text ?? "") }
     }
-    var hasTranscript: Bool { jobId != nil || !transcriptSections.isEmpty }
+    var hasTranscript: Bool { canReadTranscript && (jobId != nil || !transcriptSections.isEmpty) }
 
     /// Who can see the note (0016); loaded lazily the first time the menu asks.
     @Published private(set) var sharing: SharingView?
@@ -265,7 +265,8 @@ final class NoteViewModel: ObservableObject {
         let name = note?.primaryAuthorName?.trimmingCharacters(in: .whitespaces) ?? ""
         return name.isEmpty ? "A colleague's note" : "\(name)'s note"
     }
-    var editable: Bool { isDraft }
+    /// A draft the person may edit (W3 level).
+    var editable: Bool { isDraft && NoteLevel.allowsEdit(level) }
 
     // MARK: - Load
 
@@ -376,7 +377,7 @@ final class NoteViewModel: ObservableObject {
     }
 
     func loadTranscript() async {
-        guard turns == nil, transcriptError == nil, let jobId else { return }
+        guard turns == nil, transcriptError == nil, canReadTranscript, let jobId else { return }
         do {
             apply(try await api.transcript(jobId: jobId))
         } catch {
@@ -444,8 +445,8 @@ final class NoteViewModel: ObservableObject {
                                                toText: toText == correction.toText ? nil : toText,
                                                correctionsRev: correctionsRev)
             if accept && correction.source == "glossary" {
-                try? await api.rememberTerm(toText ?? correction.toText, kind: .term,
-                                            heardAs: correction.fromForms, noteId: noteId)
+                _ = try? await api.rememberTerm(toText ?? correction.toText, kind: .term,
+                                                heardAs: correction.fromForms, noteId: noteId)
             }
         } catch {
             spellingError = "These spellings changed or could not be saved — reloaded, please check again."
@@ -645,6 +646,7 @@ final class NoteViewModel: ObservableObject {
     /// A readable job, online (no replay against a changed roster), nothing in flight, no re-label running.
     var canEditSpeakers: Bool {
         jobId != nil && transcriptError == nil && online && !renamingSpeaker && relabel != .running
+            && NoteLevel.allowsEdit(level)
     }
 
     /// Whether this turn can be moved (the server sent its segments).
@@ -1321,6 +1323,79 @@ final class NoteViewModel: ObservableObject {
 
     func revokePublicLink() async {
         await sharingAction { try await self.api.revokePublicLink(id: self.noteId) }
+    }
+
+    // MARK: - People and roles (W3)
+
+    /// What this person may do here; nil from a server that predates W3.
+    var level: NoteLevel? { sharing?.myLevel ?? note?.myLevel }
+
+    /// Comments are offered to commenters and up, on a server that has them.
+    var canComment: Bool { NoteLevel.allowsComment(level) && viewing == nil }
+
+    /// Share sheet, visibility, transcript inclusion: the author team only.
+    var canManage: Bool { level.map(\.canManage) ?? (sharing?.canManage ?? true) }
+
+    /// The transcript and its audio follow the note's role; the server already left the job id out.
+    var canReadTranscript: Bool { note?.canReadTranscript ?? true }
+
+    /// Invite one or more addresses with one role. Returns how many were invited (not members) and
+    /// granted, or nil when one failed (`actionError`); the rest are still done.
+    func invite(emails: [String], role: NoteLevel, message: String) async -> (granted: Int, invited: Int)? {
+        busy = true
+        actionError = nil
+        defer { busy = false }
+        var granted = 0
+        var invited = 0
+        var failed = false
+        for email in emails {
+            do {
+                let (outcome, view) = try await api.shareOrInvite(noteId: noteId, email: email, role: role,
+                                                                  message: message)
+                if let view { sharing = view }
+                if outcome == .granted { granted += 1 } else { invited += 1 }
+            } catch {
+                actionError = "\(email): \(CollaborationCopy.message(for: error))"
+                failed = true
+            }
+        }
+        await loadSharing()
+        return failed ? nil : (granted, invited)
+    }
+
+    func setRole(_ person: NotePerson, _ role: NoteLevel) async {
+        guard role != person.level else { return }
+        await sharingAction { try await self.api.setCollaborator(id: self.noteId, sub: person.sub, role: role) }
+    }
+
+    func remove(_ person: NotePerson) async {
+        busy = true
+        actionError = nil
+        defer { busy = false }
+        do {
+            try await api.removeCollaborator(id: noteId, sub: person.sub)
+            await loadSharing()
+        } catch {
+            actionError = CollaborationCopy.message(for: error)
+        }
+    }
+
+    /// Withdraw an invitation to this note (it lives in the workspace's invitations).
+    func revoke(_ invite: PendingNoteInvite) async {
+        busy = true
+        actionError = nil
+        defer { busy = false }
+        do {
+            guard let tenantId = await api.tenantId else { return }
+            try await api.revokeInvitation(tenantId: tenantId, id: invite.invitationId)
+            await loadSharing()
+        } catch {
+            actionError = CollaborationCopy.message(for: error)
+        }
+    }
+
+    func setTranscriptShared(_ shared: Bool) async {
+        await sharingAction { try await self.api.setTranscriptSharing(id: self.noteId, shared: shared) }
     }
 
     // MARK: - Per-recipient links (Sprint 19)

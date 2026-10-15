@@ -3,6 +3,47 @@
 ## Unreleased — A live meeting note writes itself too
 
 ### Added
+- **Share a note by role; guests; comments (Sprint W3, ADR-0071)** (note-service, asr-service,
+  auth-service, notification-service, web, Mac, iPhone; migrations 0073–0075): one Share dialog
+  gives people **view**, **comment** or **edit** on a note, whether they are in the workspace
+  or not (outsiders get a guest invitation to that one note and see "Guest in …"); a note in a
+  team workspace is visible to its members by default (members edit, viewers comment) — a
+  one-on-one, interview or memo stays private, and so does everything in Personal; commenters
+  leave comments anchored to a section or a line ("on a removed line" when it is gone),
+  editors resolve them; "Anna is viewing" presence; All / Mine / Shared with me filters.
+  Transcript and audio follow the note: edit or above, or any reader once the author turns
+  "Include transcript" on — enforced in asr-service through `note_access_for_job`. Counters
+  `mdx_note_share_total`, `mdx_note_access_refused_total`, `mdx_note_transcript_refused_total`,
+  `mdx_note_comments_total`, `mdx_note_presence_viewers`, `mdx_note_search_scope_total`;
+  notifications `note.commented`, `note.access_changed`; alert `NoteEditRefusalsSpike`.
+- **Create a workspace and invite anyone (Sprint W2, ADR-0070)** (auth-service,
+  notification-service, web, Mac, iPhone; migration 0072): "New workspace…" in every switcher
+  creates a free team workspace by name and switches into it; Members invites by e-mail with a
+  role (member, admin, viewer) and an optional message, lists Pending with Resend/Revoke, shows
+  "Left" and a seat meter (display only); anyone can leave, an owner can dissolve an empty team
+  workspace by typing its name. Invitations are one entity (`tenant_invitations`): the mailed
+  link only shows the invitation, accepting needs a sign-in as the invited address and switches
+  the session there, a new address that signs up with a code joins automatically and lands in
+  the workspace (`joined_tenant_ids`). In-app notifications `workspace.invited`,
+  `workspace.invitation_accepted`, `workspace.member_removed`; mail `invitation.{en,de,uk}`;
+  `/invite/:token` and `/invitations` on the web, `notesai://invite/<token>` on the Mac and
+  iPhone; Grafana `workspaces`, `scripts/ops/workspace_funnel.sql`, alerts
+  `InvitationMailFailing` / `InvitationAcceptanceLow`; daily `sweep-invitations` job.
+- **One account, many workspaces (Sprint W1, ADR-0069)** (auth-service, notification-service,
+  note-service, web, Mac, iPhone; migration 0071): dev and staging run `MDX_IDP_MODE=dual` — sign
+  in with an e-mail code, land in Personal, switch to any team workspace from the web sidebar
+  header, the iPhone chip or the Mac menu-bar header. Every active identity has exactly one
+  Personal workspace (`python -m auth_service.ops.ensure_personal`, checked by
+  `make check-identity-bridge`); `GET /tenants` carries `kind` with Personal first; `GET /auth/me`
+  adds `active_membership` and `personal_tenant_id` and derives the deprecated `db_user` from the
+  active membership; the roster and e-mail lookup read `identities`. A web tab whose session
+  moved in another tab refuses writes until it reloads; offline meeting notes on the Mac and
+  iPhone are created in the workspace they were typed in (borrowed tokens); notification
+  sockets receive only their own workspace's frames and links carry `?ws=`; `guest` joins the
+  role vocabulary (offered nowhere); role pickers offer member, admin, viewer;
+  `make workspace-smoke`; counters `mdx_auth_workspace_switch_total`,
+  `mdx_auth_personal_healed_total`, `mdx_auth_me_legacy_db_user_total`,
+  `mdx_share_blocked_no_account_total`.
 - **Transcript parity items (Sprint I3 T2–T4)** (nlp-service, asr-service, note-service, web): a
   conversation's displayed transcript hides fillers and immediate repeats and capitalises each
   segment's first word, with every word and its timing kept (`words[].hidden`, `raw_text`
@@ -151,6 +192,24 @@
   person — never *we*, *I* or *our* — with no filler. `PROMPT_VERSION` is `2026-10-2`.
 
 ### Changed
+- **Note access (Sprint W3)**: a workspace `viewer` no longer writes notes (`note.write` removed;
+  they comment on workspace-visible notes); being on a note's share list no longer means edit
+  — existing sharees were backfilled as `edit`, new grants pick a role; `PUT /draft` needs edit
+  (403 `insufficient_role`), cancelling a note needs manage; `notes.shared_with_ids` is no
+  longer written; the note envelope adds `my_level` and `can_read_transcript` and hides
+  `source_job_id` without transcript access; `by-source-job` only returns notes you can see.
+- **Workspaces (Sprint W2)**: managing people (invite, role change, remove, dissolve) needs a
+  recent sign-in in dual/native instead of MFA; a session whose workspace was left, removed or
+  dissolved moves to Personal on refresh instead of being signed out; `notifications` and
+  `notification_preferences` category CHECKs now cover every category the producers emit
+  (`note.recipient_responded`, `note.link_status_changed`, `share.reported`,
+  `ai.budget_reached` were missing since 0011).
+- **Workspaces (Sprint W1)**: in dual/native mode `POST /admin/users/invite` answers
+  `410 use_invitations`, and adding a member by e-mail finds only people already in that
+  workspace (no platform-wide address probe) until W2's invitations; `/admin/users/*`
+  deactivate/reactivate/roles act on memberships; a Personal workspace cannot be suspended
+  (`409 personal_workspace`); the demo tenants (0013) are recorded as skipped under
+  `MDX_ENV=prod`; the realm export keeps passwords only for `dev-*` users.
 - **Structure follows content** (`note-service`, `note_models`, Mac, iPhone, web; ADR-0058 §6): the
   note view no longer draws the template. Every client renders the sections the content HAS, in
   its order, headed only when a section has a name — the template's for a template section, its

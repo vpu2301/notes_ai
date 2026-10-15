@@ -273,9 +273,13 @@ async def token(
         )
     except ApiError as exc:
         auth_metrics.token_switch_counter.add(1, {"result": exc.code})
+        if body.activate:
+            auth_metrics.workspace_switch_counter.add(1, {"result": exc.code})
         raise as_problem(exc) from exc
 
     auth_metrics.token_switch_counter.add(1, {"result": "success"})
+    if body.activate:
+        auth_metrics.workspace_switch_counter.add(1, {"result": "success"})
     if switched.activated:
         await _audit(
             tenant_id=switched.tenant_id,

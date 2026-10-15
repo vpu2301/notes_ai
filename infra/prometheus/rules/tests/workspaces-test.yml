@@ -1,0 +1,57 @@
+# promtool unit tests for the workspace alerts (make check-alert-rules).
+
+rule_files:
+  - ../workspaces.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: invitation mail failing
+    input_series:
+      # One failed send a minute = 60/h, well over 5.
+      - series: 'mdx_auth_invitation_total{action="mail_failed",has_account="unknown"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: InvitationMailFailing
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: InvitationMailFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: backend
+            exp_annotations:
+              summary: "More than 5 workspace invitations could not be mailed in the last hour"
+              runbook: "docs/runbooks/auth.md#invitations-w2"
+
+  - interval: 1h
+    name: nobody new accepts
+    input_series:
+      - series: 'mdx_auth_invitation_total{action="created",has_account="false"}'
+        values: "0+2x200"
+      - series: 'mdx_auth_invitation_total{action="auto_accepted",has_account="true"}'
+        values: "0x200"
+    alert_rule_test:
+      - eval_time: 190h
+        alertname: InvitationAcceptanceLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: product
+            exp_annotations:
+              summary: "Under 20% of invitations to new addresses were accepted over 7 days"
+              runbook: "docs/runbooks/auth.md#invitations-w2"
+
+  - interval: 1h
+    name: healthy acceptance stays quiet
+    input_series:
+      - series: 'mdx_auth_invitation_total{action="created",has_account="false"}'
+        values: "0+2x200"
+      - series: 'mdx_auth_invitation_total{action="auto_accepted",has_account="true"}'
+        values: "0+1x200"
+    alert_rule_test:
+      - eval_time: 190h
+        alertname: InvitationAcceptanceLow
+        exp_alerts: []

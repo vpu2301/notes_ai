@@ -41,6 +41,8 @@ class NoteVersionSummary(_Strict):
     version_number: int
     parent_version_id: UUID | None
     created_by: UUID
+    # W3/WEB P3-3: who saved it, for the "newer version" banner; null when unresolvable.
+    created_by_display: str | None = None
     created_at: str
     is_amendment: bool
     amendment_type: NoteAmendmentType | None
@@ -72,6 +74,10 @@ async def list_versions(
         note = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
         _enforce_read_purpose(note, claims, purpose)
         summaries = await repo.list_version_summaries(conn, note_id=note_id)
+        names = {
+            m.sub: m.display_name
+            for m in await repo.fetch_members(conn, subs=list({s.created_by for s in summaries}))
+        }
 
     return [
         NoteVersionSummary(
@@ -79,6 +85,7 @@ async def list_versions(
             version_number=s.version_number,
             parent_version_id=s.parent_version_id,
             created_by=s.created_by,
+            created_by_display=names.get(s.created_by),
             created_at=s.created_at.isoformat(),
             is_amendment=s.is_amendment,
             amendment_type=s.amendment_type,

@@ -91,3 +91,56 @@ def test_dictation_completion_never_emails() -> None:
 def test_dictation_completion_is_addressed_by_hint() -> None:
     """Only the dictating user; nobody else cares that a colleague stopped."""
     assert CATALOG[Category.DICTATION_COMPLETED].recipient_rule is RecipientRule.EXPLICIT_HINTS
+
+
+_WORKSPACE_CATEGORIES = (
+    Category.WORKSPACE_INVITED,
+    Category.WORKSPACE_INVITATION_ACCEPTED,
+    Category.WORKSPACE_MEMBER_REMOVED,
+)
+
+
+@pytest.mark.parametrize("category", _WORKSPACE_CATEGORIES)
+def test_workspace_categories_are_addressed_by_hint(category: Category) -> None:
+    """Each is written in a workspace the recipient belongs to, so the member filter holds."""
+    assert CATALOG[category].recipient_rule is RecipientRule.EXPLICIT_HINTS
+
+
+@pytest.mark.parametrize("category", _WORKSPACE_CATEGORIES)
+def test_workspace_categories_are_in_app_only(category: Category) -> None:
+    """auth-service sends the invitation mail; a second one from here would duplicate it."""
+    spec = CATALOG[category]
+    assert spec.default_in_app is True
+    assert spec.default_email_mode is EmailMode.OFF
+    assert spec.email_template == ""
+    assert category not in emailing_categories()
+
+
+def test_only_the_acceptance_may_wait_for_the_digest() -> None:
+    eligible = digest_eligible_categories()
+    assert Category.WORKSPACE_INVITATION_ACCEPTED in eligible
+    assert Category.WORKSPACE_INVITED not in eligible
+    assert Category.WORKSPACE_MEMBER_REMOVED not in eligible
+
+
+_NOTE_COLLAB_CATEGORIES = (Category.NOTE_COMMENTED, Category.NOTE_ACCESS_CHANGED)
+
+
+@pytest.mark.parametrize("category", _NOTE_COLLAB_CATEGORIES)
+def test_note_collaboration_categories_are_in_app_by_hint_and_never_mail(
+    category: Category,
+) -> None:
+    """W3: the producer names the audience; neither ever renders an e-mail of its own."""
+    spec = CATALOG[category]
+    assert spec.recipient_rule is RecipientRule.EXPLICIT_HINTS
+    assert spec.default_in_app is True
+    assert spec.default_email_mode is EmailMode.OFF
+    assert spec.email_template == ""
+    assert category not in emailing_categories()
+    assert spec.exclude_actor is True
+
+
+def test_a_comment_may_wait_for_the_digest_an_access_change_may_not() -> None:
+    eligible = digest_eligible_categories()
+    assert Category.NOTE_COMMENTED in eligible
+    assert Category.NOTE_ACCESS_CHANGED not in eligible

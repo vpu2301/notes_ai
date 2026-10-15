@@ -68,6 +68,27 @@
 }
 .sb.collapsed .sb-head { justify-content: center; padding: 0; }
 
+/* Workspace name in the head; the role sits small under it, the caret at the end */
+.sb-ws-wrap { position: relative; flex: 1; min-width: 0; }
+.sb-ws {
+  display: flex; align-items: center; gap: calc(8px * var(--density));
+  width: 100%; height: 36px;
+  padding: 0 calc(6px * var(--density));
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background var(--t-fast) var(--ease);
+}
+.sb-ws:hover, .sb-ws.open { background: var(--sidebar-hover); }
+.sb-ws-text { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.15; }
+.sb-ws > svg { flex: none; color: var(--muted); transition: transform var(--t-fast) var(--ease); }
+.sb-ws.open > svg { transform: rotate(180deg); }
+.sb-ws-name { font-size: calc(14px * var(--fs)); font-weight: 500; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-ws-role { font-size: calc(11px * var(--fs)); color: var(--muted); }
+.sb.collapsed .sb-head { flex-direction: column; height: auto; gap: 4px; }
+.sb.collapsed .sb-ws-wrap { flex: none; }
+.sb.collapsed .sb-ws { width: 32px; height: 32px; padding: 0; justify-content: center; }
+.sb-user-menu.down { position: fixed; bottom: auto; right: auto; width: 260px; }
+
 /* "New meeting" row; the caret surfaces on hover */
 .sb-new { position: relative; display: flex; align-items: center; margin: 0 0 calc(2px * var(--density)); }
 .sb-new-main {
@@ -387,6 +408,20 @@
   background: var(--accent-soft); color: var(--accent-text);
   display: inline-flex; align-items: center; justify-content: center;
   font-size: calc(9px * var(--fs)); font-weight: 600; letter-spacing: .02em;
+}
+.sb-ws-mark.personal svg { color: currentColor; }
+/* "This session switched in another tab" */
+.ws-moved { align-items: center; margin: 0 calc(40px * var(--density)) calc(8px * var(--density)); }
+/* "You joined …" — moss, not a warning. */
+.banner-ok { background: var(--accent-soft); }
+.banner-ok svg { color: var(--accent); }
+/* Open invitations: a dot on the account avatar. */
+.avatar { position: relative; }
+.avatar-dot {
+  position: absolute; top: -1px; right: -1px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--sidebar);
 }
 .sb.collapsed .sb-foot { margin: 8px calc(-8px * var(--density)) 0; }
 

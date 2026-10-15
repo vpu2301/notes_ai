@@ -1480,3 +1480,63 @@ ol.rt-list > li::before {
 .segmented button[aria-checked="true"] { color: var(--text-1); font-weight: 500; }
 .segmented button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { .segmented-thumb { transition: none; } }
+
+/* ─── Note roles, comments, presence (W3) ───────────────────────────────── */
+.chip.guest-badge, .chip.level-chip { text-transform: none; background: var(--surface-2); color: var(--text-3); }
+.chip.guest-badge { margin-left: 6px; }
+.share-avatar-ws { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; flex: none; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent-text); }
+.share-transcript { align-items: flex-start; gap: 10px; margin-top: calc(6px * var(--density)); }
+.share-transcript .chk { margin-top: 2px; }
+.home-scope { display: flex; max-width: 360px; }
+
+.presence { display: inline-flex; align-items: center; }
+.presence-avatar { width: 24px; height: 24px; font-size: 10px; margin: 0; border: 2px solid var(--surface); }
+.presence-avatar + .presence-avatar { margin-left: -6px; }
+.presence-more { margin-left: 4px; font-size: calc(11.5px * var(--fs)); color: var(--muted); }
+.doc-comments-btn { position: relative; display: inline-flex; align-items: center; gap: 4px; }
+.doc-comments-btn.on { background: var(--accent-soft); color: var(--accent-text); }
+.doc-comments-btn .count { font-size: calc(11.5px * var(--fs)); font-variant-numeric: tabular-nums; }
+
+/* Offered on hover; always shown once the section has comments. */
+.section-comment { margin-left: 6px; width: auto; min-width: 24px; height: 22px; padding: 0 4px; gap: 3px; opacity: 0; color: var(--muted); }
+.section-comment .count { position: static; font-size: calc(11px * var(--fs)); }
+.doc-section:hover .section-comment, .section-comment:focus-visible, .section-comment.has { opacity: 1; }
+.line-comment { width: 20px; height: 20px; margin-left: 4px; vertical-align: middle; opacity: 0; color: var(--muted); }
+li:hover > span > .line-comment, p:hover > .line-comment, .line-comment:focus-visible { opacity: 1; }
+@media (hover: none) { .section-comment, .line-comment { opacity: 1; } }
+
+.comments-panel {
+  width: 300px; flex: none;
+  position: sticky; top: calc(var(--topbar-h) + 8px);
+  max-height: calc(100vh - var(--topbar-h) - 40px);
+  display: flex; flex-direction: column;
+}
+.comments-body { overflow-y: auto; display: flex; flex-direction: column; gap: calc(14px * var(--density)); }
+.comments-resolved-toggle { gap: 6px; font-size: calc(12px * var(--fs)); }
+.comment-group { display: flex; flex-direction: column; gap: calc(8px * var(--density)); }
+.comment-anchor { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: calc(12px * var(--fs)); font-weight: 600; color: var(--text-2); }
+.chip.comment-removed { text-transform: none; background: var(--warn-soft); color: var(--warn); }
+.comment { display: flex; flex-direction: column; gap: 4px; padding: calc(8px * var(--density)) calc(10px * var(--density)); border-radius: var(--radius); background: var(--surface-2); }
+.comment.resolved { opacity: .7; }
+.comment-h { display: flex; align-items: baseline; gap: 8px; }
+.comment-author { font-weight: 600; font-size: calc(13px * var(--fs)); color: var(--text-1); }
+.comment-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(13px * var(--fs)); color: var(--text-1); }
+.comment-actions { display: flex; flex-wrap: wrap; gap: 2px; }
+.comment-edit { display: flex; flex-direction: column; gap: 6px; }
+.comment-compose { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; border-top: var(--hairline) solid var(--line-2); padding-top: calc(12px * var(--density)); }
+.comment-compose .textarea { width: 100%; }
+.comment-target { align-self: stretch; display: flex; align-items: center; gap: 4px; }
+/* Narrow windows: a sheet over the bottom of the page instead of a side column. */
+@media (max-width: 1023px) {
+  .comments-panel {
+    position: fixed; top: auto; left: 0; right: 0; bottom: 0; z-index: 40;
+    width: auto; max-height: 60vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    box-shadow: var(--shadow-3);
+  }
+}
+
+/* Members page: initial per row, seat meter under the heading. */
+.member-avatar { background: var(--accent-soft); color: var(--accent-text); margin-right: 10px; }
+.seat-meter { display: flex; flex-direction: column; gap: 4px; min-width: 180px; }
+.seat-meter .meter { height: 6px; max-width: 240px; }

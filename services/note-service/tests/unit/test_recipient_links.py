@@ -232,6 +232,19 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
     monkeypatch.setattr(sharing_policy, "load_policy", _load_policy)
 
+    async def _tenant_kind(conn, *, tenant_id):  # noqa: ANN001
+        return "team"
+
+    async def _membership_roles(conn, *, subs):  # noqa: ANN001
+        return dict.fromkeys(subs, "member")
+
+    async def _no_pending(conn, note_id):  # noqa: ANN001
+        return []
+
+    monkeypatch.setattr(sharing_policy, "tenant_kind", _tenant_kind)
+    monkeypatch.setattr(repo, "membership_roles", _membership_roles)
+    monkeypatch.setattr(router_mod, "_pending", _no_pending)
+
     app = create_app()
     app.dependency_overrides[deps.current_user] = lambda: _claims()
     c = TestClient(app)
@@ -340,7 +353,7 @@ def test_shared_with_member_reads_but_cannot_manage(client: TestClient) -> None:
 
     _create(client, label="Tom")
     client.store.note = _note()
-    client.store.note.shared_with_ids = [OTHER]
+    client.store.note.collaborators = {OTHER: "edit"}
     client.app_.dependency_overrides[deps.current_user] = lambda: _claims(sub=OTHER)
     # May see the sheet, but tokens are for managers only.
     sharing = client.get(f"/v1/notes/{NOTE}/sharing").json()

@@ -53,6 +53,11 @@ apps:
       MDX_NOTE_ENTITY_MODEL_TIER: "false"
   auth-service:
     replicas: 2
+    # W4: the native flip in production is its own decision (ADR-0069). The chart's
+    # staging defaults set `dual`; pin keycloak here so prod does not inherit it.
+    env:
+      MDX_IDP_MODE: keycloak
+    secretEnv: [mdx-keycloak-clients]
     hpa: {enabled: true, minReplicas: 2, maxReplicas: 6, cpuUtilisation: 70}
   nlp-service:
     replicas: 2
@@ -89,6 +94,7 @@ apps:
 jobs:
   migrate:
     databaseUrl: postgresql://postgres@postgres:5432/notes
+    mdxEnv: prod     # demo tenants (0013) recorded as skipped, never inserted
   seed:
     enabled: false   # production NEVER seeds dev tenants/users
 

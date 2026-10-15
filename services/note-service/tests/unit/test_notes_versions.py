@@ -150,6 +150,7 @@ def test_list_versions_author_ok(client: TestClient, monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(notes_versions.repo, "fetch_note", _fetch_note)
     monkeypatch.setattr(notes_versions.repo, "list_version_summaries", _list)
+    monkeypatch.setattr(notes_versions.repo, "fetch_members", _no_profiles)
 
     resp = client.get(f"/v1/notes/{NOTE_ID}/versions")
     assert resp.status_code == 200
@@ -172,6 +173,7 @@ def test_list_versions_non_author_requires_purpose(
 
     monkeypatch.setattr(notes_versions.repo, "fetch_note", _fetch_note)
     monkeypatch.setattr(notes_versions.repo, "list_version_summaries", _list)
+    monkeypatch.setattr(notes_versions.repo, "fetch_members", _no_profiles)
 
     # No purpose → 422.
     assert client.get(f"/v1/notes/{NOTE_ID}/versions").status_code == 422
@@ -224,3 +226,8 @@ def test_get_version_ok_emits_audit(client: TestClient, monkeypatch: pytest.Monk
     assert len(calls) == 1
     assert calls[0]["kind"] == "note.viewed_full"
     assert calls[0]["payload"]["version_number"] == 2
+
+
+async def _no_profiles(conn, *, subs):  # noqa: ANN001, ANN202
+    """W3: list_versions names who saved each version; these tests do not need the names."""
+    return []

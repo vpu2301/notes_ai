@@ -26,6 +26,8 @@ from db import tenant_connection
 
 from .. import audit_kinds
 from ..deps import get_state, requires
+from ..domain import access
+from ..domain import notes_repository as notes_repo
 from ..domain import spaces_repository as repo
 
 logger = logging.getLogger(__name__)
@@ -153,6 +155,8 @@ async def file_note(
 ) -> None:
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
+        # W3: filing into your own space still needs a note you can see.
+        access.require_view(await notes_repo.fetch_note(conn, note_id=note_id), claims)
         ok = await repo.set_note_space(
             conn,
             tenant_id=claims.tid,

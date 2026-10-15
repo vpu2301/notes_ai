@@ -30,6 +30,8 @@ KIND_SIGNUP_VERIFY: Final = "signup_verify"
 KIND_SIGNUP_EXISTS: Final = "signup_exists"
 # Concierge mail: the only one carrying a password, so it is sent by an operator CLI, not an endpoint.
 KIND_CONCIERGE_WELCOME: Final = "concierge_welcome"
+# W2: an invitation to a workspace; the subject names the workspace, the link only shows it.
+KIND_INVITATION: Final = "invitation"
 KINDS: Final[tuple[str, ...]] = (
     KIND_PASSWORD_RESET,
     KIND_PASSWORD_CHANGED,
@@ -43,6 +45,7 @@ KINDS: Final[tuple[str, ...]] = (
     KIND_SIGNUP_VERIFY,
     KIND_SIGNUP_EXISTS,
     KIND_CONCIERGE_WELCOME,
+    KIND_INVITATION,
 )
 # Kinds whose body carries an action link (tests assert it is in both parts).
 LINK_KINDS: Final[tuple[str, ...]] = (
@@ -51,6 +54,7 @@ LINK_KINDS: Final[tuple[str, ...]] = (
     KIND_EMAIL_CHANGED,
     KIND_SIGNUP_EXISTS,
     KIND_CONCIERGE_WELCOME,
+    KIND_INVITATION,
 )
 
 
@@ -98,6 +102,12 @@ SUBJECTS: Final[dict[str, dict[str, str]]] = {
         "de": "Ihr Notes AI-Konto ist bereit",
         "uk": "Ваш обліковий запис Notes AI готовий",
     },
+    # `{workspace_name}` is filled by `subject_for(..., fields)`; nothing else is.
+    KIND_INVITATION: {
+        "en": "Join {workspace_name} on Notes AI",
+        "de": "Treten Sie {workspace_name} auf Notes AI bei",
+        "uk": "Приєднуйтесь до {workspace_name} у Notes AI",
+    },
     KIND_AUTH_LOCKED: {
         "en": "Your Notes AI account is temporarily locked",
         "de": "Ihr Notes AI-Konto ist vorübergehend gesperrt",
@@ -131,9 +141,13 @@ SUBJECTS: Final[dict[str, dict[str, str]]] = {
 }
 
 
-def subject_for(kind: str, lang: str) -> str:
+def subject_for(kind: str, lang: str, fields: dict[str, object] | None = None) -> str:
     by_lang = SUBJECTS[kind]
-    return by_lang.get(lang, by_lang[DEFAULT_LANG])
+    subject = by_lang.get(lang, by_lang[DEFAULT_LANG])
+    if kind == KIND_INVITATION:
+        # Only the workspace name; a stray brace in it is data, not a placeholder.
+        subject = subject.replace("{workspace_name}", str((fields or {}).get("workspace_name", "")))
+    return subject
 
 
 # ── Greetings ────────────────────────────────────────────────────────
@@ -896,6 +910,53 @@ Erstellt: {created_at}
 """,
 }
 _TEXT.update(_TEXT_OPS0)
+
+# ── W2 invitation: the link shows the invitation; joining needs a sign-in as this address ──
+_TEXT_W2: Final[dict[tuple[str, str], str]] = {
+    (KIND_INVITATION, "en"): """\
+Hello,
+
+{inviter_display} invited you to join {workspace_name} on Notes AI as {role_words}.
+{message_block}
+Open the invitation:
+
+{invite_url}
+
+Sign in or create an account with this address to join. The link
+works for {expires_label}. If you did not expect this, ignore this mail —
+nothing is shared until you accept.
+— Notes AI
+""",
+    (KIND_INVITATION, "de"): """\
+Hallo,
+
+{inviter_display} hat Sie eingeladen, {workspace_name} auf Notes AI als {role_words} beizutreten.
+{message_block}
+Einladung öffnen:
+
+{invite_url}
+
+Melden Sie sich mit dieser Adresse an oder erstellen Sie ein Konto, um
+beizutreten. Der Link gilt {expires_label}. Wenn Sie das nicht erwartet
+haben, ignorieren Sie diese E-Mail — geteilt wird erst, wenn Sie annehmen.
+— Notes AI
+""",
+    (KIND_INVITATION, "uk"): """\
+Вітаємо,
+
+{inviter_display} запрошує вас приєднатися до {workspace_name} у Notes AI як {role_words}.
+{message_block}
+Відкрити запрошення:
+
+{invite_url}
+
+Увійдіть або створіть обліковий запис з цією адресою, щоб приєднатися.
+Посилання діє {expires_label}. Якщо ви цього не очікували, просто
+проігноруйте лист — нічого не буде відкрито, доки ви не приймете.
+— Notes AI
+""",
+}
+_TEXT.update(_TEXT_W2)
 
 
 def hours_label(seconds: int, lang: str) -> str:

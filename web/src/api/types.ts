@@ -22,6 +22,30 @@ export interface Identity {
   created_at?: string | null;
 }
 
+/** Workspace roles. `assistant` is legacy and `guest` is decoded but offered nowhere (W1). */
+export type WorkspaceRole = "owner" | "admin" | "member" | "viewer" | "guest" | "assistant";
+
+const ROLE_LABEL: Record<WorkspaceRole, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  member: "Member",
+  viewer: "Viewer",
+  guest: "Guest",
+  assistant: "Assistant",
+};
+
+/** A role as a person reads it; an unknown one from a newer server shows as sent. */
+export function roleLabel(role: string): string {
+  return ROLE_LABEL[role as WorkspaceRole] ?? role;
+}
+
+/** A workspace's name as every client shows it: a personal one is always "Personal". */
+export function workspaceLabel(w: { kind?: string; name: string; role?: string }): string {
+  if (w.kind === "personal") return "Personal";
+  // A guest only reaches the notes shared with them there (W3).
+  return w.role === "guest" ? `Guest in ${w.name}` : w.name;
+}
+
 /** `MembershipSummary` — one workspace this identity belongs to. */
 export interface Membership {
   tenant_id: string;
@@ -53,6 +77,8 @@ export interface AuthResult {
   /** Set only when the sign-in spent a recovery code. Zero is the case that matters. */
   recovery_codes_left: number | null;
   recovery_codes_exhausted: boolean | null;
+  /** Invitations accepted at sign-up; the landing `tenant_id` is the first. Absent on older servers. */
+  joined_tenant_ids?: string[];
 }
 
 /** `GET /auth/signup/config` — `/join` picks its form by it. */
@@ -123,6 +149,9 @@ export interface MeResponse {
   /** Optional: null/empty in keycloak mode and on older servers. */
   identity?: Identity | null;
   memberships?: Membership[];
+  /** dual/native mode only: the workspace this token is scoped to, and the identity's own one. */
+  active_membership?: Membership | null;
+  personal_tenant_id?: string | null;
 }
 
 // ── auth-service: account & security ──────────────────────────────────
@@ -219,6 +248,8 @@ export interface TenantSummary {
   is_active: boolean;
   logo_url: string;
   my_role: string;
+  /** Absent on older servers; a personal workspace is shown as "Personal". */
+  kind?: "personal" | "team" | string;
 }
 
 /** `POST /auth/token` — an access token for another of my workspaces. */
@@ -239,6 +270,70 @@ export interface TenantMember {
   platform_role: string | null;
   created_at: string;
   updated_at: string;
+  /** Set on a `suspended` row when the person left themselves; shown as "Left". */
+  left_at?: string | null;
+}
+
+/** `GET /tenants/{id}/members` — display only; nothing blocks on it. */
+export interface SeatMeter {
+  active: number;
+  /** null: the plan sets no limit. */
+  limit: number | null;
+}
+
+export interface MemberList {
+  items: TenantMember[];
+  seat_meter?: SeatMeter;
+}
+
+/** The roles an invitation can carry (`guest` only with a note: W3; owner is earned). */
+export type InvitationRole = "member" | "admin" | "viewer" | "guest";
+
+/** `InvitationOut` — one invitation as its workspace's managers see it. */
+export interface InvitationOut {
+  id: string;
+  email: string;
+  role: string;
+  status: "pending" | "accepted" | "revoked" | "expired";
+  expires_at: string;
+  sent_count: number;
+  last_sent_at: string | null;
+  invited_by_display: string | null;
+  created_at: string;
+  /** `queued_failed`: the row exists but the mail did not go out; Resend retries. */
+  delivery?: "sent" | "queued_failed";
+}
+
+/** `GET /auth/invitations/{token}` — all the token reveals. */
+export interface InvitationLookup {
+  workspace_name: string;
+  inviter_display: string;
+  role: string;
+  email_masked: string;
+  expires_at: string;
+  note_title: string | null;
+}
+
+/** `GET /auth/invitations` row — the signed-in person's own open invitations. */
+export interface MyInvitation {
+  id: string;
+  workspace_name: string;
+  inviter_display: string;
+  role: string;
+  expires_at: string;
+}
+
+/** Accepting moves the session there; `token` is that workspace's access token. */
+export interface InvitationAccepted {
+  tenant_id: string;
+  role: string;
+  token: WorkspaceToken;
+}
+
+/** `POST /tenants/{id}/dissolve` 202. */
+export interface DissolveResult {
+  status: "dissolved";
+  restore_until: string;
 }
 
 // ── note-service: templates ────────────────────────────────────────────
@@ -349,6 +444,10 @@ export interface NoteEnvelope {
   shared_with_ids?: string[];
   /** Set only on an oversight read (`?purpose=`), so the page can say whose note it is. */
   primary_author_name?: string | null;
+  /** What the caller may do with this note (W3). Absent from an older server. */
+  my_level?: NoteLevel;
+  /** False: no Transcript tab, and `source_job_id` is null. Absent from an older server. */
+  can_read_transcript?: boolean;
   content?: NoteContent | null;
   section_labels?: SectionLabel[] | null;
 }
@@ -356,6 +455,32 @@ export interface NoteEnvelope {
 // ── note-service: sharing ───────────────────────────────────────────────
 
 export type NoteVisibility = "private" | "workspace";
+
+/** One person's access to one note; `manage` = edit + share + visibility. */
+export type NoteLevel = "manage" | "edit" | "comment" | "view";
+
+/** The roles an author can give a person on a note. */
+export type CollaboratorRole = "view" | "comment" | "edit";
+
+/** A note's reader, and why they can open it (`GET /sharing` v2). */
+export interface NotePerson {
+  sub: string;
+  email: string;
+  display_name: string;
+  level: NoteLevel;
+  source: "author" | "collaborator" | "workspace_role";
+  membership_role: string;
+  /** True only for a collaborator row the caller manages. */
+  can_change: boolean;
+}
+
+/** A note invitation to someone with no membership yet (manage only). */
+export interface PendingNoteInvitation {
+  invitation_id: string;
+  email_masked: string;
+  note_role: CollaboratorRole;
+  expires_at: string;
+}
 
 /** Required on a non-author read (422 `missing-read-purpose` otherwise); audited. */
 export type ReadPurpose = "review" | "audit" | "legal" | "export" | "collaboration";
@@ -439,6 +564,44 @@ export interface SharingView {
   links: LinkView[];
   /** The workspace's effective sharing rules. */
   constraints: SharingConstraints;
+  // W3 — absent from an older server.
+  my_level?: NoteLevel;
+  people?: NotePerson[];
+  pending?: PendingNoteInvitation[];
+  /** "Include transcript": view/comment collaborators and guests may read it. */
+  transcript_shared?: boolean;
+  workspace_kind?: "personal" | "team";
+}
+
+/** `POST /v1/notes/{id}/share` for a member. A non-member is a 404 `not_a_member` with `can_invite`. */
+export interface ShareGranted {
+  kind: "granted";
+  sharing: SharingView;
+}
+
+/** One comment on a note, anchored to the note, a section or an item line. */
+export interface NoteComment {
+  id: string;
+  author: { sub: string; display_name: string };
+  anchor_kind: CommentAnchorKind;
+  anchor_key: string | null;
+  /** False when the section or line it was left on is gone. */
+  anchor_present: boolean;
+  body: string;
+  created_at: string;
+  edited_at: string | null;
+  resolved_at: string | null;
+  resolved_by_display: string | null;
+  can_edit: boolean;
+  can_resolve: boolean;
+  can_delete: boolean;
+}
+
+export type CommentAnchorKind = "note" | "section" | "item";
+
+export interface PresenceViewer {
+  sub: string;
+  display_name: string;
 }
 
 export interface SharingConstraints {
@@ -472,6 +635,8 @@ export interface TenantProfile {
   has_logo?: boolean;
   contact_email: string;
   plan?: string;
+  /** `POST /tenants` (short form) answers with `team`. */
+  kind?: string;
 }
 
 /** One recipient of a server-sent share mail, and what became of it. */
@@ -488,6 +653,8 @@ export interface ShareEmailResponse {
   results: ShareEmailOutcome[];
   /** True when this send minted the public link, so the sheet can say so. */
   public_link_created: boolean;
+  /** `mode: "invite"`: addresses with no membership, to invite through auth-service. */
+  invite_needed?: string[];
 }
 
 /** What an anonymous reader gets from a public link. */
@@ -617,6 +784,8 @@ export interface NoteVersionSummary {
   version_number: number;
   parent_version_id: string | null;
   created_by: string;
+  /** Who saved it, as people see them; null when the server could not name them. */
+  created_by_display?: string | null;
   created_at: string;
   is_amendment: boolean;
   amendment_type: NoteAmendmentType | null;
@@ -642,6 +811,9 @@ export interface SearchHit {
   visibility?: NoteVisibility | null;
   shared_with_count?: number | null;
   has_public_link?: boolean | null;
+  /** W3: the caller's level and how many people it is shared with. */
+  my_level?: NoteLevel | null;
+  collaborator_count?: number | null;
   /** Live recipient disputes, for the "1 disputed" marker. */
   open_disputes?: number;
 }

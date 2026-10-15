@@ -37,8 +37,13 @@ struct RootView: View {
                 MainView()
             }
         }
-        .sheet(item: $app.reauth) { prompt in
+        // Settings and the invite sheet present their own (one sheet cannot present over another).
+        .sheet(item: Binding(get: { app.settingsPresented || app.invitePresented ? nil : app.reauth },
+                             set: { app.reauth = $0 })) { prompt in
             ReauthSheet(prompt: prompt)
+        }
+        .sheet(item: $app.invitation) { landing in
+            InviteLandingSheet(landing: landing)
         }
         .onOpenURL { url in app.handle(url) }
         .preferredColorScheme(app.themePref.colorScheme)
@@ -55,6 +60,7 @@ struct RootView: View {
             app.refreshPending()
             Task {
                 await app.refreshWorkspaces()
+                await app.refreshMyInvitations()
                 await app.refreshRecents()
                 await app.refreshNotes()
                 await app.refreshSpaces()

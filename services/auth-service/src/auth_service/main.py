@@ -31,6 +31,7 @@ from .routers import (
     credentials,
     email_code,
     health,
+    invitations,
     leads,
     login,
     me,
@@ -212,6 +213,8 @@ def create_app() -> FastAPI:
         # Native only: under Keycloak it is the token endpoint for devices/services.
         app.include_router(oauth.router)
         app.include_router(credentials.router)
+        app.include_router(invitations.manage_router)
+        app.include_router(invitations.invitee_router)
     elif settings.idp_mode == "dual":
         # ADR-0047: both session stores are live, so mounting ORDER is the routing
         # (first matching route wins):
@@ -227,6 +230,8 @@ def create_app() -> FastAPI:
         app.include_router(signup.router)
         # After password.router so /auth/sessions resolves to Keycloak's list.
         app.include_router(account.router)
+        app.include_router(invitations.manage_router)
+        app.include_router(invitations.invitee_router)
     else:
         app.include_router(mfa.router)
         app.include_router(login.router)

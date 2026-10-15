@@ -24,6 +24,19 @@ cta_clicks = _meter.create_counter(
     description="Clicks on the shared page's product CTA",
     unit="1",
 )
+# W1 baseline for W2/W3 (`share.blocked_no_account`): a share by e-mail refused because
+# nobody in this workspace has the address. Counts only — never the address.
+# W3: per-note grants by role; `kind` granted (member) | invited (guest, via auth-service).
+share_total = _meter.create_counter(
+    "mdx_note_share_total",
+    description="Per-note grants (labels: role, kind)",
+    unit="1",
+)
+share_blocked_no_account = _meter.create_counter(
+    "mdx_share_blocked_no_account_total",
+    description="Shares to a person refused because they are not a workspace member",
+    unit="1",
+)
 rate_limited = _meter.create_counter(
     "mdx_shared_rate_limit_total",
     description="429s on /v1/shared/* (label: scope)",

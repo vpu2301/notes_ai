@@ -720,13 +720,6 @@
           "0"
         ]
       },
-      "credentials": [
-        {
-          "type": "password",
-          "value": "VOVAp1987@",
-          "temporary": false
-        }
-      ],
       "realmRoles": [
         "tenant_admin",
         "member",

@@ -148,7 +148,7 @@ async def _write(
 
 
 async def _editable(conn: object, *, note_id: UUID, claims: Claims) -> object:
-    note = access.require_manage(
+    note = access.require_edit(
         await repo.lock_note_for_update(conn, note_id=note_id),
         claims,  # type: ignore[arg-type]
     )

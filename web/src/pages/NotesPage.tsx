@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { messageFor } from "../lib/errorCopy";
-import { deleteNote, searchNotes } from "../api/notes";
+import { deleteNote, searchNotes, type SearchScope } from "../api/notes";
 import type { SearchHit, SharingView } from "../api/types";
-import { AccessMenu, noteAccess, withSharing } from "../components/AccessBadge";
+import { AccessMenu, LevelBadge, noteAccess, withSharing } from "../components/AccessBadge";
 import { useAuthOptional } from "../auth/AuthContext";
 import { ComingUp } from "../components/ComingUp";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -12,6 +12,8 @@ import { EmptyState } from "../components/EmptyState";
 import { AlertIcon, FolderIcon, LayersIcon, MicIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon, WaveformIcon } from "../components/icons";
 import { Menu, type MenuItem } from "../components/Menu";
 import { SearchField } from "../components/SearchField";
+import { Segmented } from "../components/Segmented";
+import { canManageNote } from "../lib/noteLevel";
 import { SkeletonRow } from "../components/Skeleton";
 import { Snippet } from "../components/Snippet";
 import { StatusBadge } from "../components/StatusBadge";
@@ -21,6 +23,12 @@ import { relativeTime } from "../lib/time";
 import { useCaptures, type Capture } from "../lib/useCaptures";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { useSpaces } from "../spaces/SpacesContext";
+
+const SCOPES: { value: SearchScope; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "mine", label: "Mine" },
+  { value: "shared_with_me", label: "Shared with me" },
+];
 
 /** In-progress captures shown before "Show N more" — the notes come first. */
 const CAPTURES_SHOWN = 3;
@@ -122,17 +130,22 @@ function NoteRow({
   hit,
   spaceName,
   menuItems,
+  guest,
   onOpen,
   onAccessChange,
 }: {
   hit: SearchHit;
+  /** The reader is a guest in this workspace: the chip says so. */
+  guest: boolean;
   /** Shown as a chip when the list is not already narrowed to that space. */
   spaceName?: string;
   menuItems: MenuItem[];
   onOpen: () => void;
   onAccessChange: (view: SharingView) => void;
 }) {
-  const access = noteAccess(hit);
+  // Changing who can open it is the manager's; a level chip says what anyone else may do.
+  const manages = canManageNote(hit.my_level);
+  const access = manages ? noteAccess(hit) : null;
   return (
     <div
       className="row click"
@@ -152,6 +165,7 @@ function NoteRow({
         <span className="row-1">
           <span className="row-name">{hit.title || "Untitled note"}</span>
           {hit.status === "cancelled" && <StatusBadge status={hit.status} />}
+          {hit.my_level && !manages && <LevelBadge level={hit.my_level} guest={guest} />}
           {spaceName && (
             <span className="chip space-chip">
               <FolderIcon size={11} /> {spaceName}
@@ -167,7 +181,7 @@ function NoteRow({
       {access && <AccessMenu hit={hit} access={access} onChange={onAccessChange} />}
       <span className="row-time">{relativeTime(hit.updated_at)}</span>
       <span className="row-side" onClick={(e) => e.stopPropagation()}>
-        <Menu anchored items={menuItems} label={`Actions for “${hit.title || "Untitled note"}”`} />
+        {menuItems.length > 0 && <Menu anchored items={menuItems} label={`Actions for “${hit.title || "Untitled note"}”`} />}
       </span>
     </div>
   );
@@ -199,7 +213,12 @@ export function NotesPage() {
   const [trashError, setTrashError] = useState<string | null>(null);
   const space = spaces.find((s) => s.id === spaceId);
   // First word of a real name, never an e-mail.
-  const realName = useAuthOptional()?.identity?.display_name?.trim() ?? "";
+  const auth = useAuthOptional();
+  const realName = auth?.identity?.display_name?.trim() ?? "";
+  // A guest sees only what was shared with them, and cannot start anything here.
+  const guest = auth?.activeRole === "guest";
+  const [scopePick, setScopePick] = useState<SearchScope>("all");
+  const scope: SearchScope = guest ? "shared_with_me" : scopePick;
   const firstName = realName.includes("@") ? "" : realName.split(/\s+/)[0];
   useDocumentTitle(space ? space.name : "Notes");
 
@@ -217,12 +236,12 @@ export function NotesPage() {
       setLoadError(null);
       try {
         const limit = spaceId ? 100 : 25;
-        const res = await searchNotes({ q: query, limit, signal: controller.signal });
+        const res = await searchNotes({ q: query, limit, scope, signal: controller.signal });
         let page = res.hits;
         let cursor = res.next_cursor;
         // The space filter is client-side: pull more pages (bounded) so the count is honest.
         for (let i = 0; spaceId && cursor && i < SPACE_PAGES; i++) {
-          const more = await searchNotes({ q: query, limit, cursor, signal: controller.signal });
+          const more = await searchNotes({ q: query, limit, cursor, scope, signal: controller.signal });
           page = [...page, ...more.hits];
           cursor = more.next_cursor;
         }
@@ -238,7 +257,7 @@ export function NotesPage() {
         if (!controller.signal.aborted) setLoading(false);
       }
     },
-    [spaceId],
+    [spaceId, scope],
   );
 
   useEffect(() => {
@@ -254,7 +273,7 @@ export function NotesPage() {
     if (!nextCursor) return;
     setLoadingMore(true);
     try {
-      const res = await searchNotes({ q: debouncedQ, limit: spaceId ? 100 : 25, cursor: nextCursor });
+      const res = await searchNotes({ q: debouncedQ, limit: spaceId ? 100 : 25, cursor: nextCursor, scope });
       setHits((prev) => [...(prev ?? []), ...res.hits]);
       setNextCursor(res.next_cursor);
     } catch (err) {
@@ -307,11 +326,12 @@ export function NotesPage() {
   const menuItems = useCallback(
     (hit: SearchHit): MenuItem[] => {
       const current = spaceOf[hit.note_id];
-      const items: MenuItem[] = spaces.map((s) => ({
+      const items: MenuItem[] = (guest ? [] : spaces).map((s) => ({
         label: current === s.id ? `Remove from ${s.name}` : `Move to ${s.name}`,
         icon: <FolderIcon size={14} />,
         onClick: () => void file(hit.note_id, current === s.id ? null : s.id),
       }));
+      if (!canManageNote(hit.my_level)) return items;
       items.push({
         label: "Move to trash",
         icon: <TrashIcon size={14} />,
@@ -324,7 +344,7 @@ export function NotesPage() {
       });
       return items;
     },
-    [spaces, spaceOf, file],
+    [spaces, spaceOf, file, guest],
   );
 
   const onTrash = async () => {
@@ -351,7 +371,7 @@ export function NotesPage() {
 
   /** Known to hold anything; deliberately false while `hits` is null so "unknown" never renders as "empty". */
   const hasSomething = (hits?.length ?? 0) > 0 || (captures?.length ?? 0) > 0;
-  const firstUse = !searching && !spaceId && !hasSomething && !loadError;
+  const firstUse = !searching && !spaceId && !hasSomething && !loadError && scope === "all";
 
   return (
     <div className="home">
@@ -371,26 +391,35 @@ export function NotesPage() {
           status={searching && !loading && hits ? resultCount : undefined}
         />
         {/* Named as a group so it is distinguishable from the sidebar's "New meeting". */}
-        <div className="home-start" role="group" aria-label="Start a note">
-          <button ref={newMeetingRef} className="btn accent" onClick={() => navigate("/meeting/new")} title="New meeting (N)">
-            <MicIcon size={14} /> New meeting
-          </button>
-          <Menu
-            anchored
-            label="More ways to start"
-            triggerClassName="icon-btn home-more"
-            items={[
-              { label: makingBlank ? "Creating…" : "Blank note", icon: <PlusIcon size={14} />, onClick: () => void onBlank(), disabled: makingBlank },
-              { label: "Upload a recording", icon: <UploadIcon size={14} />, onClick: () => navigate("/meeting/new?mode=upload") },
-              { label: "New from template…", icon: <LayersIcon size={14} />, onClick: () => navigate("/new") },
-            ]}
-          />
-        </div>
+        {!guest && (
+          <div className="home-start" role="group" aria-label="Start a note">
+            <button ref={newMeetingRef} className="btn accent" onClick={() => navigate("/meeting/new")} title="New meeting (N)">
+              <MicIcon size={14} /> New meeting
+            </button>
+            <Menu
+              anchored
+              label="More ways to start"
+              triggerClassName="icon-btn home-more"
+              items={[
+                { label: makingBlank ? "Creating…" : "Blank note", icon: <PlusIcon size={14} />, onClick: () => void onBlank(), disabled: makingBlank },
+                { label: "Upload a recording", icon: <UploadIcon size={14} />, onClick: () => navigate("/meeting/new?mode=upload") },
+                { label: "New from template…", icon: <LayersIcon size={14} />, onClick: () => navigate("/new") },
+              ]}
+            />
+          </div>
+        )}
       </div>
 
-      {!searching && !spaceId && <ComingUp invite={hasSomething} />}
+      {!searching && !spaceId && !guest && <ComingUp invite={hasSomething} />}
 
-      {!spaceId && captures && captures.length > 0 && (
+      {/* A guest's list is "Shared with me" only: the server returns nothing else. */}
+      {!spaceId && !guest && (
+        <div className="home-scope">
+          <Segmented label="Show notes" options={SCOPES} value={scope} onChange={setScopePick} />
+        </div>
+      )}
+
+      {!spaceId && !guest && captures && captures.length > 0 && (
         <section className="home-group" aria-label="In progress">
           <h2 className="home-group-h">
             In progress <span className="home-group-count">{captures.length}</span>
@@ -476,6 +505,18 @@ export function NotesPage() {
         </section>
       )}
 
+      {empty && !searching && !spaceId && scope !== "all" && (
+        <EmptyState
+          icon={<FolderIcon size={20} />}
+          title={scope === "mine" ? "No notes of your own yet" : "Nothing shared with you yet"}
+          message={
+            scope === "mine"
+              ? "Notes you write show up here."
+              : "Notes other people share with you, or open to the whole workspace, show up here."
+          }
+        />
+      )}
+
       {empty && searching && (
         <EmptyState
           icon={<SearchIcon size={20} />}
@@ -500,6 +541,7 @@ export function NotesPage() {
                   hit={hit}
                   spaceName={spaceId ? undefined : spaces.find((s) => s.id === spaceOf[hit.note_id])?.name}
                   menuItems={menuItems(hit)}
+                  guest={guest}
                   onOpen={() => navigate(`/notes/${hit.note_id}`)}
                   onAccessChange={(view) =>
                     setHits((prev) => prev?.map((h) => (h.note_id === view.note_id ? withSharing(h, view) : h)) ?? prev)

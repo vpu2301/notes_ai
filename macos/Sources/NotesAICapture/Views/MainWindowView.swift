@@ -44,6 +44,10 @@ struct MainWindowView: View {
                         WorkspaceNoticeBanner(text: notice)
                         DSDivider()
                     }
+                    if let notice = app.membershipNotice {
+                        WorkspaceNoticeBanner(text: notice, good: true)
+                        DSDivider()
+                    }
                     HStack(spacing: 0) {
                         SidebarView()
                         Rectangle().fill(DS.line).frame(width: DS.hairline).frame(maxHeight: .infinity)
@@ -65,6 +69,16 @@ struct MainWindowView: View {
             InviteView(onClose: { app.invitePresented = false })
                 .frame(width: 540, height: 560)
         }
+        .sheet(isPresented: $app.newWorkspacePresented) {
+            NewWorkspaceSheet(onClose: { app.newWorkspacePresented = false })
+        }
+        .sheet(isPresented: $app.invitationsPresented) {
+            InvitationsSheet(onClose: { app.invitationsPresented = false })
+                .frame(width: 480, height: 420)
+        }
+        .sheet(item: $app.invitation) { landing in
+            InviteLandingSheet(landing: landing)
+        }
         .sheet(isPresented: $app.templatePickerPresented) {
             TemplatePickerSheet(onClose: { app.templatePickerPresented = false })
                 .frame(width: 640, height: 520)
@@ -76,7 +90,9 @@ struct MainWindowView: View {
         } message: {
             Text(app.actionNotice ?? "")
         }
-        .sheet(item: $app.reauth) { prompt in
+        // Settings and the invite sheet present their own (a sheet cannot present over another here).
+        .sheet(item: Binding(get: { app.settingsPresented || app.invitePresented ? nil : app.reauth },
+                             set: { app.reauth = $0 })) { prompt in
             ReauthSheet(prompt: prompt)
         }
         // The call-audio notice. Settings shows its own copy while open (a sheet cannot present over another here).

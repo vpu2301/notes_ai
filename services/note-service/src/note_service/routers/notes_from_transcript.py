@@ -26,8 +26,9 @@ from template_models import FieldType, TemplateDefinition
 from .. import audit_kinds
 from ..config import settings
 from ..deps import get_state, requires
-from ..domain import code_sequence, generation_service, template_match
+from ..domain import access, code_sequence, generation_service, template_match
 from ..domain import notes_repository as repo
+from ..domain import visibility as visibility_defaults
 from ..domain.field_extraction_client import extract_fields
 from ..domain.repository import get_template
 from ..notifications import emit_budget_reached
@@ -381,6 +382,9 @@ async def create_note_from_transcript(
                 content=content,
                 source_asr_job_id=body.asr_job_id,
                 title_source="user" if body.title.strip() else "default",
+                visibility=await visibility_defaults.default_for_new_note(
+                    conn, tenant_id=claims.tid, template_id=template_id
+                ),
             )
         except asyncpg.UniqueViolationError:
             # Concurrent double-assign lost the race on the partial index.
@@ -485,6 +489,14 @@ async def notes_by_source_job(
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         rows = await repo.fetch_notes_by_source_jobs(conn, asr_job_ids=job_ids)
+        # W3: only notes the caller may see (a private note is not revealed by its job id).
+        visible = {
+            row["id"]
+            for row in rows
+            if (note := await repo.fetch_note(conn, note_id=row["id"])) is not None
+            and access.can_view(note, claims)
+        }
+        rows = [row for row in rows if row["id"] in visible]
     return [
         SourceJobLink(
             asr_job_id=row["source_asr_job_id"],

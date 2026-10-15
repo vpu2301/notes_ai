@@ -5,8 +5,9 @@ Fire-and-forget: a note write must not fail because the bus is down (ADR-0029).
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 from uuid import UUID, uuid4
 
 from notification_events import Category, build_event, publish_event
@@ -14,6 +15,9 @@ from notification_events import Category, build_event, publish_event
 from .config import settings
 
 logger = logging.getLogger(__name__)
+
+# One `note.commented` per note per recipient per window (W3 B-10).
+COMMENT_NOTIFY_DEBOUNCE_S: Final = 300
 
 
 async def emit_note_event(
@@ -98,3 +102,75 @@ async def emit_budget_reached(
         ),
     )
     return True
+
+
+async def emit_note_commented(
+    redis: Any,
+    *,
+    tenant_id: UUID,
+    note_id: UUID,
+    note_code: str,
+    actor_user_id: UUID,
+    recipients: Iterable[UUID],
+    anchor_kind: str,
+) -> list[UUID]:
+    """Tell ``recipients`` (minus the actor) that the note has a new comment, at most once
+    per note per recipient per ``COMMENT_NOTIFY_DEBOUNCE_S``. Content-free: ``note_code`` and
+    ``anchor_kind`` only. Returns who was told. A Redis error skips the ping (a lost ping
+    is cheaper than a flood)."""
+    if not settings.notifications_enabled:
+        return []
+    told: list[UUID] = []
+    for sub in dict.fromkeys(recipients):
+        if sub == actor_user_id:
+            continue
+        try:
+            first = await redis.set(
+                f"note:comment-notify:{note_id}:{sub}",
+                b"1",
+                nx=True,
+                ex=COMMENT_NOTIFY_DEBOUNCE_S,
+            )
+        except Exception as exc:  # noqa: BLE001 — a notification is not worth a failed write
+            logger.warning(
+                "note.comment_notify_debounce_error", extra={"error_class": type(exc).__name__}
+            )
+            first = False
+        if first:
+            told.append(sub)
+    if told:
+        await emit_note_event(
+            redis,
+            category=Category.NOTE_COMMENTED,
+            tenant_id=tenant_id,
+            note_id=note_id,
+            note_code=note_code,
+            actor_user_id=actor_user_id,
+            co_author_ids=tuple(told),
+            extra_payload={"anchor_kind": anchor_kind},
+        )
+    return told
+
+
+async def emit_note_access_changed(
+    redis: Any,
+    *,
+    tenant_id: UUID,
+    note_id: UUID,
+    note_code: str,
+    actor_user_id: UUID,
+    user_sub: UUID,
+    role: str | None,
+) -> None:
+    """Tell ``user_sub`` their role on a note changed (``role`` = the new
+    view|comment|edit) or was revoked (``role=None``). Content-free; nobody else hears."""
+    await emit_note_event(
+        redis,
+        category=Category.NOTE_ACCESS_CHANGED,
+        tenant_id=tenant_id,
+        note_id=note_id,
+        note_code=note_code,
+        actor_user_id=actor_user_id,
+        primary_author_id=user_sub,
+        extra_payload={"role": role} if role else None,
+    )

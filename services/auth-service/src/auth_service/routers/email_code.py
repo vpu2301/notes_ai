@@ -240,7 +240,7 @@ async def verify(body: VerifyRequest, request: Request, response: Response) -> A
         ),
         memberships=[_membership_out(m) for m in result.memberships],
         is_new_identity=result.is_new_identity,
-    )
+    ).model_copy(update={"joined_tenant_ids": [str(t) for t in result.joined_tenant_ids]})
 
 
 async def _write_success_audit(state: Any, result: VerifyResult) -> None:
@@ -248,13 +248,26 @@ async def _write_success_audit(state: Any, result: VerifyResult) -> None:
     tenant_id = result.session.tenant_id
     identity_id = result.identity.id
     if result.is_new_identity:
-        # On the NEW personal tenant: the first line of that workspace's history.
+        # On the NEW personal tenant (memberships[0]; the session may have landed in an
+        # invited workspace instead): the first line of that workspace's history.
+        personal_id = result.memberships[0].tenant_id
         await _audit(
             state,
-            tenant_id=tenant_id,
+            tenant_id=personal_id,
             kind=audit_kinds.AUTH_SIGNUP,
-            payload={"identity_id": str(identity_id), "tenant_id": str(tenant_id)},
+            payload={"identity_id": str(identity_id), "tenant_id": str(personal_id)},
             severity=Severity.INFO,
+            actor_sub=identity_id,
+            target_id=identity_id,
+        )
+    for joined in result.joined_tenant_ids:
+        # W2: invitations accepted at sign-up, on the workspace that was joined.
+        await _audit(
+            state,
+            tenant_id=joined,
+            kind=audit_kinds.TENANT_INVITATION_ACCEPTED,
+            payload={"via": "signup", "identity_id": str(identity_id)},
+            severity=Severity.SEC,
             actor_sub=identity_id,
             target_id=identity_id,
         )

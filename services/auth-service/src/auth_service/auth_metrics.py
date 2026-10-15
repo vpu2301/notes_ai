@@ -29,6 +29,46 @@ token_switch_counter = _meter.create_counter(
     unit="1",
 )
 
+# W1: activations only (a borrowed token is not a switch); labelled by outcome, not tenant.
+workspace_switch_counter = _meter.create_counter(
+    "mdx_auth_workspace_switch_total",
+    description="Workspace switches (POST /auth/token activate=true) by outcome",
+    unit="1",
+)
+personal_healed_counter = _meter.create_counter(
+    "mdx_auth_personal_healed_total",
+    description="Personal workspaces created for an identity that had none",
+    unit="1",
+)
+# The W4 gate for dropping `db_user`: who still gets it, and from which source.
+me_legacy_db_user_counter = _meter.create_counter(
+    "mdx_auth_me_legacy_db_user_total",
+    description="GET /auth/me responses carrying db_user (labels: client, source)",
+    unit="1",
+)
+
+# W2: the invitation funnel. `has_account` is true|false|unknown, never an address.
+invitation_counter = _meter.create_counter(
+    "mdx_auth_invitation_total",
+    description="Workspace invitations by action (labels: action, has_account)",
+    unit="1",
+)
+workspace_created_counter = _meter.create_counter(
+    "mdx_auth_workspace_created_total",
+    description="Team workspaces created (label: source)",
+    unit="1",
+)
+workspace_dissolved_counter = _meter.create_counter(
+    "mdx_auth_workspace_dissolved_total",
+    description="Team workspaces dissolved by their owner",
+    unit="1",
+)
+member_left_counter = _meter.create_counter(
+    "mdx_auth_member_left_total",
+    description="Members who left a workspace themselves",
+    unit="1",
+)
+
 # Leads from the shared page's CTA (POST /auth/leads).
 leads_captured_counter = _meter.create_counter(
     "mdx_leads_captured_total",

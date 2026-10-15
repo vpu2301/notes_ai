@@ -58,7 +58,7 @@ async def cancel_note(
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         # A private note the caller was not given is a 404 (0016).
-        row = access.require_view(await repo.lock_note_for_update(conn, note_id=note_id), claims)
+        row = access.require_manage(await repo.lock_note_for_update(conn, note_id=note_id), claims)
         try:
             await _sm.cancel(conn, note_id=note_id, from_status=row.status, reason=body.reason)
         except IllegalTransitionError as exc:

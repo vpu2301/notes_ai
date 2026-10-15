@@ -3,6 +3,8 @@ import SwiftUI
 /// "Action items" above the sections: a disclosure with one row per item; a click opens the responses in a popover.
 struct ActionItemsSection: View {
     @ObservedObject var model: NoteViewModel
+    /// "Comment…" on a row (by `item_key`); nil when the person cannot comment.
+    var comment: ((String) -> Void)? = nil
     @State private var expanded = true
     @State private var openItemId: String?
 
@@ -16,6 +18,11 @@ struct ActionItemsSection: View {
                             set: { if !$0 { openItemId = nil } }
                         ), arrowEdge: .bottom) {
                             ItemDetailPopover(model: model, itemId: item.id)
+                        }
+                        .contextMenu {
+                            if let comment {
+                                Button("Comment…") { comment(item.itemKey) }
+                            }
                         }
                     if item.id != model.items.last?.id { DSDivider() }
                 }
@@ -116,8 +123,10 @@ struct ItemDetailPopover: View {
                                 Text(response.linkLabel.isEmpty ? "A recipient" : response.linkLabel)
                                     .font(.ds(12.5, .medium)).foregroundStyle(DS.text1)
                                 Spacer()
-                                Button("Clear") { Task { await model.clear(response) } }
-                                    .buttonStyle(DSButtonStyle(kind: .secondary, size: 11, height: 22))
+                                if model.editable {
+                                    Button("Clear") { Task { await model.clear(response) } }
+                                        .buttonStyle(DSButtonStyle(kind: .secondary, size: 11, height: 22))
+                                }
                             }
                             if let comment = response.comment {
                                 // Recipient-authored: shown as text, nothing else.
@@ -132,11 +141,13 @@ struct ItemDetailPopover: View {
                 if let error = model.actionError {
                     DSNotice(tone: .danger, symbol: "exclamationmark.triangle.fill", text: error)
                 }
-                DSDivider()
-                HStack {
-                    Spacer()
-                    Button(item.status == .done ? "Reopen" : "Mark done") { Task { await model.markDone(item) } }
-                        .buttonStyle(DSButtonStyle(kind: .primary, height: 26))
+                if model.editable {
+                    DSDivider()
+                    HStack {
+                        Spacer()
+                        Button(item.status == .done ? "Reopen" : "Mark done") { Task { await model.markDone(item) } }
+                            .buttonStyle(DSButtonStyle(kind: .primary, height: 26))
+                    }
                 }
             }
         }

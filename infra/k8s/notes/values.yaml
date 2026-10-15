@@ -112,7 +112,11 @@ apps:
       KEYCLOAK_BASE_URL: http://keycloak:8080
       KEYCLOAK_REALM: notes
       REDIS_URL: redis://redis:6379/0
-    secretEnv: [mdx-keycloak-clients]
+      # W1 (ADR-0069): e-mail-code sign-in + workspace switching. `iss` must match the
+      # native entry of commonEnv.AUTH_ISSUERS_JSON.
+      MDX_IDP_MODE: dual
+      AUTH_ISSUER_URL: http://auth-service:8000
+    secretEnv: [mdx-keycloak-clients, mdx-auth-signing]   # mdx-auth-signing: AUTH_SIGNING_KEYS_JSON
     hpa: {enabled: false, minReplicas: 2, maxReplicas: 6, cpuUtilisation: 70}
 
   asr-service:
@@ -290,6 +294,7 @@ jobs:
   migrate:
     image: notes-ai-migrate:latest
     databaseUrl: postgresql://postgres:postgres@postgres:5432/notes
+    mdxEnv: staging              # prod: `prod` skips infra/postgres/migrations/DEV_ONLY
   seed:
     enabled: true                # staging only — prod NEVER seeds dev users
     image: notes-ai-seed:latest

@@ -263,3 +263,178 @@ test("the transcript's speaker controls hold AA contrast in the dark theme too",
   await expect(page.getByRole("menu")).toBeVisible();
   await scanTranscript(page, "transcript, dark (move menu open)");
 });
+
+/**
+ * The collaboration surfaces (work order phases 2–3) against a mocked backend: the share dialog,
+ * the comments panel, the members page and the invite landing, in light and dark.
+ */
+const TEAM_ID = "33333333-3333-4333-8333-333333333333";
+const ANNA_ID = "55555555-5555-4555-8555-555555555555";
+
+function collabBody(method: string, path: string): unknown {
+  if (path === "/auth/refresh") return { access_token: "e2e-token", expires_in: 3600, token_type: "Bearer", tenant_id: TEAM_ID };
+  if (path === "/auth/me") {
+    return {
+      claims: { sub: "u-1", tid: TEAM_ID, roles: ["owner"] },
+      db_user: null,
+      identity: {
+        id: "u-1",
+        email: "axe@example.test",
+        display_name: "Axe Test",
+        mfa_enabled: false,
+        has_password: false,
+        status: "active",
+        created_at: "2025-01-01T00:00:00Z",
+      },
+      memberships: [{ tenant_id: TEAM_ID, name: "Sunrise Studio", kind: "team", role: "owner", status: "active" }],
+    };
+  }
+  if (path === `/v1/notes/${NOTE_ID}`) {
+    return { ...(mockBody(method, path) as object), source_job_id: null, my_level: "manage", can_read_transcript: true };
+  }
+  if (path.endsWith("/sharing")) {
+    return {
+      note_id: NOTE_ID,
+      visibility: "private",
+      can_manage: true,
+      can_delete: true,
+      shared_with: [],
+      public_link: null,
+      links: [],
+      my_level: "manage",
+      workspace_kind: "team",
+      transcript_shared: false,
+      people: [
+        { sub: "u-1", email: "axe@example.test", display_name: "Axe Test", level: "manage", source: "author", membership_role: "owner", can_change: false },
+        { sub: ANNA_ID, email: "anna@example.test", display_name: "Anna", level: "comment", source: "collaborator", membership_role: "member", can_change: true },
+      ],
+      pending: [{ invitation_id: "inv-1", email_masked: "t•••@client.test", note_role: "view", expires_at: NOW }],
+    };
+  }
+  if (path.endsWith("/comments")) {
+    return {
+      items: [
+        {
+          id: "c-1",
+          author: { sub: ANNA_ID, display_name: "Anna" },
+          anchor_kind: "note",
+          anchor_key: null,
+          anchor_present: true,
+          body: "Is this final?",
+          created_at: NOW,
+          edited_at: null,
+          resolved_at: null,
+          resolved_by_display: null,
+          can_edit: false,
+          can_resolve: true,
+          can_delete: false,
+        },
+      ],
+    };
+  }
+  if (path.endsWith("/presence")) return method === "GET" ? { viewers: [] } : {};
+  if (path === `/tenants/${TEAM_ID}/members`) {
+    return {
+      items: [
+        { user_sub: "u-1", role: "owner", status: "active", email: "axe@example.test", display_name: "Axe Test", platform_role: null, created_at: NOW, updated_at: NOW },
+        { user_sub: ANNA_ID, role: "member", status: "active", email: "anna@example.test", display_name: "Anna", platform_role: null, created_at: NOW, updated_at: NOW },
+      ],
+      seat_meter: { active: 2, limit: 3 },
+    };
+  }
+  if (path === `/tenants/${TEAM_ID}/invitations`) {
+    return {
+      items: [
+        { id: "inv-1", email: "tom@client.test", role: "member", status: "pending", expires_at: "2026-12-01T00:00:00Z", sent_count: 1, last_sent_at: NOW, invited_by_display: "Axe Test", created_at: NOW, delivery: "sent" },
+      ],
+    };
+  }
+  if (path === "/auth/invitations/tok") {
+    return { workspace_name: "Sunrise Studio", inviter_display: "Anna", role: "member", email_masked: "t•••@client.test", expires_at: "2026-12-01T00:00:00Z", note_title: null };
+  }
+  if (path === "/auth/invitations") return { items: [] };
+  return mockBody(method, path);
+}
+
+async function mockCollabBackend(page: import("@playwright/test").Page, signedIn = true) {
+  await page.route(ORIGINS, async (route) => {
+    const req = route.request();
+    const cors = {
+      "access-control-allow-origin": "http://localhost:5173",
+      "access-control-allow-credentials": "true",
+      "access-control-allow-headers": "authorization, content-type, x-client-type, x-request-id",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+    };
+    if (req.method() === "OPTIONS") {
+      await route.fulfill({ status: 204, headers: cors });
+      return;
+    }
+    const path = new URL(req.url()).pathname;
+    if (!signedIn && path === "/auth/refresh") {
+      await route.fulfill({ status: 401, headers: cors, contentType: "application/json", body: JSON.stringify({ code: "no_refresh_token" }) });
+      return;
+    }
+    await route.fulfill({ status: 200, headers: cors, contentType: "application/json", body: JSON.stringify(collabBody(req.method(), path)) });
+  });
+}
+
+for (const theme of ["light", "dark"] as const) {
+  test(`share dialog and comments panel: keyboard path and no critical failures (${theme})`, async ({ page }) => {
+    await page.addInitScript((t) => localStorage.setItem("notesai.theme", t), theme);
+    await mockCollabBackend(page);
+    await page.goto(`/notes/${NOTE_ID}`);
+
+    await page.getByRole("button", { name: /more actions/i }).click();
+    await page.getByRole("menuitem", { name: /share…/i }).click();
+    const dialog = page.getByRole("dialog", { name: "Share note" });
+    await expect(dialog.getByLabel("Who has access")).toBeVisible();
+    await scan(page, `share dialog (${theme})`);
+
+    // Chips → role → message → Share, by Tab alone.
+    const box = dialog.getByLabel("Invite people");
+    await box.focus();
+    await page.keyboard.type("tom@client.test ");
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByRole("button", { name: "Role", exact: true })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByLabel("Invitation message")).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByRole("button", { name: "Share", exact: true })).toBeFocused();
+    await scan(page, `share dialog, composing (${theme})`);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+
+    await page.getByRole("button", { name: /^comments/i }).click();
+    const panel = page.getByRole("complementary", { name: "Comments" });
+    await expect(panel.getByText("Is this final?")).toBeVisible();
+    await scan(page, `comments panel (${theme})`);
+    await panel.getByLabel("Comment", { exact: true }).focus();
+    await page.keyboard.type("Yes, final.");
+    await expect(panel.getByRole("button", { name: "Comment", exact: true })).toBeEnabled();
+  });
+
+  test(`members page and invite landing have no critical failures (${theme})`, async ({ page }) => {
+    await page.addInitScript((t) => localStorage.setItem("notesai.theme", t), theme);
+    await mockCollabBackend(page);
+    await page.goto("/settings/members");
+    await expect(page.getByLabel("Pending invitations")).toBeVisible();
+    await expect(page.getByRole("meter", { name: "Seats used" })).toBeVisible();
+    await scan(page, `members page (${theme})`);
+
+    // The invite form by keyboard: address, role, Invite.
+    const email = page.getByRole("textbox", { name: "Email", exact: true });
+    await email.focus();
+    await page.keyboard.type("jo@client.test ");
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Role", exact: true })).toBeFocused();
+    await scan(page, `members page, composing (${theme})`);
+  });
+
+  test(`invite landing, signed out, has no critical failures (${theme})`, async ({ page }) => {
+    await page.addInitScript((t) => localStorage.setItem("notesai.theme", t), theme);
+    await mockCollabBackend(page, false);
+    await page.goto("/invite/tok");
+    await expect(page.getByRole("button", { name: /continue with/i })).toBeVisible();
+    await scan(page, `invite landing (${theme})`);
+  });
+}

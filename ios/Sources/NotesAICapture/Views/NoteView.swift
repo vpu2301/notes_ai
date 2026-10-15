@@ -4,16 +4,24 @@ import UIKit
 /// The note as a document, as the web editor shows it; autosaves until cancelled.
 struct NoteView: View {
     @EnvironmentObject private var app: AppState
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model: NoteViewModel
+    /// Comments and who else is here (W3).
+    @StateObject private var collab: NoteCollaboration
     @State private var confirmDelete = false
-    @State private var shareByEmail = false
-    @State private var shareWithClient = false
+    /// One sheet at a time: "Share…" hands over to the link sheets.
+    @State private var shareRoute: ShareRoute?
+    @State private var commentsShown = false
+    /// "Switch…" from the not-in-this-workspace page.
+    @State private var pickingWorkspace = false
     @State private var historyPresented = false
     /// Which speaker label is being renamed, and the name it starts from.
     @State private var renaming: SpeakerRename?
     /// The turn whose avatar was tapped ("Move this turn to").
     @State private var movingTurn: TranscriptTurn?
     @State private var copied = false
+    /// The conflict banner's "Copy my text" was used.
+    @State private var copiedMine = false
     @State private var reviewingSpellings = false
     /// Which section is open in its editor; only one at a time.
     @State private var editingSection: String?
@@ -27,6 +35,12 @@ struct NoteView: View {
     init(capture: RecentCapture?, noteId: String, api: APIClient) {
         self.capture = capture
         _model = StateObject(wrappedValue: NoteViewModel(noteId: noteId, jobId: capture?.jobId, api: api))
+        _collab = StateObject(wrappedValue: NoteCollaboration(noteId: noteId, api: api))
+    }
+
+    private enum ShareRoute: String, Identifiable {
+        case people, client, email
+        var id: String { rawValue }
     }
 
     var body: some View {
@@ -55,6 +69,27 @@ struct NoteView: View {
                     .disabled(!model.selecting && !model.canEditSpeakers)
                     .accessibilityHint(model.selecting ? "Ends picking turns" : "Pick several turns to move them together")
                 }
+                PresenceAvatars(viewers: collab.viewers)
+                if model.level != nil {
+                    Button {
+                        collab.anchor = .note
+                        commentsShown = true
+                    } label: {
+                        Image(systemName: "text.bubble")
+                            .font(.dsSymbol(15, .medium))
+                            .overlay(alignment: .topTrailing) {
+                                if collab.openCount > 0 {
+                                    Text("\(collab.openCount)")
+                                        .font(.ds(10, .semibold))
+                                        .foregroundStyle(DS.inkText)
+                                        .padding(.horizontal, 4)
+                                        .background(Capsule().fill(DS.ink))
+                                        .offset(x: 8, y: -6)
+                                }
+                            }
+                    }
+                    .accessibilityLabel(collab.openCount > 0 ? "Comments (\(collab.openCount))" : "Comments")
+                }
                 DSMenu(items: menuItems)
             }
         }
@@ -66,6 +101,25 @@ struct NoteView: View {
         }
         .task(id: model.noteId) { await model.load() }
         .task(id: model.noteId) { await model.loadSharing() }
+        // A W3 server sends a level: then comments exist.
+        .task(id: model.level) {
+            guard model.level != nil else { return }
+            await collab.load()
+        }
+        // Presence only while the note is on screen and the app is in front; leaving either ends the task.
+        .task(id: PresenceGate(level: model.level, phase: scenePhase)) {
+            guard PresenceGate(level: model.level, phase: scenePhase).present else { return }
+            await collab.stayPresent()
+        }
+        .onChange(of: model.loadErrorStatus) { _, status in
+            // A 403 may be a removed membership: ask the membership table rather than guess.
+            if status == 403 { Task { await app.refreshWorkspaces(force: true) } }
+        }
+        .sheet(isPresented: $pickingWorkspace) { WorkspacePicker() }
+        .sheet(isPresented: $commentsShown) {
+            CommentsView(collab: collab, model: model) { commentsShown = false }
+                .presentationDetents([.medium, .large])
+        }
         .onChange(of: model.note?.title) { old, title in
             // The server's name for the note replaces this device's placeholder.
             guard let title, !title.isEmpty else { return }
@@ -89,20 +143,26 @@ struct NoteView: View {
         } message: {
             Text("It disappears from everyone's list and any public link stops working. The note is kept for the workspace's records.")
         }
-        .sheet(isPresented: $shareWithClient) {
-            ShareWithClientSheet(model: model, webAppURL: app.settings.webAppURL) { url in
-                // Hand the link straight to Mail / Messages / WhatsApp.
-                shareWithClient = false
-                model.shareItem = NoteViewModel.ShareItem(url: url)
-            } onClose: { shareWithClient = false }
-        }
-        .sheet(isPresented: $shareByEmail) {
-            ShareEmailSheet(
-                noteTitle: model.content?.title ?? "",
-                send: { recipients, message in
-                    await model.sendShareEmail(recipients: recipients, message: message)
-                },
-                onClose: { shareByEmail = false })
+        .sheet(item: $shareRoute) { route in
+            switch route {
+            case .people:
+                NoteShareSheet(model: model, webAppURL: app.settings.webAppURL,
+                               sendLink: { shareRoute = .client }, sendEmail: { shareRoute = .email },
+                               onClose: { shareRoute = nil })
+            case .client:
+                ShareWithClientSheet(model: model, webAppURL: app.settings.webAppURL) { url in
+                    // Hand the link straight to Mail / Messages / WhatsApp.
+                    shareRoute = nil
+                    model.shareItem = NoteViewModel.ShareItem(url: url)
+                } onClose: { shareRoute = nil }
+            case .email:
+                ShareEmailSheet(
+                    noteTitle: model.content?.title ?? "",
+                    send: { recipients, message in
+                        await model.sendShareEmail(recipients: recipients, message: message)
+                    },
+                    onClose: { shareRoute = nil })
+            }
         }
         .sheet(item: $renaming) { rename in
             SpeakerNameSheet(model: model, label: rename.label, initial: rename.initial)
@@ -147,7 +207,7 @@ struct NoteView: View {
             } else if let label = model.oversightLabel {
                 DSChip(text: label, tint: DS.info, soft: DS.infoSoft)
                     .accessibilityHint("You can see this note because you run this workspace. This view is recorded.")
-            } else if model.isDraft {
+            } else if model.editable {
                 saveStatus
             }
         }
@@ -174,8 +234,6 @@ struct NoteView: View {
     }
 
     private func menuItems() -> [DSMenuItem] {
-        let canManage = model.sharing?.canManage ?? true
-        let hasLink = model.sharing?.publicLink != nil
         var items: [DSMenuItem] = [
             .item("Open in web app", symbol: "safari") {
                 app.openNoteInBrowser(model.noteId)
@@ -183,34 +241,12 @@ struct NoteView: View {
             .item("Copy link", symbol: "link") {
                 if let url = app.noteURL(model.noteId) { copyToPasteboard(url.absoluteString) }
             },
-            .separator,
-            .item("Visible to everyone in the workspace", symbol: "person.2",
-                  disabled: model.busy || !canManage, checked: model.isWorkspaceVisible) {
-                Task { await model.setWorkspaceVisible(!model.isWorkspaceVisible) }
-            },
-            .item(hasLink ? "Copy public link" : "Create public link", symbol: "globe",
-                  disabled: model.busy || !canManage) {
-                Task {
-                    if let url = await model.publicLinkURL(webAppURL: app.settings.webAppURL) {
-                        copyToPasteboard(url.absoluteString)
-                    }
-                }
-            },
-            // One entry: colleague vs outsider is the server's problem.
-            .item("Send by email…", symbol: "envelope", disabled: model.busy || !canManage) {
-                shareByEmail = true
-            },
         ]
-        if model.rules.externalLinksEnabled {
-            // One link per recipient; hidden, not disabled, when the admin switched it off.
-            items.insert(.item("Share with client…", symbol: "paperplane", disabled: model.busy || !canManage) {
-                shareWithClient = true
-            }, at: 3)
-        }
-        if hasLink && canManage {
-            items.append(.item("Turn off public link", symbol: "globe.badge.chevron.backward",
-                               disabled: model.busy) {
-                Task { await model.revokePublicLink() }
+        // People, general access, the transcript and the links: one sheet, for whoever manages the note.
+        if model.canManage {
+            items.append(.separator)
+            items.append(.item("Share…", symbol: "person.badge.plus", disabled: model.busy) {
+                shareRoute = .people
             })
         }
         items.append(.separator)
@@ -223,7 +259,7 @@ struct NoteView: View {
         items.append(.item("Share Markdown", symbol: "doc.plaintext", disabled: model.busy) {
             model.exportMarkdown()
         })
-        if !app.spaces.isEmpty {
+        if app.capabilities.showsSpaces, !app.spaces.isEmpty {
             items.append(.separator)
             let current = app.spaceOf[model.noteId]
             for space in app.spaces {
@@ -285,12 +321,25 @@ struct NoteView: View {
                     .padding(.bottom, 14)
                 }
 
+                // Viewers and commenters read; the body is not a field for them.
+                if model.viewing == nil, model.isDraft, let line = model.level?.readOnlyLine {
+                    DSNotice(tone: .info, symbol: model.level == .comment ? "text.bubble" : "eye", text: line)
+                        .padding(.bottom, 16)
+                }
+
                 if model.conflict {
                     VStack(alignment: .leading, spacing: 8) {
-                        DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill",
-                                 text: "Someone else saved a newer version of this note.")
-                        Button("Reload latest") { Task { await model.load() } }
-                            .buttonStyle(DSButtonStyle(kind: .secondary, size: 14, height: 34))
+                        DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill", text: model.conflictLine)
+                        HStack(spacing: 8) {
+                            Button("Reload latest") { Task { await model.load() } }
+                                .buttonStyle(DSButtonStyle(kind: .secondary, size: 14, height: 34))
+                            // Before reloading: what this phone holds goes to the clipboard, never lost.
+                            Button(copiedMine ? "Copied" : "Copy my text") {
+                                model.copyMyText()
+                                copiedMine = true
+                            }
+                            .buttonStyle(DSButtonStyle(kind: .ghost, size: 14, height: 34))
+                        }
                     }
                     .padding(.bottom, 16)
                 }
@@ -316,7 +365,7 @@ struct NoteView: View {
                     .padding(.bottom, 16)
                 }
 
-                if capture?.status == .complete || model.hasTranscript {
+                if model.canReadTranscript, capture?.status == .complete || model.hasTranscript {
                     DSSegmentedPill(
                         options: [
                             .init(NoteViewModel.Tab.notes, label: "Notes"),
@@ -491,7 +540,10 @@ struct NoteView: View {
         VStack(alignment: .leading, spacing: 22) {
             if !model.items.isEmpty, model.viewing == nil {
                 // Action items as objects; the section text below stays the source.
-                ActionItemsSection(model: model)
+                ActionItemsSection(model: model, comment: model.canComment ? { key in
+                    collab.compose(on: .item(key))
+                    commentsShown = true
+                } : nil)
             }
             if model.viewing == nil {
                 generationStatus
@@ -608,6 +660,14 @@ struct NoteView: View {
                         .font(.dsSerif(21))
                         .tracking(-0.2)
                         .foregroundStyle(DS.text1)
+                        .contextMenu {
+                            if model.canComment {
+                                Button {
+                                    collab.compose(on: .section(block.key))
+                                    commentsShown = true
+                                } label: { Label("Comment…", systemImage: "text.bubble") }
+                            }
+                        }
                 }
                 if block.isFreeText {
                     SectionField(
@@ -662,7 +722,7 @@ struct NoteView: View {
     /// The "filed in" pill: names the space, or offers the list.
     @ViewBuilder
     private var spacePill: some View {
-        if !app.spaces.isEmpty {
+        if app.capabilities.showsSpaces, !app.spaces.isEmpty {
             let current = app.spaceOf[model.noteId]
             if let space = app.spaces.first(where: { $0.id == current }) {
                 Button {
@@ -1039,12 +1099,25 @@ struct NoteView: View {
 
     private func failed(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            DSNotice(tone: .danger, symbol: "exclamationmark.triangle.fill", text: message)
-            HStack {
-                Button("Try again") { Task { await model.load() } }
-                    .buttonStyle(DSButtonStyle(kind: .secondary, height: 36))
-                Button("Open in web app") { app.openNoteInBrowser(model.noteId) }
-                    .buttonStyle(DSButtonStyle(kind: .ghost, height: 36))
+            if model.loadErrorStatus == 404 {
+                // Most often a link to a note that lives in another of this person's workspaces.
+                DSNotice(tone: .info, symbol: "building.2", text: AuthCopy.notInThisWorkspace)
+                HStack {
+                    if app.workspaces.count > 1 {
+                        Button("Switch…") { pickingWorkspace = true }
+                            .buttonStyle(DSButtonStyle(kind: .secondary, height: 36))
+                    }
+                    Button("Open in web app") { app.openNoteInBrowser(model.noteId) }
+                        .buttonStyle(DSButtonStyle(kind: .ghost, height: 36))
+                }
+            } else {
+                DSNotice(tone: .danger, symbol: "exclamationmark.triangle.fill", text: message)
+                HStack {
+                    Button("Try again") { Task { await model.load() } }
+                        .buttonStyle(DSButtonStyle(kind: .secondary, height: 36))
+                    Button("Open in web app") { app.openNoteInBrowser(model.noteId) }
+                        .buttonStyle(DSButtonStyle(kind: .ghost, height: 36))
+                }
             }
             Spacer()
         }
@@ -1290,4 +1363,17 @@ struct EntityReviewSheetView: View {
             .disabled(!model.online)
         }
     }
+}
+
+/// When the note keeps "I am viewing" alive: a W3 server (a level), and the app in front.
+struct PresenceGate: Hashable {
+    let level: NoteLevel?
+    let active: Bool
+
+    init(level: NoteLevel?, phase: ScenePhase) {
+        self.level = level
+        self.active = phase == .active
+    }
+
+    var present: Bool { level != nil && active }
 }

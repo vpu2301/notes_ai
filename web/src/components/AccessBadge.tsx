@@ -1,6 +1,7 @@
 import { messageFor } from "../lib/errorCopy";
 import { createPublicLink, revokePublicLink, setVisibility } from "../api/notes";
-import type { SearchHit, SharingView } from "../api/types";
+import type { NoteLevel, SearchHit, SharingView } from "../api/types";
+import { levelLabel } from "../lib/noteLevel";
 import { ChevronDownIcon, CloseIcon, GlobeIcon, LockIcon, UsersIcon } from "./icons";
 import { Menu, type MenuItem } from "./Menu";
 import { publicLinkUrl } from "./ShareDialog";
@@ -46,6 +47,15 @@ export function accessHelp(access: NoteAccess): string {
     case "public":
       return "Public — anyone with the link can open it";
   }
+}
+
+/** The chip on a note someone else manages: what this reader may do, and "Guest" for a guest. */
+export function levelBadgeLabel(level: NoteLevel, guest = false): string {
+  return guest ? `Guest · ${levelLabel(level).toLowerCase()}` : levelLabel(level);
+}
+
+export function LevelBadge({ level, guest = false }: { level: NoteLevel; guest?: boolean }) {
+  return <span className="chip level-chip">{levelBadgeLabel(level, guest)}</span>;
 }
 
 /** The list row's sharing fields after a change made from its menu. */

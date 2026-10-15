@@ -4,6 +4,10 @@
 per transaction; a divergent sha256 on an applied file aborts before any change.
 
     python scripts/db/migrate.py up | down | status   (DATABASE_URL overrides the dev default)
+
+Files named in ``infra/postgres/migrations/DEV_ONLY`` (the demo tenants) are recorded as
+``skipped`` instead of run when ``--skip-dev-seeds`` is given or ``MDX_ENV=prod``, so the
+version numbering stays dense and a prod database never holds dev fixtures.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ import asyncpg
 
 DEFAULT_DSN = "postgresql://postgres:postgres@localhost:5432/notes"
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent.parent / "infra" / "postgres" / "migrations"
+DEV_ONLY_FILE = "DEV_ONLY"
 
 _VERSION_RE = re.compile(r"^(\d{4})_([\w-]+)\.sql$")
 
@@ -72,6 +77,15 @@ def _discover() -> list[Migration]:
     return out
 
 
+def _dev_only_names(migrations_dir: Path) -> frozenset[str]:
+    """File names listed in ``DEV_ONLY`` — one per line, ``#`` comments allowed."""
+    path = migrations_dir / DEV_ONLY_FILE
+    if not path.exists():
+        return frozenset()
+    lines = (ln.split("#", 1)[0].strip() for ln in path.read_text().splitlines())
+    return frozenset(ln for ln in lines if ln)
+
+
 def _checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -87,6 +101,9 @@ async def _ensure_tracking_table(conn: asyncpg.Connection) -> None:
         )
         """
     )
+    await conn.execute(
+        "ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS skipped BOOLEAN NOT NULL DEFAULT false"
+    )
 
 
 async def _applied_versions(conn: asyncpg.Connection) -> dict[str, str]:
@@ -94,7 +111,7 @@ async def _applied_versions(conn: asyncpg.Connection) -> dict[str, str]:
     return {r["version"]: r["checksum"] for r in rows}
 
 
-async def _apply_one(conn: asyncpg.Connection, m: Migration) -> None:
+async def _apply_one(conn: asyncpg.Connection, m: Migration, *, skip: bool = False) -> None:
     sql = _strip_outer_transaction(m.up_path.read_text())
     csum = _checksum(m.up_path)  # over the raw file — stripping must not shift checksums
     async with conn.transaction():
@@ -110,14 +127,16 @@ async def _apply_one(conn: asyncpg.Connection, m: Migration) -> None:
                 )
             print(f"  = {m.version}_{m.name} (already applied)")
             return
-        await conn.execute(sql)
+        if not skip:
+            await conn.execute(sql)
         await conn.execute(
-            "INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)",
+            "INSERT INTO schema_migrations (version, name, checksum, skipped) VALUES ($1, $2, $3, $4)",
             m.version,
             m.name,
             csum,
+            skip,
         )
-    print(f"  + {m.version}_{m.name}")
+    print(f"  {'~' if skip else '+'} {m.version}_{m.name}{' (dev-only, skipped)' if skip else ''}")
 
 
 async def _rollback_one(conn: asyncpg.Connection, m: Migration) -> None:
@@ -125,19 +144,21 @@ async def _rollback_one(conn: asyncpg.Connection, m: Migration) -> None:
     async with conn.transaction():
         await conn.execute("LOCK TABLE schema_migrations IN EXCLUSIVE MODE")
         existing = await conn.fetchrow(
-            "SELECT version FROM schema_migrations WHERE version = $1", m.version
+            "SELECT version, skipped FROM schema_migrations WHERE version = $1", m.version
         )
         if existing is None:
             print(f"  - {m.version}_{m.name} (not applied; nothing to do)")
             return
-        await conn.execute(sql)
+        if not existing["skipped"]:
+            await conn.execute(sql)
         await conn.execute("DELETE FROM schema_migrations WHERE version = $1", m.version)
     print(f"  - {m.version}_{m.name}")
 
 
-async def cmd_up(conn: asyncpg.Connection) -> int:
+async def cmd_up(conn: asyncpg.Connection, *, skip_dev_seeds: bool = False) -> int:
     await _ensure_tracking_table(conn)
     migrations = _discover()
+    dev_only = _dev_only_names(MIGRATIONS_DIR) if skip_dev_seeds else frozenset()
     applied = await _applied_versions(conn)
     pending = [m for m in migrations if m.version not in applied]
     if not pending:
@@ -145,7 +166,7 @@ async def cmd_up(conn: asyncpg.Connection) -> int:
         return 0
     print(f"Applying {len(pending)} migration(s):")
     for m in pending:
-        await _apply_one(conn, m)
+        await _apply_one(conn, m, skip=m.up_path.name in dev_only)
     return 0
 
 
@@ -176,9 +197,15 @@ async def cmd_status(conn: asyncpg.Connection) -> int:
     await _ensure_tracking_table(conn)
     migrations = _discover()
     applied = await _applied_versions(conn)
+    skipped = {
+        r["version"]
+        for r in await conn.fetch("SELECT version FROM schema_migrations WHERE skipped")
+    }
     print(f"{'STATUS':<8} {'VERSION':<6} NAME")
     for m in migrations:
-        status = "applied" if m.version in applied else "pending"
+        status = (
+            "skipped" if m.version in skipped else "applied" if m.version in applied else "pending"
+        )
         print(f"{status:<8} {m.version:<6} {m.name}")
     for version, csum in applied.items():
         match = next((x for x in migrations if x.version == version), None)
@@ -198,12 +225,18 @@ async def main() -> int:
         default=os.environ.get("DATABASE_URL", DEFAULT_DSN),
         help="Postgres DSN (default: env DATABASE_URL or %(default)s)",
     )
+    p.add_argument(
+        "--skip-dev-seeds",
+        action="store_true",
+        default=os.environ.get("MDX_ENV") == "prod",
+        help="record DEV_ONLY files as skipped instead of running them (default: on when MDX_ENV=prod)",
+    )
     args = p.parse_args()
 
     conn = await asyncpg.connect(args.dsn)
     try:
         if args.command == "up":
-            return await cmd_up(conn)
+            return await cmd_up(conn, skip_dev_seeds=args.skip_dev_seeds)
         if args.command == "down":
             return await cmd_down(conn)
         if args.command == "status":

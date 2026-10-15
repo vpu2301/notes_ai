@@ -366,11 +366,17 @@ struct MeetingTypeMenu: View {
 
 /// The one button. Dark, like the web's create button.
 struct NewMeetingButton: View {
+    @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
     var fill = false
     var height: CGFloat = 32
 
     var body: some View {
+        // A guest cannot record in this workspace: no button at all.
+        if app.capabilities.canRecord { button }
+    }
+
+    private var button: some View {
         Button {
             capture.startNew()
         } label: {

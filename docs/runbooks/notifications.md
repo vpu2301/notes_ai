@@ -47,6 +47,14 @@ Key invariants:
 - A channel that was deliberately not sent has a `suppressed` row with a
   `suppressed_reason` — absence of a row means a bug, not a suppression.
 
+## Workspaces (W1, ADR-0069)
+
+- The WebSocket registry is keyed by `(user, workspace)`: a socket receives only frames whose
+  `tenant_id` is the workspace its token was minted for. A frame with no `tenant_id` is dropped
+  (logged once, `ws.fanout.untenanted_frame_dropped`).
+- The digest stays per `(day, workspace, user)`: a person in two workspaces gets two digests.
+- Deep links carry `?ws=<tenant_id>` so a client switches workspace before opening the item.
+
 ## Quick triage
 
 ```bash

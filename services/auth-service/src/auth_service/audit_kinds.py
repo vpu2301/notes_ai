@@ -84,6 +84,13 @@ TENANT_MEMBER_ADDED: Final[str] = "tenant.member_added"
 TENANT_MEMBER_ROLE_CHANGED: Final[str] = "tenant.member_role_changed"
 TENANT_MEMBER_REMOVED: Final[str] = "tenant.member_removed"
 TENANT_SWITCHED: Final[str] = "tenant.switched"
+# W2 (ADR-0070): invitations and the workspace lifecycle. Payloads carry ids and roles, never an address.
+TENANT_INVITATION_CREATED: Final[str] = "tenant.invitation_created"
+TENANT_INVITATION_REVOKED: Final[str] = "tenant.invitation_revoked"
+TENANT_INVITATION_ACCEPTED: Final[str] = "tenant.invitation_accepted"
+TENANT_INVITATION_DECLINED: Final[str] = "tenant.invitation_declined"
+TENANT_MEMBER_LEFT: Final[str] = "tenant.member_left"
+TENANT_DISSOLVED: Final[str] = "tenant.dissolved"
 
 # ── Referral leads ────────────────────────────────────────────────────
 # Platform tenant; payload is ref_present only, never the address.

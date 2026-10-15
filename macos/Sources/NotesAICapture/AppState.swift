@@ -121,6 +121,10 @@ final class AppState: ObservableObject {
     }
     /// nil = every note; otherwise only the notes filed in that space.
     @Published var selectedSpaceId: String?
+    /// All notes, mine, or shared with me (W3); the server filters.
+    @Published var noteScope: NoteScope = .all {
+        didSet { if noteScope != oldValue { Task { await refreshNotes() } } }
+    }
     let calendar = CalendarService()
     /// Google Calendar connected on the server (shared with the web app).
     private(set) lazy var googleCalendar = GoogleCalendarService(api: api)
@@ -213,9 +217,26 @@ final class AppState: ObservableObject {
     @Published private(set) var switchingTo: String?
     /// A workspace this Mac can no longer reach, and why; banner until dismissed, local state stays.
     @Published var workspaceNotice: String?
+    /// "You joined …", "You left …": good news about a membership, banner until dismissed.
+    @Published var membershipNotice: String?
+    /// "New workspace…" and "Invitations (n)" from the account menu.
+    @Published var newWorkspacePresented = false
+    @Published var invitationsPresented = false
+    /// The invitation link on screen; the landing sheet follows it. The token stays in memory only.
+    @Published var invitation: InvitationLanding?
+    /// A link opened signed out: the sign-in screen names the address, and it is accepted right after sign-in.
+    @Published private(set) var pendingInvitation: InvitationLanding?
+    /// Open invitations addressed to this person.
+    @Published private(set) var myInvitations: [MyInvitation] = []
+    private var lastInvitationsRefresh: Date?
+    /// Meeting notes typed offline whose workspace refused them (`not_a_member`); still on disk.
+    @Published private(set) var orphanedMeetingNotes: [PendingMeetingNote] = []
     /// The session expired while away from the network: nothing lost, nothing sendable.
     @Published private(set) var expiredWhileOffline = false
     private var lastWorkspaceRefresh: Date?
+
+    /// What the shell offers in this workspace; a guest reaches only the notes they were given.
+    var capabilities: WorkspaceCapabilities { WorkspaceCapabilities(role: activeWorkspace?.myRole) }
 
     var activeWorkspace: Tenant? {
         guard let tenantId else { return nil }
@@ -224,7 +245,7 @@ final class AppState: ObservableObject {
 
     /// The name to show for the active workspace before `/tenants` answers.
     var activeWorkspaceName: String {
-        if let activeWorkspace { return activeWorkspace.title }
+        if let activeWorkspace { return activeWorkspace.switcherTitle }
         if let tenantId, let membership = memberships.first(where: { $0.tenantId == tenantId }) {
             return membership.name
         }
@@ -329,14 +350,16 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// A `notesai://` link arrived. OAuth and calendar callbacks are intercepted earlier, so in practice this is invitations.
+    /// A `notesai://` link arrived. OAuth and calendar callbacks are intercepted earlier, so in practice this is invitations and notes.
     func handle(_ url: URL) {
         switch AppURL.parse(url) {
         case .invite(let token):
-            pendingInviteToken = token
+            // The landing sheet lives on the main window.
             NotificationCenter.default.post(name: .openMainWindow, object: nil)
-            // No server can issue or redeem an invitation yet; say so rather than render a sheet that lies.
-            workspaceNotice = "This link is an invitation, but the server does not support invitations yet."
+            Task { await openInvitation(token: token) }
+        case .note(let id, let workspace):
+            guard authState == .signedIn else { return }
+            Task { await openLinkedNote(id, workspace: workspace) }
         case .calendarConnected, .oauthCallback, .none:
             // Handled by the session that started them.
             break
@@ -408,6 +431,17 @@ final class AppState: ObservableObject {
             applyScope(identityId: identityId, tenantId: session.tenantId)
             await loadWorkspaceData()
             await retryPendingUploads()
+            if !session.joinedTenantIds.isEmpty {
+                // Signed up from an invitation: the server accepted it and landed the session there.
+                pendingInvitation = nil
+                let names = workspaces.filter { session.joinedTenantIds.contains($0.id) }.map(\.title)
+                if !names.isEmpty { membershipNotice = "You joined \(names.joined(separator: ", "))." }
+            } else if let pending = pendingInvitation {
+                // The link was opened signed out: accept it now, as the address that just proved itself.
+                pendingInvitation = nil
+                invitation = pending
+                await joinInvitation()
+            }
             return session.isNewIdentity ? .welcome : .signedIn
         }
     }
@@ -477,6 +511,10 @@ final class AppState: ObservableObject {
         identityId = ""
         reconnecting = false
         reauth = nil
+        orphanedMeetingNotes = []
+        myInvitations = []
+        lastInvitationsRefresh = nil
+        membershipNotice = nil
     }
 
     // ── step-up ──────────────────────────────────────────────────────
@@ -523,8 +561,6 @@ final class AppState: ObservableObject {
     /// Where that state actually lives.
     private let local: LocalStore
     private var urlObserver: NSObjectProtocol?
-    /// An invitation token from a `notesai://invite/…` link, held in memory only.
-    private(set) var pendingInviteToken: String?
     /// Who this Mac was last signed in as; survives an expired session so kept recordings can be found.
     private(set) var lastIdentity: LastIdentity?
 
@@ -537,9 +573,14 @@ final class AppState: ObservableObject {
         notesError = nil
         do {
             let query = searchQuery.trimmingCharacters(in: .whitespaces)
-            notes = try await api.searchNotes(query: query.isEmpty ? nil : query).hits
+            notes = try await api.searchNotes(query: query.isEmpty ? nil : query,
+                                             scope: capabilities.isGuest ? .all : noteScope).hits
         } catch {
             notesError = error.localizedDescription
+            // A 403 may be a removed membership: ask the membership table rather than guess.
+            if (error as? APIError)?.status == 403 {
+                await refreshWorkspaces(force: true)
+            }
         }
         notesLoading = false
     }
@@ -998,11 +1039,6 @@ final class AppState: ObservableObject {
             email: address.trimmingCharacters(in: .whitespaces))
     }
 
-    /// Where an invited colleague signs in — the web app's login page.
-    var inviteURL: URL? {
-        URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?.appending(path: "login")
-    }
-
     /// Settings › Data & AI in the web app, where the tier and the processor acknowledgement are changed.
     func openWebSettingsData() {
         if let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
@@ -1138,6 +1174,39 @@ extension AppState {
         await refreshSpaces()
         await googleCalendar.refresh(force: true)
         await refreshWorkspaces(force: true)
+        await refreshMyInvitations(force: true)
+    }
+
+    /// A note link from another workspace: switch there first if this identity is a member, else say so.
+    func openLinkedNote(_ id: String, workspace: String?) async {
+        if let workspace, workspace != tenantId {
+            if !workspaces.contains(where: { $0.id == workspace }) {
+                await refreshWorkspaces(force: true)
+            }
+            guard workspaces.contains(where: { $0.id == workspace }) else {
+                NotificationCenter.default.post(name: .openMainWindow, object: nil)
+                workspaceNotice = "This note is in a workspace you are not a member of."
+                return
+            }
+            await switchWorkspace(to: workspace)
+            // A refused or failed switch has said why; never open the note in the wrong workspace.
+            guard tenantId == workspace else { return }
+        }
+        openNote(id)
+    }
+
+    func setOrphanedMeetingNotes(_ notes: [PendingMeetingNote]) {
+        orphanedMeetingNotes = notes
+    }
+
+    /// The personal workspace, once `GET /tenants` said which one it is.
+    var personalWorkspace: Tenant? { workspaces.first { $0.isPersonal } }
+
+    /// Send a refused meeting note to Personal instead, then replay it.
+    func moveMeetingNoteToPersonal(_ note: PendingMeetingNote) async {
+        guard let personal = personalWorkspace else { return }
+        PendingMeetingNotes.retarget(note, to: personal.id)
+        await capture.syncPendingMeetingNotes()
     }
 
     /// A workspace refused us: say which and why, then move somewhere real.
@@ -1180,6 +1249,150 @@ extension AppState {
     }
 }
 
+
+// MARK: - Invitations and workspace membership (W2)
+
+extension AppState {
+
+    /// Show what the link is (anonymous lookup, so it works signed out too).
+    func openInvitation(token: String) async {
+        settingsPresented = false
+        invitePresented = false
+        invitation = InvitationLanding(token: token)
+        let state: InvitationLandingState
+        do {
+            state = .ready(try await api.lookupInvitation(token: token))
+        } catch let error as APIError where error.status == 404 {
+            state = .invalid
+        } catch {
+            state = .failed(nil, message: AuthCopy.message(for: error))
+        }
+        if invitation?.token == token { invitation?.state = state }
+    }
+
+    /// Join from the landing sheet; signed out, remember it and let the sign-in screen take over.
+    func joinInvitation() async {
+        guard let landing = invitation, let lookup = landing.state.lookup else { return }
+        guard authState == .signedIn else {
+            pendingInvitation = InvitationLanding(token: landing.token, state: .ready(lookup))
+            invitation = nil
+            return
+        }
+        invitation?.state = .joining(lookup)
+        do {
+            let accepted = try await api.acceptInvitation(token: landing.token)
+            invitation = nil
+            await joined(accepted.tenantId, name: lookup.workspaceName)
+        } catch let error as APIError where error.code == "invitation_email_mismatch" {
+            invitation?.state = .mismatch(lookup, signedInAs: email)
+        } catch let error as APIError where error.status == 404 {
+            invitation?.state = .invalid
+        } catch {
+            invitation?.state = .failed(lookup, message: AuthCopy.message(for: error))
+        }
+    }
+
+    /// Signed in as the wrong address: sign out, keep the invitation for the right one.
+    func signOutForInvitation() {
+        guard let landing = invitation, let lookup = landing.state.lookup else { return }
+        pendingInvitation = InvitationLanding(token: landing.token, state: .ready(lookup))
+        invitation = nil
+        requestSignOut()
+    }
+
+    /// The sign-in screen's "not now".
+    func forgetPendingInvitation() {
+        pendingInvitation = nil
+    }
+
+    /// Re-read this person's open invitations, at most every five minutes unless forced.
+    func refreshMyInvitations(force: Bool = false) async {
+        guard authState == .signedIn, !reconnecting else { return }
+        if !force, let last = lastInvitationsRefresh, last.timeIntervalSinceNow > -300 { return }
+        guard let list = try? await api.myInvitations() else { return }
+        lastInvitationsRefresh = Date()
+        myInvitations = list
+    }
+
+    /// Accept from the in-app list. Returns what went wrong, or nil.
+    func accept(_ invite: MyInvitation) async -> String? {
+        do {
+            let accepted = try await api.acceptInvitation(id: invite.id)
+            await joined(accepted.tenantId, name: invite.workspaceName)
+            return nil
+        } catch {
+            return AuthCopy.message(for: error)
+        }
+    }
+
+    func decline(_ invite: MyInvitation) async -> String? {
+        do {
+            try await api.declineInvitation(id: invite.id)
+            myInvitations.removeAll { $0.id == invite.id }
+            return nil
+        } catch {
+            return AuthCopy.message(for: error)
+        }
+    }
+
+    /// The server put the session into a workspace just joined; follow it.
+    private func joined(_ tenantId: String, name: String) async {
+        pendingInvitation = nil
+        workspaceNotice = nil
+        adoptWorkspace(tenantId)
+        await loadWorkspaceData()
+        membershipNotice = "You joined \(name)."
+    }
+
+    /// Create a team workspace and switch into it. Returns what went wrong, or nil.
+    func createWorkspace(named name: String) async -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let created: Tenant
+        do {
+            created = try await api.createWorkspace(name: trimmed)
+        } catch {
+            return AuthCopy.message(for: error)
+        }
+        await switchWorkspace(to: created.id)
+        guard tenantId == created.id else {
+            return "\(created.title) was created, but switching to it failed. Pick it from the workspace list."
+        }
+        return nil
+    }
+
+    /// Leave a workspace; the server moves the session to Personal. Returns the server's reason when it refuses.
+    func leave(_ workspace: Tenant) async -> String? {
+        do {
+            try await api.leaveWorkspace(tenantId: workspace.id)
+        } catch {
+            return AuthCopy.message(for: error)
+        }
+        if let now = await api.tenantId {
+            adoptWorkspace(now)
+            await loadWorkspaceData()
+        }
+        membershipNotice = "You left \(workspace.title)."
+        return nil
+    }
+
+    /// Dissolve the open workspace (owner, nobody else in it, name typed back). Returns what went wrong, or nil.
+    func dissolve(_ workspace: Tenant, confirmName: String) async -> String? {
+        do {
+            try await api.dissolveWorkspace(tenantId: workspace.id, confirmName: confirmName)
+        } catch {
+            return AuthCopy.message(for: error)
+        }
+        // The session still points at it; move to Personal now rather than wait for a refresh to heal it.
+        if tenantId == workspace.id, let personal = personalWorkspace {
+            await switchWorkspace(to: personal.id)
+        } else {
+            await refreshWorkspaces(force: true)
+        }
+        membershipNotice = "\(workspace.title) was dissolved."
+        return nil
+    }
+}
 
 // MARK: - Holding the recordings that have not been sent
 

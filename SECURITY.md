@@ -46,3 +46,12 @@ In scope:
 Out of scope (low impact, please file a normal issue):
 - Documentation typos.
 - Cosmetic UI bugs in dev-only dashboards.
+
+## Changelog
+
+- **2026-10-13 (W1, ADR-0069)** — Notification WebSocket frames could reach a person's socket
+  opened in another workspace (the registry was keyed by user only). The registry is now keyed
+  by `(user, workspace)` and a frame is delivered only to sockets of its own workspace. Also:
+  the demo tenants are no longer inserted in production (`DEV_ONLY` migrations), a plaintext
+  password was removed from `infra/keycloak/realm-export.json` (rotate it), and an e-mail
+  resolves to a person only inside a workspace they already belong to.

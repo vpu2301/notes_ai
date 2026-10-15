@@ -129,9 +129,14 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         }
         return [people[s] for s in subs if s in people]
 
-    async def _add_shared(conn, *, note_id, user_sub):  # noqa: ANN001
+    async def _upsert_collaborator(conn, *, note_id, tenant_id, user_sub, role, granted_by):  # noqa: ANN001
         note = state["note"]
-        state["note"] = _note(shared_with_ids=[*note.shared_with_ids, user_sub])
+        previous = note.collaborators.get(user_sub)
+        state["note"] = _note(collaborators={**note.collaborators, user_sub: role})
+        return previous
+
+    async def _membership_roles(conn, *, subs):  # noqa: ANN001
+        return {s: "member" for s in subs if s in (USER, COLLEAGUE)}
 
     async def _fetch_link(conn, *, note_id):  # noqa: ANN001
         return next((row for row in state["links"] if row.kind == "public"), None)
@@ -172,7 +177,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         "fetch_note": _fetch_note,
         "find_member_by_email": _find_member,
         "fetch_members": _fetch_members,
-        "add_shared_with": _add_shared,
+        "upsert_collaborator": _upsert_collaborator,
+        "membership_roles": _membership_roles,
         "fetch_live_share_link": _fetch_link,
         "list_live_share_links": _list_links,
         "find_live_recipient_link": _find_recipient,
@@ -192,6 +198,15 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         return policy_box["policy"], policy_box["plan"]
 
     monkeypatch.setattr(sharing_policy, "load_policy", _load_policy)
+
+    async def _tenant_kind(conn, *, tenant_id):  # noqa: ANN001
+        return "team"
+
+    async def _no_pending(conn, note_id):  # noqa: ANN001
+        return []
+
+    monkeypatch.setattr(sharing_policy, "tenant_kind", _tenant_kind)
+    monkeypatch.setattr(router_mod, "_pending", _no_pending)
 
     app = create_app()
     app.dependency_overrides[deps.current_user] = _claims
@@ -219,7 +234,8 @@ def test_member_is_granted_access_and_sent_an_app_link(client: TestClient) -> No
     # No public link was minted: the note did not need one.
     assert body["public_link_created"] is False
     assert client.state_["links_created"] == 0
-    assert COLLEAGUE in client.state_["note"].shared_with_ids
+    # Members get `edit` unless the sharer picked a role (W3 default).
+    assert client.state_["note"].collaborators == {COLLEAGUE: "edit"}
     # They still get the ordinary content-free "shared with you" ping.
     assert client.notified == [COLLEAGUE]
 
@@ -267,6 +283,37 @@ def test_one_link_per_stranger_and_none_for_a_member(client: TestClient) -> None
     # Sending again reuses the links rather than minting a second pair.
     _send(client, recipients=["a@example.com"])
     assert client.state_["links_created"] == 2
+
+
+def test_member_gets_the_role_the_sharer_picked(client: TestClient) -> None:
+    r = _send(client, recipients=["colleague@acme.com"], role="comment")
+    assert r.status_code == 200, r.text
+    assert client.state_["note"].collaborators == {COLLEAGUE: "comment"}
+    shared = [c["payload"] for c in client.audit if c["kind"] == "note.shared"]
+    assert shared == [{"with": str(COLLEAGUE), "via": "email", "role": "comment"}]
+
+
+def test_invite_mode_gives_outsiders_nothing_and_lists_them(client: TestClient) -> None:
+    r = _send(client, recipients=["outsider@example.com", "colleague@acme.com"], mode="invite")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Outsiders get no link and no mail: the client invites them as guests (auth-service).
+    assert body["invite_needed"] == ["outsider@example.com"]
+    assert client.state_["links_created"] == 0
+    assert body["sharing"]["links"] == []
+    assert [x["access"] for x in body["results"]] == ["member"]
+    (mail,) = client.provider.sent
+    assert mail.to_address == "colleague@acme.com"
+    assert client.state_["note"].collaborators == {COLLEAGUE: "edit"}
+
+
+def test_invite_mode_ignores_the_external_link_switch(client: TestClient) -> None:
+    """No link is minted, so turning external links off does not refuse the send."""
+    client.policy_box["policy"] = sharing_policy.SharingPolicy(external_links_enabled=False)
+    r = _send(client, recipients=["outsider@example.com"], mode="invite")
+    assert r.status_code == 200, r.text
+    assert r.json()["invite_needed"] == ["outsider@example.com"]
+    assert client.provider.sent == []
 
 
 def test_external_sharing_off_refuses_a_stranger(client: TestClient) -> None:

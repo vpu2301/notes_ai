@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { listTenants } from "../api/account";
+import { cachedTenants, listTenants, myInvitationsCached } from "../api/account";
+import { createWorkspace } from "../api/tenants";
 import { ApiError } from "../api/http";
-import type { TenantSummary } from "../api/types";
+import { roleLabel, workspaceLabel, type TenantSummary } from "../api/types";
 import * as notifApi from "../api/notifications";
 import type { NotificationItem } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
@@ -14,6 +15,9 @@ import {
   BellIcon,
   ChevronDownIcon,
   CheckIcon,
+  CloseIcon,
+  HomeIcon,
+  MailIcon,
   FileTextIcon,
   LayersIcon,
   LogoutIcon,
@@ -179,9 +183,27 @@ function ThemeSeg({ pref, onChange }: { pref: ThemePref; onChange: (p: ThemePref
   );
 }
 
-/** `GET /tenants` (not `/auth/me` memberships): it carries display name and `is_active`. */
-function WorkspaceSwitch({ onDone }: { onDone: () => void }) {
-  const { activeTenantId, canSwitchWorkspaces, switchWorkspace } = useAuth();
+/** One switcher row, from `GET /tenants` or, until it answers, `/auth/me` memberships. */
+interface WorkspaceRow {
+  id: string;
+  name: string;
+  kind?: string;
+  role: string;
+}
+
+/** Personal workspaces get a house, team ones their first letter in a circle. */
+function WorkspaceMark({ kind, name }: { kind?: string; name: string }) {
+  return (
+    <span className={`sb-ws-mark ${kind === "personal" ? "personal" : ""}`} aria-hidden="true">
+      {kind === "personal" ? <HomeIcon size={11} /> : (name.trim().charAt(0) || "?").toUpperCase()}
+    </span>
+  );
+}
+
+/** `GET /tenants` (not `/auth/me` memberships): it carries display name and `is_active`. Shown even with one workspace.
+ *  Mounted each time the menu opens, so a create, leave or dissolve is reflected on the next open. */
+function WorkspaceSwitch({ onDone, onNew }: { onDone: () => void; onNew: () => void }) {
+  const { me, memberships, activeTenantId, canSwitchWorkspaces, switchWorkspace } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
   const [tenants, setTenants] = useState<TenantSummary[] | null>(null);
@@ -200,9 +222,20 @@ function WorkspaceSwitch({ onDone }: { onDone: () => void }) {
     };
   }, [canSwitchWorkspaces]);
 
-  if (!canSwitchWorkspaces || legacy || !tenants || tenants.length < 2) return null;
+  // Server order (Personal first); older servers omit `kind`, so `personal_tenant_id` fills it.
+  const rows: WorkspaceRow[] = tenants
+    ? tenants.map((t) => ({
+        id: t.id,
+        name: t.display_name || t.name,
+        kind: t.kind ?? (t.id === me?.personal_tenant_id ? "personal" : undefined),
+        role: t.my_role,
+      }))
+    : memberships.map((m) => ({ id: m.tenant_id, name: m.name, kind: m.kind, role: m.role }));
+  // A session that cannot switch still names where it is.
+  const fixed = !canSwitchWorkspaces || legacy;
+  const shown = fixed ? rows.filter((r) => r.id === activeTenantId) : rows;
 
-  const pick = async (t: TenantSummary) => {
+  const pick = async (t: WorkspaceRow) => {
     if (t.id === activeTenantId || switching) return;
     setSwitching(t.id);
     try {
@@ -219,8 +252,7 @@ function WorkspaceSwitch({ onDone }: { onDone: () => void }) {
 
   return (
     <>
-      <div className="sb-user-menu-label">Workspace</div>
-      {tenants.map((t) => {
+      {shown.map((t) => {
         const current = t.id === activeTenantId;
         return (
           <button
@@ -228,24 +260,244 @@ function WorkspaceSwitch({ onDone }: { onDone: () => void }) {
             className={`sb-user-menu-item ${current ? "current" : ""}`}
             role="menuitemradio"
             aria-checked={current}
-            disabled={switching !== null}
+            disabled={switching !== null || (fixed && !current)}
             onClick={() => void pick(t)}
           >
-            <span className="sb-ws-mark" aria-hidden="true">
-              {initialsOf(t.display_name || t.name)}
-            </span>
-            <span className="grow ellipsis">{t.display_name || t.name}</span>
-            {current ? (
-              <CheckIcon size={13} />
+            <WorkspaceMark kind={t.kind} name={t.name} />
+            <span className="grow ellipsis">{workspaceLabel(t)}</span>
+            {t.role === "guest" && switching !== t.id ? (
+              <span className="chip guest-badge">Guest</span>
             ) : (
-              switching === t.id && <span className="sb-user-menu-hint">Switching…</span>
+              <span className="sb-user-menu-hint">{switching === t.id ? "Switching…" : roleLabel(t.role)}</span>
             )}
+            {current && <CheckIcon size={13} />}
           </button>
         );
       })}
-      <div className="sb-user-menu-sep" />
+      {!fixed && (
+        <>
+          <div className="sb-user-menu-sep" />
+          <button className="sb-user-menu-item" role="menuitem" onClick={onNew}>
+            <PlusIcon size={14} />
+            <span>New workspace…</span>
+          </button>
+        </>
+      )}
     </>
   );
+}
+
+/** Name it, Enter, and you are in it — on the Members page, ready to invite. */
+function NewWorkspaceDialog({ onClose }: { onClose: () => void }) {
+  const { switchWorkspace } = useAuth();
+  const navigate = useNavigate();
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, busy]);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await createWorkspace(trimmed);
+      // Remounts the signed-in tree, this dialog included.
+      await switchWorkspace(created.id);
+      navigate("/settings/members?first=1");
+    } catch (err) {
+      setError(messageFor(err));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
+      <form className="modal" role="dialog" aria-modal="true" aria-label="New workspace" onSubmit={(e) => void submit(e)}>
+        <div className="modal-h">
+          <h2>New workspace</h2>
+          <p>A shared home for a team's notes. You can invite people next.</p>
+        </div>
+        <div className="modal-b">
+          <label className="field">
+            <span className="label">Name</span>
+            <input
+              autoFocus
+              maxLength={80}
+              placeholder="Sunrise Studio"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={busy}
+            />
+          </label>
+          {error && (
+            <div className="banner banner-danger" role="alert">
+              <span className="grow">{error}</span>
+            </div>
+          )}
+        </div>
+        <div className="modal-f">
+          <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button type="submit" className="btn primary" disabled={busy || !name.trim()}>
+            {busy ? "Creating…" : "Create"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/** The sidebar head: where am I, and the one click to go elsewhere. */
+export function WorkspaceMenu({ collapsed }: { collapsed: boolean }) {
+  const { me, identity, memberships, activeTenantId } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const close = useCallback(() => setOpen(false), []);
+  const ref = useDismiss<HTMLDivElement>(open, close);
+  const active = memberships.find((m) => m.tenant_id === activeTenantId) ?? me?.active_membership ?? null;
+  const name = active ? workspaceLabel(active) : "Notes AI";
+  // A guest's "Guest in …" already says the role.
+  const role = active && active.role !== "guest" ? roleLabel(active.role) : null;
+
+  // `fixed`, like NewMenu: the sidebar clips overflow.
+  const toggle = () => {
+    if (!open && ref.current) {
+      const r = ref.current.getBoundingClientRect();
+      setPos(
+        collapsed
+          ? { left: Math.round(r.right + 6), top: Math.round(r.top) }
+          : { left: Math.round(r.left), top: Math.round(r.bottom + 6) },
+      );
+    }
+    setOpen((v) => !v);
+  };
+
+  return (
+    <div className="sb-ws-wrap" ref={ref}>
+      <button
+        className={`sb-ws ${open ? "open" : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={collapsed ? name : "Switch workspace"}
+        onClick={toggle}
+      >
+        <WorkspaceMark kind={active?.kind} name={name} />
+        {!collapsed && (
+          <>
+            <span className="sb-ws-text">
+              <span className="sb-ws-name">{name}</span>
+              {role && <span className="sb-ws-role">{role}</span>}
+            </span>
+            <ChevronDownIcon size={13} />
+          </>
+        )}
+      </button>
+      {open && pos && (
+        <div className="sb-user-menu down" role="menu" aria-label="Workspaces" style={pos}>
+          {identity?.email && (
+            <div className="sb-user-menu-head">
+              <span>{identity.email}</span>
+            </div>
+          )}
+          <WorkspaceSwitch
+            onDone={close}
+            onNew={() => {
+              setOpen(false);
+              setCreating(true);
+            }}
+          />
+        </div>
+      )}
+      {creating && <NewWorkspaceDialog onClose={() => setCreating(false)} />}
+    </div>
+  );
+}
+
+/** "You joined <name>" — after an accepted invitation, wherever it was accepted. */
+function JoinedBanner() {
+  const { joinedWorkspace, dismissJoined } = useAuth();
+  if (!joinedWorkspace) return null;
+  return (
+    <div className="banner banner-ok ws-moved" role="status">
+      <CheckIcon size={15} />
+      <span className="grow">
+        You joined <strong>{joinedWorkspace}</strong>.
+      </span>
+      <button className="icon-btn" aria-label="Dismiss" onClick={dismissJoined}>
+        <CloseIcon size={14} />
+      </button>
+    </div>
+  );
+}
+
+/** The session moved in another tab: this one refuses requests (`http.ts`) until it follows. */
+export function WorkspaceMovedStrip() {
+  const { workspaceMoved, memberships, followWorkspace } = useAuth();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  if (!workspaceMoved) return null;
+  // A workspace made in the other tab may not be in this tab's memberships: the last `GET /tenants` names it
+  // (no new request: everything but `/auth/*` is held back now).
+  const known = memberships.find((m) => m.tenant_id === workspaceMoved.to);
+  const listed = cachedTenants().find((t) => t.id === workspaceMoved.to);
+  const name = known
+    ? workspaceLabel(known)
+    : listed
+      ? workspaceLabel({ kind: listed.kind, name: listed.display_name || listed.name, role: listed.my_role })
+      : null;
+  const follow = async () => {
+    setBusy(true);
+    try {
+      await followWorkspace();
+      navigate("/");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="banner banner-warn ws-moved" role="status">
+      <span className="grow">
+        This session switched to {name ? <strong>{name}</strong> : "another workspace"} in another tab.
+      </span>
+      <button className="btn moss sm" onClick={() => void follow()} disabled={busy}>
+        Continue there
+      </button>
+    </div>
+  );
+}
+
+/** Open invitations to this person: on mount and on window focus, from a five-minute cache. Zero while unknown. */
+function useOpenInvitations(): number {
+  const onList = useLocation().pathname === "/invitations";
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let live = true;
+    const load = () =>
+      myInvitationsCached()
+        .then((items) => live && setCount(items.length))
+        .catch(() => {
+          /* keep the last count; a missing dot is harmless */
+        });
+    void load();
+    window.addEventListener("focus", load);
+    return () => {
+      live = false;
+      window.removeEventListener("focus", load);
+    };
+  }, [onList]);
+  return count;
 }
 
 function AccountMenu({ collapsed, onSignOut }: { collapsed: boolean; onSignOut: () => void }) {
@@ -257,6 +509,7 @@ function AccountMenu({ collapsed, onSignOut }: { collapsed: boolean; onSignOut: 
   const close = useCallback(() => setOpen(false), []);
   const ref = useDismiss<HTMLDivElement>(open, close);
   const email = identity?.email ?? "";
+  const invitations = useOpenInvitations();
 
   return (
     <div className="sb-user-wrap" ref={ref}>
@@ -269,6 +522,7 @@ function AccountMenu({ collapsed, onSignOut }: { collapsed: boolean; onSignOut: 
       >
         <span className="avatar" aria-hidden="true">
           {initialsOf(displayName)}
+          {invitations > 0 && <span className="avatar-dot" />}
         </span>
         {!collapsed && (
           <>
@@ -284,7 +538,19 @@ function AccountMenu({ collapsed, onSignOut }: { collapsed: boolean; onSignOut: 
             {email && <span>{email}</span>}
           </div>
           <div className="sb-user-menu-sep" />
-          <WorkspaceSwitch onDone={close} />
+          {invitations > 0 && (
+            <button
+              className="sb-user-menu-item"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                navigate("/invitations");
+              }}
+            >
+              <MailIcon size={14} />
+              <span className="grow">Invitations ({invitations})</span>
+            </button>
+          )}
           <button
             className="sb-user-menu-item"
             role="menuitem"
@@ -490,6 +756,8 @@ function SignOutDialog({ onCancel, onConfirm, busy }: { onCancel: () => void; on
 export function AppShell() {
   const navigate = useNavigate();
   const { activeRole, logout } = useAuth();
+  // A guest reaches only notes shared with them: nothing to record, file or set up here.
+  const guest = activeRole === "guest";
   const toast = useToast();
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -540,7 +808,7 @@ export function AppShell() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t?.matches("input, textarea, select, [contenteditable]")) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || guest) return;
       if (e.key === "n") {
         e.preventDefault();
         navigate("/meeting/new");
@@ -551,7 +819,7 @@ export function AppShell() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navigate, newBlankNote]);
+  }, [navigate, newBlankNote, guest]);
 
   return (
     <div className="app">
@@ -565,22 +833,20 @@ export function AppShell() {
           >
             <SidebarIcon size={17} />
           </button>
-          {!collapsed && (
-            <NavLink to="/" className="sb-wordmark" title="Notes AI">
-              Notes AI
-            </NavLink>
-          )}
+          <WorkspaceMenu collapsed={collapsed} />
         </div>
 
-        <NewMenu
-          collapsed={collapsed}
-          primary={{ icon: <MicIcon size={14} />, label: "New meeting", kbd: "N", onClick: () => navigate("/meeting/new") }}
-          actions={[
-            { icon: <FileTextIcon size={14} />, label: "Blank note", kbd: "B", onClick: () => void newBlankNote() },
-            { icon: <UploadIcon size={14} />, label: "Upload a recording", onClick: () => navigate("/meeting/new?mode=upload") },
-            { icon: <LayersIcon size={14} />, label: "New from template…", onClick: () => navigate("/new") },
-          ]}
-        />
+        {!guest && (
+          <NewMenu
+            collapsed={collapsed}
+            primary={{ icon: <MicIcon size={14} />, label: "New meeting", kbd: "N", onClick: () => navigate("/meeting/new") }}
+            actions={[
+              { icon: <FileTextIcon size={14} />, label: "Blank note", kbd: "B", onClick: () => void newBlankNote() },
+              { icon: <UploadIcon size={14} />, label: "Upload a recording", onClick: () => navigate("/meeting/new?mode=upload") },
+              { icon: <LayersIcon size={14} />, label: "New from template…", onClick: () => navigate("/new") },
+            ]}
+          />
+        )}
 
         <nav className="sb-nav" aria-label="Main">
           <SideLink to="/" end icon={<NotesIcon size={16} />} label="All notes" collapsed={collapsed} />
@@ -588,7 +854,7 @@ export function AppShell() {
             /* counts only; the API refuses everyone else */
             <SideLink to="/admin/sharing" icon={<ShareIcon size={16} />} label="Sharing" collapsed={collapsed} />
           )}
-          <SpacesNav collapsed={collapsed} />
+          {!guest && <SpacesNav collapsed={collapsed} />}
         </nav>
 
         <div className="sb-spacer" />
@@ -600,6 +866,8 @@ export function AppShell() {
 
       <div className="app-main" ref={scroller}>
         <TopBar scroller={scroller} />
+        <WorkspaceMovedStrip />
+        <JoinedBanner />
         <main className="page">
           <Outlet />
         </main>
