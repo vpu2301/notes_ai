@@ -444,10 +444,11 @@ struct DSTextField: View {
     }
 }
 
-/// Toggle drawn as the web's switch: a pill with a sliding knob.
+/// Toggle as a moss switch: the track fills with the accent, the raised knob carries a check when on.
 struct DSToggleStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
-        Button {
+        let on = configuration.isOn
+        return Button {
             configuration.isOn.toggle()
         } label: {
             HStack(spacing: 10) {
@@ -455,25 +456,32 @@ struct DSToggleStyle: ToggleStyle {
                     .font(.ds(13))
                     .foregroundStyle(DS.text1)
                 Spacer(minLength: 0)
-                ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                ZStack(alignment: on ? .trailing : .leading) {
                     Capsule()
-                        .fill(configuration.isOn ? DS.ink : DS.surface2)
-                        .overlay(Capsule().strokeBorder(DS.line, lineWidth: configuration.isOn ? 0 : DS.hairline))
-                        .frame(width: 34, height: 20)
+                        .fill(on ? DS.accentFill : DS.surface2)
+                        .overlay(Capsule().strokeBorder(on ? Color.black.opacity(0.06) : DS.lineHover, lineWidth: DS.hairline))
+                        .frame(width: 36, height: 21)
                     Circle()
-                        .fill(configuration.isOn ? DS.inkText : DS.surface)
-                        .overlay(Circle().strokeBorder(DS.line, lineWidth: configuration.isOn ? 0 : DS.hairline))
-                        .frame(width: 16, height: 16)
+                        .fill(Color.white)
+                        .shadow(color: .black.opacity(0.22), radius: 1.5, y: 1)
+                        .overlay(
+                            Image(systemName: "checkmark")
+                                .font(.dsIcon(7.7, .bold))
+                                .foregroundStyle(DS.accent)
+                                .opacity(on ? 1 : 0)
+                                .scaleEffect(on ? 1 : 0.5)
+                        )
+                        .frame(width: 17, height: 17)
                         .padding(2)
                 }
-                .animation(.easeOut(duration: 0.15), value: configuration.isOn)
+                .animation(.spring(response: 0.28, dampingFraction: 0.72), value: on)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         // Read as a switch with its state, not as a plain button.
         .accessibilityAddTraits(.isToggle)
-        .accessibilityValue(configuration.isOn ? "On" : "Off")
+        .accessibilityValue(on ? "On" : "Off")
     }
 }
 

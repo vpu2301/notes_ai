@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError } from "../../api/http";
 import {
+  archiveWorkspace,
   dissolveWorkspace,
   invite,
   leaveWorkspace,
@@ -59,6 +60,9 @@ export function MembersSettingsPage() {
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<TenantMember | null>(null);
   const [leaving, setLeaving] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  /** Delete first offers archiving; only "Delete anyway" reaches the type-the-name step. */
+  const [deleteOffer, setDeleteOffer] = useState(false);
   const [dissolving, setDissolving] = useState(false);
   const [confirmName, setConfirmName] = useState("");
   const [dialogError, setDialogError] = useState<string | null>(null);
@@ -189,12 +193,32 @@ export function MembersSettingsPage() {
     }
   };
 
+  const archive = async () => {
+    setBusy(true);
+    setDialogError(null);
+    try {
+      const { token } = await archiveWorkspace(activeTenantId);
+      toast.success(`${workspaceName} was archived — restore it from the workspace menu`);
+      // The session is already in Personal when the server says so; otherwise move there.
+      if (token) {
+        await enterWorkspace(token);
+      } else {
+        const home = memberships.find((m) => m.kind === "personal")?.tenant_id ?? me?.personal_tenant_id;
+        if (home) await switchWorkspace(home);
+      }
+      navigate("/");
+    } catch (err) {
+      setDialogError(messageFor(err));
+      setBusy(false);
+    }
+  };
+
   const dissolve = async () => {
     setBusy(true);
     setDialogError(null);
     try {
       await dissolveWorkspace(activeTenantId, confirmName);
-      toast.success(`${workspaceName} was dissolved`);
+      toast.success(`${workspaceName} was deleted`);
       const home = memberships.find((m) => m.kind === "personal")?.tenant_id ?? me?.personal_tenant_id;
       if (home) await switchWorkspace(home);
       navigate("/");
@@ -224,6 +248,7 @@ export function MembersSettingsPage() {
         <InviteCard
           tenantId={activeTenantId}
           first={params.get("first") === "1"}
+          focus={params.get("invite") === "1"}
           onInvited={upsertPending}
         />
       )}
@@ -366,24 +391,34 @@ export function MembersSettingsPage() {
         <div className="card settings-card">
           <div className="settings-card-h">
             <div>
-              <h2 className="settings-h">Danger zone</h2>
+              <h2 className="settings-h">Archive or delete</h2>
               <span className="help">
-                {others.length > 0
-                  ? "To dissolve this workspace, remove everyone else first."
-                  : "Dissolving closes this workspace and its notes for everyone."}
+                Archiving closes this workspace for everyone and keeps every note and member — restore it any time.
+                Deleting removes it.
               </span>
             </div>
-            <button
-              className="btn danger sm"
-              disabled={busy || members === null || others.length > 0}
-              onClick={() => {
-                setConfirmName("");
-                setDialogError(null);
-                setDissolving(true);
-              }}
-            >
-              Dissolve…
-            </button>
+            <div className="row-actions">
+              <button
+                className="btn sm"
+                disabled={busy}
+                onClick={() => {
+                  setDialogError(null);
+                  setArchiving(true);
+                }}
+              >
+                Archive…
+              </button>
+              <button
+                className="btn danger sm"
+                disabled={busy || members === null}
+                onClick={() => {
+                  setDialogError(null);
+                  setDeleteOffer(true);
+                }}
+              >
+                Delete…
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -413,11 +448,40 @@ export function MembersSettingsPage() {
         />
       )}
 
+      {archiving && (
+        <ConfirmDialog
+          title={`Archive ${workspaceName}?`}
+          subtitle="Nobody can open it until you restore it. Notes and members stay as they are; open invitations are cancelled."
+          confirmLabel="Archive"
+          busy={busy}
+          error={dialogError}
+          onCancel={() => setArchiving(false)}
+          onConfirm={() => void archive()}
+        />
+      )}
+
+      {deleteOffer && (
+        <DeleteOffer
+          name={workspaceName}
+          others={others.length}
+          busy={busy}
+          error={dialogError}
+          onArchive={() => void archive()}
+          onDelete={() => {
+            setDeleteOffer(false);
+            setConfirmName("");
+            setDialogError(null);
+            setDissolving(true);
+          }}
+          onCancel={() => setDeleteOffer(false)}
+        />
+      )}
+
       {dissolving && (
         <ConfirmDialog
-          title={`Dissolve ${workspaceName}?`}
+          title={`Delete ${workspaceName}?`}
           subtitle="Nobody can open it or its notes afterwards."
-          confirmLabel="Dissolve"
+          confirmLabel="Delete"
           confirmDanger
           busy={busy}
           confirmDisabled={confirmName !== workspaceName}
@@ -487,10 +551,13 @@ const MESSAGE_MAX = 500;
 function InviteCard({
   tenantId,
   first,
+  focus,
   onInvited,
 }: {
   tenantId: string;
   first: boolean;
+  /** The topbar's Invite button lands here: the e-mail field takes focus. */
+  focus: boolean;
   onInvited: (inv: InvitationOut) => void;
 }) {
   const toast = useToast();
@@ -553,7 +620,7 @@ function InviteCard({
       <form className="settings-pad settings-stack-sm" onSubmit={(e) => void send(e)}>
         <div className="settings-actions">
           <div className="grow" style={{ flex: 1, minWidth: 220 }}>
-            <EmailChips box={box} label="Email" placeholder="name@company.com" disabled={busy} autoFocus={first} />
+            <EmailChips box={box} label="Email" placeholder="name@company.com" disabled={busy} autoFocus={first || focus} />
           </div>
           <Select
             label="Role"
@@ -598,4 +665,70 @@ function InviteCard({
 
 function nameOf(m: TenantMember): string {
   return m.display_name || m.email || "Member";
+}
+
+/** Delete asks first whether archiving would do: same result for everyone, and nothing is lost. */
+function DeleteOffer({
+  name,
+  others,
+  busy,
+  error,
+  onArchive,
+  onDelete,
+  onCancel,
+}: {
+  name: string;
+  /** Other active members; deleting needs them gone first. */
+  others: number;
+  busy: boolean;
+  error: string | null;
+  onArchive: () => void;
+  onDelete: () => void;
+  onCancel: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel, busy]);
+
+  return (
+    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && !busy && onCancel()}>
+      <div className="modal" role="alertdialog" aria-modal="true" aria-label={`Archive ${name} instead?`}>
+        <div className="modal-h">
+          <h2>Archive {name} instead?</h2>
+          <p>
+            Archiving closes it for everyone just like deleting, but keeps every note and member. You can restore it any
+            time from the workspace menu.
+          </p>
+        </div>
+        <div className="modal-b">
+          <span className="help">
+            {others > 0
+              ? `To delete it, remove the ${others} other ${others === 1 ? "member" : "members"} first. Archiving needs nothing.`
+              : "Deleting can't be undone from the app."}
+          </span>
+          {error && (
+            <div className="banner banner-danger" role="alert">
+              <span className="grow">{error}</span>
+            </div>
+          )}
+        </div>
+        <div className="modal-f">
+          <button className="btn ghost danger-text" disabled={busy || others > 0} onClick={onDelete}>
+            Delete anyway…
+          </button>
+          <span className="grow" />
+          <button className="btn ghost" disabled={busy} onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="btn moss" autoFocus disabled={busy} onClick={onArchive}>
+            {busy ? "Archiving…" : "Archive instead"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }

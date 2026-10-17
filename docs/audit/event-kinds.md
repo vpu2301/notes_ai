@@ -63,6 +63,8 @@ typos at import.
 | `tenant.invitation_declined`      | info     | auth-service POST /auth/invitations/{id}/decline | W2 — the invitee declined. Payload: invitation_id |
 | `tenant.member_left`              | sec      | auth-service DELETE /tenants/{id}/members/me | W2 — a member left the workspace (row suspended, `left_at`). Payload: role |
 | `tenant.dissolved`                | sec      | auth-service POST /tenants/{id}/dissolve | W2 — the owner dissolved an empty team workspace (restorable 30 days). Payload: revoked_invitations |
+| `tenant.archived`                 | sec      | auth-service POST /tenants/{id}/archive | The owner archived a team workspace: closed for everyone, nothing deleted. Payload: revoked_invitations |
+| `tenant.unarchived`               | sec      | auth-service POST /tenants/{id}/unarchive | The owner restored an archived workspace. Payload: none |
 | `audit.chain_verified`            | info/sec | nightly verifier (`scripts/jobs/nightly_verify.py`) | One per tenant per verify run. severity flips to `sec` on divergence |
 | `asr.audio_uploaded`              | info     | asr-service POST /asr/jobs       | Audio file enveloped + persisted; row inserted in `audio_files`    |
 | `asr.audio_deleted`               | sec      | retention tooling                | Crypto-shred of a recording: stored object + metadata row (its wrapped DEK) destroyed. Constant reserved; no runtime emitter today. |

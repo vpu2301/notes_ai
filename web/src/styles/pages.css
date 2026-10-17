@@ -165,6 +165,11 @@
 .home-list .row-time { font-size: calc(12.5px * var(--fs)); }
 .home-list .row-ico { width: 28px; height: 28px; }
 .home-list .row-2 { margin-top: 1px; }
+/* The row's ⋯ shows on hover, as the Mac's. */
+.home-list .row-side .icon-btn { opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+.home-list .row:hover .row-side .icon-btn,
+.home-list .row:focus-within .row-side .icon-btn,
+.home-list .row-side .icon-btn[aria-expanded="true"] { opacity: 1; }
 .home-group-count { font-variant-numeric: tabular-nums; color: var(--muted); opacity: .8; margin-left: 4px; }
 .home-list-more {
   align-self: flex-start;
@@ -519,6 +524,16 @@ ol.rt-list > li::before {
   padding-top: calc(20px * var(--density));
   pointer-events: none;
 }
+/* The text scrolling under the composer softens: a short blurred band (~20px over the bar, down to the edge),
+   faded in so it has no hard top edge. */
+.ask-dock::before {
+  content: ""; position: absolute; z-index: -1;
+  top: 0; bottom: calc(-14px * var(--density)); left: -24px; right: -24px;
+  background: linear-gradient(to bottom, transparent, var(--bg) 70%);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 calc(20px * var(--density)));
+  mask-image: linear-gradient(to bottom, transparent, #000 calc(20px * var(--density)));
+}
 .ask-bar {
   pointer-events: auto;
   display: flex; flex-direction: column; gap: calc(6px * var(--density));
@@ -544,24 +559,24 @@ ol.rt-list > li::before {
 /* focus-within lights the bar */
 .ask-input:focus-visible { caret-color: var(--accent); }
 .ask-input::placeholder { color: var(--muted); }
-.ask-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* Claude's composer: the tool row sits right, a quiet label beside an accent send square. */
+.ask-tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .ask-scope {
-  display: inline-flex; align-items: center; gap: 6px;
-  height: 30px; padding: 0 10px; margin-left: -6px;
-  border-radius: var(--radius-sm);
-  font-size: calc(13px * var(--fs)); color: var(--text-3);
+  display: inline-flex; align-items: center;
+  height: 32px; padding: 0 8px;
+  border-radius: 8px;
+  font-size: calc(14px * var(--fs)); color: var(--text-3);
 }
-.ask-scope svg { color: var(--accent-text); }
 .ask-send {
   flex: none;
   width: 32px; height: 32px;
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: var(--radius-sm);
-  background: var(--ink); color: var(--ink-text);
-  transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  border-radius: 8px;
+  background: var(--accent-fill); color: var(--accent-ink);
+  transition: background var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
 }
-.ask-send:hover:not([disabled]) { transform: scale(1.05); }
-.ask-send[disabled] { opacity: .35; cursor: default; }
+.ask-send:hover:not([disabled]) { background: var(--accent-2); }
+.ask-send[disabled] { opacity: .4; cursor: default; }
 /* SectionEditor: the negative margin keeps the text aligned with the page. */
 .seamless {
   width: calc(100% + 20px);
@@ -972,7 +987,6 @@ ol.rt-list > li::before {
 .cu-bar { flex: none; width: 3px; height: 28px; border-radius: var(--radius-2xs); }
 .cu-actions { display: flex; align-items: center; gap: 6px; opacity: 0; transition: opacity var(--t) var(--ease); }
 .cu-row:hover .cu-actions, .cu-row:focus-within .cu-actions { opacity: 1; }
-.cu-actions .btn.ghost { color: var(--text-2); }
 .cu-problem {
   display: flex; align-items: center; gap: 10px;
   padding: calc(8px * var(--density)) calc(12px * var(--density));
@@ -1487,7 +1501,6 @@ ol.rt-list > li::before {
 .share-avatar-ws { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; flex: none; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent-text); }
 .share-transcript { align-items: flex-start; gap: 10px; margin-top: calc(6px * var(--density)); }
 .share-transcript .chk { margin-top: 2px; }
-.home-scope { display: flex; max-width: 360px; }
 
 .presence { display: inline-flex; align-items: center; }
 .presence-avatar { width: 24px; height: 24px; font-size: 10px; margin: 0; border: 2px solid var(--surface); }

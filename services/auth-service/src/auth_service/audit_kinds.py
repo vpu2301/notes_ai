@@ -91,6 +91,8 @@ TENANT_INVITATION_ACCEPTED: Final[str] = "tenant.invitation_accepted"
 TENANT_INVITATION_DECLINED: Final[str] = "tenant.invitation_declined"
 TENANT_MEMBER_LEFT: Final[str] = "tenant.member_left"
 TENANT_DISSOLVED: Final[str] = "tenant.dissolved"
+TENANT_ARCHIVED: Final[str] = "tenant.archived"
+TENANT_UNARCHIVED: Final[str] = "tenant.unarchived"
 
 # ── Referral leads ────────────────────────────────────────────────────
 # Platform tenant; payload is ref_present only, never the address.

@@ -216,7 +216,7 @@ struct HomeView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            WorkspaceChip()
+            SpaceHeader()
             Text(title)
                 .font(.dsSerif(30))
                 .tracking(-0.5)

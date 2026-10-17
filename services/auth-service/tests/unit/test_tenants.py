@@ -554,7 +554,15 @@ def test_long_create_still_needs_tenant_create(make_client) -> None:
     assert resp.status_code == 403
 
 
-def _patch_member(monkeypatch, role: str, *, owners: int = 0, others: int = 0, kind: str = "team"):  # noqa: ANN001, ANN202
+def _patch_member(
+    monkeypatch,
+    role: str,
+    *,
+    owners: int = 0,
+    others: int = 0,
+    kind: str = "team",
+    tenant_status: str = "active",
+):  # noqa: ANN001, ANN202
     from auth_service.routers import tenants
 
     calls: dict[str, Any] = {}
@@ -563,7 +571,9 @@ def _patch_member(monkeypatch, role: str, *, owners: int = 0, others: int = 0, k
         return _membership_row(role)
 
     async def _get_tenant(conn, *, tenant_id):  # noqa: ANN001
-        return _tenant_row(tenant_id, kind=kind)
+        return _tenant_row(
+            tenant_id, kind=kind, status=tenant_status, is_active=tenant_status == "active"
+        )
 
     async def _count_owners(conn, *, tenant_id, exclude_sub=None):  # noqa: ANN001
         return owners
@@ -583,7 +593,16 @@ def _patch_member(monkeypatch, role: str, *, owners: int = 0, others: int = 0, k
     monkeypatch.setattr(tenants.repo, "count_active_owners", _count_owners)
     monkeypatch.setattr(tenants.repo, "count_other_active_members", _count_others)
     monkeypatch.setattr(tenants.repo, "leave", _leave)
+
+    async def _archive(conn, *, tenant_id):  # noqa: ANN001
+        calls["archived"] = True
+
+    async def _unarchive(conn, *, tenant_id):  # noqa: ANN001
+        calls["unarchived"] = True
+
     monkeypatch.setattr(tenants.repo, "dissolve", _dissolve)
+    monkeypatch.setattr(tenants.repo, "archive", _archive)
+    monkeypatch.setattr(tenants.repo, "unarchive", _unarchive)
     return calls
 
 
@@ -628,6 +647,41 @@ def test_dissolve_an_empty_team_workspace(make_client, monkeypatch) -> None:
     resp = client.post(f"/tenants/{TENANT_A}/dissolve", json={"confirm_name": "dev hospital a"})
     assert resp.status_code == 202, resp.text
     assert resp.json()["status"] == "dissolved" and calls["dissolved"]
+
+
+def test_archive_keeps_members_and_needs_no_name(make_client, monkeypatch) -> None:
+    # Unlike dissolve, other members do not block it.
+    calls = _patch_member(monkeypatch, "owner", others=3)
+    client = make_client(_claims(roles=["tenant_admin"]))
+    resp = client.post(f"/tenants/{TENANT_A}/archive")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "archived" and calls["archived"]
+    assert "tenant.archived" in [c["kind"] for c in client.audit_calls]  # type: ignore[attr-defined]
+
+
+def test_archive_refusals(make_client, monkeypatch) -> None:
+    client = make_client(_claims(roles=["tenant_admin"]))
+    url = f"/tenants/{TENANT_A}/archive"
+    _patch_member(monkeypatch, "admin")
+    assert client.post(url).json()["code"] == "owner_only"
+    _patch_member(monkeypatch, "owner", kind="personal")
+    assert client.post(url).json()["code"] == "personal_workspace"
+    _patch_member(monkeypatch, "owner", tenant_status="archived")
+    assert client.post(url).json()["code"] == "not_active"
+
+
+def test_unarchive_restores_an_archived_workspace(make_client, monkeypatch) -> None:
+    client = make_client(_claims(roles=["tenant_admin"]))
+    url = f"/tenants/{TENANT_A}/unarchive"
+    _patch_member(monkeypatch, "owner")
+    assert client.post(url).json()["code"] == "not_archived"
+    _patch_member(monkeypatch, "member", tenant_status="archived")
+    assert client.post(url).json()["code"] == "owner_only"
+    calls = _patch_member(monkeypatch, "owner", tenant_status="archived")
+    resp = client.post(url)
+    assert resp.status_code == 200, resp.text
+    assert calls["unarchived"]
+    assert "tenant.unarchived" in [c["kind"] for c in client.audit_calls]  # type: ignore[attr-defined]
 
 
 def test_add_member_by_email_says_use_invitations_in_dual(make_client, monkeypatch) -> None:

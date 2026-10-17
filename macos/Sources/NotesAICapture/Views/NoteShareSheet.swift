@@ -16,6 +16,8 @@ struct NoteShareSheet: View {
     @State private var role: NoteLevel = .comment
     @State private var message = ""
     @State private var outcome: String?
+    /// The public link's own sheet, opened when the link is made.
+    @State private var publicOpen = false
 
     private var addresses: [String] {
         emails.split(whereSeparator: { " ,;\n".contains($0) })
@@ -49,6 +51,20 @@ struct NoteShareSheet: View {
         .frame(width: 500, height: 600)
         .background(DS.bg)
         .task { await model.loadSharing() }
+        .sheet(isPresented: $publicOpen) {
+            PublicLinkSheet(
+                noteTitle: model.content?.title ?? "",
+                link: model.sharing?.publicLink,
+                url: model.publicURL(webAppURL: webAppURL),
+                busy: model.busy,
+                error: model.actionError,
+                renew: { await model.renewPublicLink(expiresInDays: $0) },
+                turnOff: {
+                    await model.revokePublicLink()
+                    return model.sharing?.publicLink == nil
+                },
+                onClose: { publicOpen = false })
+        }
     }
 
     private var noteTitle: String {
@@ -263,7 +279,12 @@ struct NoteShareSheet: View {
             HStack(spacing: 8) {
                 Button {
                     Task {
-                        if let url = await model.publicLinkURL(webAppURL: webAppURL) {
+                        // Making the link opens its sheet; an existing one is just copied.
+                        let made = !hasLink
+                        guard let url = await model.publicLinkURL(webAppURL: webAppURL) else { return }
+                        if made {
+                            publicOpen = true
+                        } else {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(url.absoluteString, forType: .string)
                         }

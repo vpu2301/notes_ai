@@ -240,6 +240,17 @@ export function UsersIcon({ size = 16 }: IconProps) {
   );
 }
 
+/** A person with a plus: invite (the Mac's `person.badge.plus`). */
+export function UserPlusIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <circle cx="8" cy="7" r="2.75" />
+      <path d="M3 16.5a5 5 0 0 1 10 0" />
+      <path d="M15.5 7.5v5M13 10h5" />
+    </svg>
+  );
+}
+
 export function LockIcon({ size = 16 }: IconProps) {
   return (
     <svg {...base(size)}>

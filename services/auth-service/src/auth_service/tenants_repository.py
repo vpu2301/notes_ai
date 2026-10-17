@@ -177,7 +177,7 @@ MEMBERSHIP_COLUMNS = "id, tenant_id, user_sub, role, status, invited_by, created
 async def list_tenants_for_user(
     conn: asyncpg.Connection, *, user_sub: UUID
 ) -> list[asyncpg.Record]:
-    """Active memberships in active tenants, with role; cross-tenant, so ``tenant_writer`` only."""
+    """Active memberships in active tenants (and archived ones the caller owns), with role; cross-tenant, so ``tenant_writer`` only."""
     return list(
         await conn.fetch(
             f"""
@@ -187,7 +187,7 @@ async def list_tenants_for_user(
             JOIN tenants t ON t.id = m.tenant_id
             WHERE m.user_sub = $1
               AND m.status = 'active'
-              AND t.status = 'active'
+              AND (t.status = 'active' OR (t.status = 'archived' AND m.role = 'owner'))
             ORDER BY (t.kind = 'personal') DESC, t.display_name, t.id
             """,
             user_sub,
@@ -349,6 +349,20 @@ async def dissolve(conn: asyncpg.Connection, *, tenant_id: UUID) -> None:
     )
     await conn.execute(
         "UPDATE tenant_memberships SET status = 'suspended' WHERE tenant_id = $1", tenant_id
+    )
+
+
+async def archive(conn: asyncpg.Connection, *, tenant_id: UUID) -> None:
+    """Closed for everyone, nothing deleted; memberships stay as they are so a restore brings everyone back."""
+    await conn.execute(
+        "UPDATE tenants SET status = 'archived', is_active = false WHERE id = $1", tenant_id
+    )
+
+
+async def unarchive(conn: asyncpg.Connection, *, tenant_id: UUID) -> None:
+    await conn.execute(
+        "UPDATE tenants SET status = 'active', is_active = true WHERE id = $1 AND status = 'archived'",
+        tenant_id,
     )
 
 

@@ -629,10 +629,10 @@ const HITS = {
   next_cursor: null,
 };
 
-function home() {
+function home(path = "/") {
   return render(
     <ToasterProvider>
-      <MemoryRouter initialEntries={["/"]}>
+      <MemoryRouter initialEntries={[path]}>
         <SpacesProvider>
           <Routes>
             <Route path="/" element={<NotesPage />} />
@@ -644,18 +644,20 @@ function home() {
 }
 
 describe("notes list — scope", () => {
-  it("All / Mine / Shared with me sends the scope, and each row says the level", async () => {
+  it("All / My notes / Shared with me (`?scope=`) sends the scope, and each row says the level", async () => {
     const calls = server({ "/v1/notes/search": { body: HITS }, "/v1/spaces": { body: { spaces: [] } } });
-    home();
+    const { unmount } = home();
     expect(await screen.findByText("Can comment")).toBeInTheDocument();
     // Not the manager: no access menu, no trash.
     expect(screen.queryByRole("button", { name: /visible to everyone in the workspace/i })).toBeNull();
     expect(calls.filter((c) => c.path === "/v1/notes/search").every((c) => !c.query.has("scope"))).toBe(true);
-    await userEvent.click(screen.getByRole("radio", { name: /shared with me/i }));
+    unmount();
+    const shared = home("/?scope=shared_with_me");
     await waitFor(() =>
       expect(calls.some((c) => c.path === "/v1/notes/search" && c.query.get("scope") === "shared_with_me")).toBe(true),
     );
-    await userEvent.click(screen.getByRole("radio", { name: /^mine$/i }));
+    shared.unmount();
+    home("/?scope=mine");
     await waitFor(() => expect(calls.some((c) => c.query.get("scope") === "mine")).toBe(true));
   });
 

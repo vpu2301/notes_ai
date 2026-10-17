@@ -51,9 +51,12 @@ struct MainWindowView: View {
                     HStack(spacing: 0) {
                         SidebarView()
                         Rectangle().fill(DS.line).frame(width: DS.hairline).frame(maxHeight: .infinity)
-                        detail
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(DS.bg)
+                        VStack(spacing: 0) {
+                            SpaceHeaderBar()
+                            detail
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(DS.bg)
                     }
                 }
             }

@@ -1,10 +1,12 @@
+import { useState } from "react";
+import { createPortal } from "react-dom";
 import { messageFor } from "../lib/errorCopy";
 import { createPublicLink, revokePublicLink, setVisibility } from "../api/notes";
-import type { NoteLevel, SearchHit, SharingView } from "../api/types";
+import type { LinkView, NoteLevel, SearchHit, SharingView } from "../api/types";
 import { levelLabel } from "../lib/noteLevel";
 import { ChevronDownIcon, CloseIcon, GlobeIcon, LockIcon, UsersIcon } from "./icons";
 import { Menu, type MenuItem } from "./Menu";
-import { publicLinkUrl } from "./ShareDialog";
+import { PublicLinkDialog, publicLinkUrl } from "./PublicLinkDialog";
 import { useToast } from "./Toaster";
 
 /** The widest audience a note reaches — what the list's badge says. */
@@ -79,6 +81,8 @@ export function AccessMenu({
   onChange: (view: SharingView) => void;
 }) {
   const toast = useToast();
+  // A link made from this menu opens its modal; an existing one is just copied.
+  const [made, setMade] = useState<LinkView | null>(null);
   const Icon = access.kind === "public" ? GlobeIcon : access.kind === "workspace" ? UsersIcon : LockIcon;
   const workspace = hit.visibility === "workspace";
 
@@ -114,6 +118,10 @@ export function AccessMenu({
           () => createPublicLink(hit.note_id),
           async (view) => {
             if (!view.public_link) return;
+            if (!hit.has_public_link) {
+              setMade(view.public_link);
+              return;
+            }
             await navigator.clipboard.writeText(publicLinkUrl(view.public_link.path));
             toast.success("Public link copied");
           },
@@ -143,6 +151,17 @@ export function AccessMenu({
           </>
         }
       />
+      {made &&
+        createPortal(
+          <PublicLinkDialog
+            noteId={hit.note_id}
+            noteTitle={hit.title}
+            link={made}
+            onChange={onChange}
+            onClose={() => setMade(null)}
+          />,
+          document.body,
+        )}
     </span>
   );
 }

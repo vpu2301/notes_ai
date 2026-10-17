@@ -213,6 +213,8 @@ final class AppState: ObservableObject {
 
     /// Every workspace this identity can reach, as the server lists it now (`memberships` is what sign-in knew).
     @Published private(set) var workspaces: [Tenant] = []
+    /// Archived workspaces this person owns: not enterable, listed apart with Restore.
+    @Published private(set) var archivedWorkspaces: [Tenant] = []
     /// A switch in flight, so the switcher can show which one.
     @Published private(set) var switchingTo: String?
     /// A workspace this Mac can no longer reach, and why; banner until dismissed, local state stays.
@@ -606,12 +608,25 @@ final class AppState: ObservableObject {
     }
 
     /// The note's public link, minted on first use.
-    func publicLink(noteId: String) async throws -> URL? {
+    func publicLink(noteId: String) async throws -> SharingView {
         let sharing = try await api.createPublicLink(id: noteId)
         applySharing(sharing)
-        guard let path = sharing.publicLink?.path,
+        return sharing
+    }
+
+    /// A public link as a full URL on the web app.
+    func publicURL(_ link: PublicLink?) -> URL? {
+        guard let path = link?.path,
               let root = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces)) else { return nil }
         return root.appending(path: String(path.dropFirst()))
+    }
+
+    /// A new lifetime mints a new link (nil = permanent); the old one stops working.
+    func renewPublicLink(noteId: String, expiresInDays: Int?) async throws -> SharingView {
+        _ = try await api.revokePublicLink(id: noteId)
+        let sharing = try await api.createPublicLink(id: noteId, expiresInDays: expiresInDays)
+        applySharing(sharing)
+        return sharing
     }
 
     func revokePublicLink(noteId: String) async throws {
@@ -1125,8 +1140,10 @@ extension AppState {
     func refreshWorkspaces(force: Bool = false) async {
         guard authState == .signedIn, !reconnecting else { return }
         if !force, let last = lastWorkspaceRefresh, last.timeIntervalSinceNow > -300 { return }
-        guard let list = try? await api.workspaces() else { return }
+        guard let all = try? await api.workspaces() else { return }
         lastWorkspaceRefresh = Date()
+        archivedWorkspaces = all.filter(\.isArchived)
+        let list = all.filter { !$0.isArchived }
         workspaces = list
         // The active workspace vanished from the list: find out properly rather than let the next request fail.
         if let tenantId, !list.isEmpty, !list.contains(where: { $0.id == tenantId }) {
@@ -1376,6 +1393,35 @@ extension AppState {
         return nil
     }
 
+    /// Archive a team workspace you own: closed for everyone, nothing deleted. Returns what went wrong, or nil.
+    func archive(_ workspace: Tenant) async -> String? {
+        do {
+            try await api.archiveWorkspace(tenantId: workspace.id)
+        } catch {
+            return AuthCopy.message(for: error)
+        }
+        // The server moved this session to Personal when it was in the archived one.
+        if let now = await api.tenantId, now != tenantId {
+            adoptWorkspace(now)
+            await loadWorkspaceData()
+        }
+        await refreshWorkspaces(force: true)
+        membershipNotice = "\(workspace.title) was archived. Restore it from the workspace list."
+        return nil
+    }
+
+    /// Bring an archived workspace back; it then sits with the others.
+    func unarchive(_ workspace: Tenant) async -> String? {
+        do {
+            _ = try await api.unarchiveWorkspace(tenantId: workspace.id)
+        } catch {
+            return AuthCopy.message(for: error)
+        }
+        await refreshWorkspaces(force: true)
+        membershipNotice = "\(workspace.title) was restored."
+        return nil
+    }
+
     /// Dissolve the open workspace (owner, nobody else in it, name typed back). Returns what went wrong, or nil.
     func dissolve(_ workspace: Tenant, confirmName: String) async -> String? {
         do {
@@ -1389,7 +1435,7 @@ extension AppState {
         } else {
             await refreshWorkspaces(force: true)
         }
-        membershipNotice = "\(workspace.title) was dissolved."
+        membershipNotice = "\(workspace.title) was deleted."
         return nil
     }
 }

@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import * as authApi from "../api/auth";
-import { activateWorkspace, forgetMyInvitations } from "../api/account";
+import { activateWorkspace, forgetMyInvitations, listTenants } from "../api/account";
 import type { ProfilePatch } from "../api/auth";
 import {
   refreshSession,
@@ -461,12 +461,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return !iss.includes("/realms/");
   }, [me]);
 
+  // Memberships carry the tenant's unique internal name (`tenant-a`); `GET /tenants` has the name people gave it.
+  const [titles, setTitles] = useState<Record<string, string>>({});
+  const membershipKey = memberships.map((m) => m.tenant_id).join(",");
+  useEffect(() => {
+    if (status !== "authenticated" || !canSwitchWorkspaces || !membershipKey) return;
+    let live = true;
+    listTenants()
+      .then((r) => live && setTitles(Object.fromEntries(r.items.map((t) => [t.id, t.display_name || t.name]))))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [status, canSwitchWorkspaces, membershipKey]);
+  const namedMemberships = useMemo(
+    () => memberships.map((m) => ({ ...m, name: titles[m.tenant_id] || m.name })),
+    [memberships, titles],
+  );
+
   const value = useMemo(
     () => ({
       status,
       me,
       identity,
-      memberships,
+      memberships: namedMemberships,
       activeTenantId,
       activeRole,
       canSwitchWorkspaces,
@@ -493,7 +511,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       status,
       me,
       identity,
-      memberships,
+      namedMemberships,
       activeTenantId,
       activeRole,
       canSwitchWorkspaces,

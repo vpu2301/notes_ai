@@ -1,6 +1,30 @@
 {
   "components": {
     "schemas": {
+      "ArchiveOut": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ArchiveOut",
+        "type": "object"
+      },
       "Body_upload_logo_tenants__tenant_id__logo_put": {
         "properties": {
           "file": {
@@ -64,6 +88,16 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3833,6 +3867,65 @@
         ]
       }
     },
+    "/tenants/{tenant_id}/archive": {
+      "post": {
+        "operationId": "archive_workspace_tenants__tenant_id__archive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Archive a team workspace (owner): closed for everyone, nothing deleted, restorable any time",
+        "tags": [
+          "tenants"
+        ]
+      }
+    },
     "/tenants/{tenant_id}/dissolve": {
       "post": {
         "operationId": "dissolve_workspace_tenants__tenant_id__dissolve_post",
@@ -4414,6 +4507,65 @@
           }
         },
         "summary": "Select the caller's active tenant (must be a member)",
+        "tags": [
+          "tenants"
+        ]
+      }
+    },
+    "/tenants/{tenant_id}/unarchive": {
+      "post": {
+        "operationId": "unarchive_workspace_tenants__tenant_id__unarchive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore an archived workspace (owner); its members get it back as it was",
         "tags": [
           "tenants"
         ]

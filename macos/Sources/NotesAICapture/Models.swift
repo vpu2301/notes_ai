@@ -854,10 +854,13 @@ struct PublicLink: Decodable, Sendable {
     /// SPA path; prefix with the web app origin for a full URL.
     let path: String
     let viewCount: Int
+    /// Nil = permanent.
+    let expiresAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case token, path
         case viewCount = "view_count"
+        case expiresAt = "expires_at"
     }
 }
 
@@ -1828,12 +1831,16 @@ struct Tenant: Decodable, Sendable {
     let myRole: String?
     /// "personal" or "team"; older servers omit it.
     var kind: String?
+    /// "archived": closed for everyone; listed only to its owners, who may restore it.
+    var status: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, kind
+        case id, name, kind, status
         case displayName = "display_name"
         case myRole = "my_role"
     }
+
+    var isArchived: Bool { status == "archived" }
 
     var isPersonal: Bool { kind == "personal" }
 
@@ -1923,6 +1930,11 @@ struct AcceptedInvitation: Decodable, Sendable {
 /// `DELETE /tenants/{id}/members/me` — a token for the personal workspace the session was moved to.
 struct LeftWorkspace: Decodable, Sendable {
     let token: WorkspaceToken
+}
+
+struct ArchivedWorkspace: Decodable, Sendable {
+    /// Nil when this session was elsewhere.
+    let token: WorkspaceToken?
 }
 
 /// Why a workspace stopped being reachable; only one case means "ask to be let back in".

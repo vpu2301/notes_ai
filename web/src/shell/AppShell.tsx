@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { cachedTenants, listTenants, myInvitationsCached } from "../api/account";
-import { createWorkspace } from "../api/tenants";
+import { createWorkspace, unarchiveWorkspace } from "../api/tenants";
 import { ApiError } from "../api/http";
 import { roleLabel, workspaceLabel, type TenantSummary } from "../api/types";
+import type { SearchScope } from "../api/notes";
 import * as notifApi from "../api/notifications";
 import type { NotificationItem } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
@@ -16,7 +17,6 @@ import {
   ChevronDownIcon,
   CheckIcon,
   CloseIcon,
-  HomeIcon,
   MailIcon,
   FileTextIcon,
   LayersIcon,
@@ -30,9 +30,12 @@ import {
   SidebarIcon,
   SunIcon,
   UploadIcon,
+  UserIcon,
+  UsersIcon,
   ShareIcon,
 } from "../components/icons";
 import { relativeTime } from "../lib/time";
+import { SpacePeople, useActiveSpace, WorkspaceMark } from "./SpaceHeader";
 import { SpacesNav } from "./SpacesNav";
 import { useTheme, type ThemePref } from "./theme";
 
@@ -46,6 +49,39 @@ function initialsOf(name: string): string {
 }
 
 // ── Sidebar pieces ──────────────────────────────────────────────────────
+
+const SCOPES: { scope: SearchScope; label: string; icon: ReactNode }[] = [
+  { scope: "all", label: "All notes", icon: <NotesIcon size={16} /> },
+  { scope: "mine", label: "My notes", icon: <UserIcon size={16} /> },
+  { scope: "shared_with_me", label: "Shared with me", icon: <UsersIcon size={16} /> },
+];
+
+/** All notes / My notes / Shared with me, as the Mac sidebar; the home page reads the scope from `?scope=`.
+ *  A guest's notes are the ones shared with them: one row, nothing to filter. */
+function ScopeLinks({ collapsed, guest }: { collapsed: boolean; guest: boolean }) {
+  const { pathname, search } = useLocation();
+  const current = new URLSearchParams(search).get("scope") ?? "all";
+  if (guest) return <SideLink to="/" end icon={<UsersIcon size={16} />} label="Shared with me" collapsed={collapsed} />;
+  return (
+    <>
+      {SCOPES.map((s) => {
+        const on = pathname === "/" && current === s.scope;
+        return (
+          <Link
+            key={s.scope}
+            to={s.scope === "all" ? "/" : `/?scope=${s.scope}`}
+            className={`sb-link ${on ? "on" : ""}`}
+            aria-current={on ? "page" : undefined}
+            title={collapsed ? s.label : undefined}
+          >
+            {s.icon}
+            <span className="sb-link-label">{s.label}</span>
+          </Link>
+        );
+      })}
+    </>
+  );
+}
 
 function SideLink({
   to,
@@ -189,15 +225,8 @@ interface WorkspaceRow {
   name: string;
   kind?: string;
   role: string;
-}
-
-/** Personal workspaces get a house, team ones their first letter in a circle. */
-function WorkspaceMark({ kind, name }: { kind?: string; name: string }) {
-  return (
-    <span className={`sb-ws-mark ${kind === "personal" ? "personal" : ""}`} aria-hidden="true">
-      {kind === "personal" ? <HomeIcon size={11} /> : (name.trim().charAt(0) || "?").toUpperCase()}
-    </span>
-  );
+  /** Archived ones are listed (to their owners) apart, with Restore instead of a switch. */
+  archived?: boolean;
 }
 
 /** `GET /tenants` (not `/auth/me` memberships): it carries display name and `is_active`. Shown even with one workspace.
@@ -229,11 +258,29 @@ function WorkspaceSwitch({ onDone, onNew }: { onDone: () => void; onNew: () => v
         name: t.display_name || t.name,
         kind: t.kind ?? (t.id === me?.personal_tenant_id ? "personal" : undefined),
         role: t.my_role,
+        archived: t.status === "archived",
       }))
     : memberships.map((m) => ({ id: m.tenant_id, name: m.name, kind: m.kind, role: m.role }));
   // A session that cannot switch still names where it is.
   const fixed = !canSwitchWorkspaces || legacy;
-  const shown = fixed ? rows.filter((r) => r.id === activeTenantId) : rows;
+  const open = rows.filter((r) => !r.archived);
+  const archived = fixed ? [] : rows.filter((r) => r.archived);
+  const shown = fixed ? open.filter((r) => r.id === activeTenantId) : open;
+  const [restoring, setRestoring] = useState<string | null>(null);
+
+  /** Back as it was; it then sits with the others, one click away. */
+  const restore = async (t: WorkspaceRow) => {
+    setRestoring(t.id);
+    try {
+      const back = await unarchiveWorkspace(t.id);
+      setTenants((list) => list?.map((x) => (x.id === back.id ? { ...x, status: back.status, is_active: back.is_active } : x)) ?? list);
+      toast.success(`${t.name} restored`);
+    } catch (err) {
+      toast.error(messageFor(err));
+    } finally {
+      setRestoring(null);
+    }
+  };
 
   const pick = async (t: WorkspaceRow) => {
     if (t.id === activeTenantId || switching) return;
@@ -274,6 +321,21 @@ function WorkspaceSwitch({ onDone, onNew }: { onDone: () => void; onNew: () => v
           </button>
         );
       })}
+      {archived.length > 0 && (
+        <>
+          <div className="sb-user-menu-sep" />
+          <div className="sb-user-menu-label">Archived</div>
+          {archived.map((t) => (
+            <div key={t.id} className="sb-user-menu-row archived">
+              <WorkspaceMark kind={t.kind} name={t.name} />
+              <span className="grow ellipsis">{t.name}</span>
+              <button className="btn ghost sm" disabled={restoring !== null} onClick={() => void restore(t)}>
+                {restoring === t.id ? "Restoring…" : "Restore"}
+              </button>
+            </div>
+          ))}
+        </>
+      )}
       {!fixed && (
         <>
           <div className="sb-user-menu-sep" />
@@ -685,17 +747,62 @@ function NotificationBell() {
   );
 }
 
-/** Route → topbar title. Pages that need a richer crumb own their heading. */
+/** "3 Days Labs ▾ · Workspace" at the head of every page, as the Mac's title-bar row: the name opens the switcher. */
+function TopbarSpace() {
+  const { identity } = useAuth();
+  const { name, kind, personal } = useActiveSpace();
+  const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  const ref = useDismiss<HTMLDivElement>(open, close);
+  if (!name) return null;
+  return (
+    <div className="tb-space" role="group" aria-label={`${personal ? "Private" : "Workspace"}: ${name}`}>
+      <div className="dropdown-host" ref={ref}>
+        <button
+          className={`tb-space-btn ${open ? "open" : ""}`}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title="Switch workspace"
+          onClick={() => setOpen((v) => !v)}
+        >
+          <WorkspaceMark kind={kind} name={name} />
+          <span className="tb-space-name">{name}</span>
+          <ChevronDownIcon size={13} />
+        </button>
+        {open && (
+          <div className="dropdown tb-space-menu" role="menu" aria-label="Workspaces">
+            {identity?.email && (
+              <div className="sb-user-menu-head">
+                <span>{identity.email}</span>
+              </div>
+            )}
+            <WorkspaceSwitch
+              onDone={close}
+              onNew={() => {
+                setOpen(false);
+                setCreating(true);
+              }}
+            />
+          </div>
+        )}
+      </div>
+      <span className="tb-space-kind">{personal ? "Private · only you" : "Workspace"}</span>
+      {creating && <NewWorkspaceDialog onClose={() => setCreating(false)} />}
+    </div>
+  );
+}
+
+/** Route → topbar title, after the workspace label. Pages that need a richer crumb own their heading. */
 function titleFor(pathname: string): string {
-  // The home page, a space and a note carry their own heading.
-  if (pathname === "/" || pathname.startsWith("/spaces/") || pathname.startsWith("/notes/")) return "";
   if (pathname.startsWith("/meeting/new")) return "New meeting";
   if (pathname.startsWith("/new")) return "New from template";
-  return "Notes AI";
+  return "";
 }
 
 function TopBar({ scroller }: { scroller: React.RefObject<HTMLDivElement> }) {
   const { pathname } = useLocation();
+  const title = titleFor(pathname);
   const [stuck, setStuck] = useState(false);
 
   useEffect(() => {
@@ -709,12 +816,16 @@ function TopBar({ scroller }: { scroller: React.RefObject<HTMLDivElement> }) {
 
   return (
     <header className={`tb ${stuck ? "is-stuck" : ""}`}>
-      <div className="tb-title">
-        {titleFor(pathname)}
-      </div>
+      <TopbarSpace />
+      {title && (
+        <div className="tb-title">
+          <span className="tb-space-sep" aria-hidden="true">·</span>
+          {title}
+        </div>
+      )}
       <div className="tb-spacer" />
       <div className="tb-actions">
-        <NotificationBell />
+        <SpacePeople />
       </div>
     </header>
   );
@@ -834,6 +945,7 @@ export function AppShell() {
             <SidebarIcon size={17} />
           </button>
           <WorkspaceMenu collapsed={collapsed} />
+          <NotificationBell />
         </div>
 
         {!guest && (
@@ -849,7 +961,7 @@ export function AppShell() {
         )}
 
         <nav className="sb-nav" aria-label="Main">
-          <SideLink to="/" end icon={<NotesIcon size={16} />} label="All notes" collapsed={collapsed} />
+          <ScopeLinks collapsed={collapsed} guest={guest} />
           {(activeRole === "owner" || activeRole === "admin") && (
             /* counts only; the API refuses everyone else */
             <SideLink to="/admin/sharing" icon={<ShareIcon size={16} />} label="Sharing" collapsed={collapsed} />

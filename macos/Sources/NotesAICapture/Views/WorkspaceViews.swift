@@ -2,13 +2,17 @@ import AppKit
 import SwiftUI
 
 /// The workspace switcher: memberships with the active one marked. Sidebar account menu and Settings › Account;
-/// with `manage` (Settings only) each team workspace can also be left, and the open one dissolved by its owner.
+/// with `manage` (Settings only) each team workspace can also be left, archived or (the open one) deleted by its owner.
+/// Archived ones the person owns are listed apart, with Restore.
 struct WorkspaceList: View {
     @EnvironmentObject private var app: AppState
     var onSwitch: (() -> Void)? = nil
     var manage = false
 
     @State private var leaving: Tenant?
+    @State private var archiving: Tenant?
+    /// Delete first offers archiving; only "Delete anyway" reaches the type-the-name step.
+    @State private var deleteOffer: Tenant?
     @State private var dissolving: Tenant?
     @State private var dissolveName = ""
     @State private var working: String?
@@ -33,9 +37,43 @@ struct WorkspaceList: View {
                     }
                 }
             }
+            if !app.archivedWorkspaces.isEmpty {
+                DSLabel("Archived")
+                    .padding(.top, 6)
+                ForEach(app.archivedWorkspaces, id: \.id) { workspace in
+                    archivedRow(workspace)
+                }
+            }
             if let error {
                 DSNotice(tone: .danger, symbol: "exclamationmark.triangle.fill", text: error)
             }
+        }
+        .alert("Archive \(archiving?.title ?? "")?",
+               isPresented: Binding(get: { archiving != nil }, set: { if !$0 { archiving = nil } })) {
+            Button("Archive") {
+                guard let workspace = archiving else { return }
+                run(workspace) { await app.archive(workspace) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Nobody can open it until you restore it. Notes and members stay as they are; open invitations are cancelled.")
+        }
+        .alert("Archive \(deleteOffer?.title ?? "") instead?",
+               isPresented: Binding(get: { deleteOffer != nil }, set: { if !$0 { deleteOffer = nil } })) {
+            Button("Archive instead") {
+                guard let workspace = deleteOffer else { return }
+                run(workspace) { await app.archive(workspace) }
+            }
+            .keyboardShortcut(.defaultAction)
+            Button("Delete anyway…", role: .destructive) {
+                guard let workspace = deleteOffer else { return }
+                dissolveName = ""
+                // The next alert can only present once this one is gone.
+                DispatchQueue.main.async { dissolving = workspace }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Archiving closes it for everyone just like deleting, but keeps every note and member. You can restore it any time.")
         }
         .alert("Leave \(leaving?.title ?? "")?",
                isPresented: Binding(get: { leaving != nil }, set: { if !$0 { leaving = nil } })) {
@@ -47,10 +85,10 @@ struct WorkspaceList: View {
         } message: {
             Text("You lose access to its notes and meetings until someone invites you again.")
         }
-        .alert("Dissolve \(dissolving?.title ?? "")?",
+        .alert("Delete \(dissolving?.title ?? "")?",
                isPresented: Binding(get: { dissolving != nil }, set: { if !$0 { dissolving = nil } })) {
             TextField("Workspace name", text: $dissolveName)
-            Button("Dissolve", role: .destructive) {
+            Button("Delete", role: .destructive) {
                 guard let workspace = dissolving else { return }
                 let typed = dissolveName
                 run(workspace) { await app.dissolve(workspace, confirmName: typed) }
@@ -61,18 +99,40 @@ struct WorkspaceList: View {
         }
     }
 
-    /// Leave for any team workspace; dissolve for the open one when you own it. The server has the last word.
+    /// Leave for any team workspace; archive for one you own; delete for the open one you own. The server has the last word.
     private func actions(_ workspace: Tenant) -> [DSMenuItem] {
         var items: [DSMenuItem] = [
             .item("Leave workspace…", symbol: "rectangle.portrait.and.arrow.right") { leaving = workspace },
         ]
+        if workspace.myRole == "owner" {
+            items.append(.item("Archive…", symbol: "archivebox") { archiving = workspace })
+        }
         if workspace.myRole == "owner", workspace.id == app.tenantId {
-            items.append(.item("Dissolve…", symbol: "trash", danger: true) {
-                dissolveName = ""
-                dissolving = workspace
-            })
+            items.append(.item("Delete…", symbol: "trash", danger: true) { deleteOffer = workspace })
         }
         return items
+    }
+
+    /// Not enterable: the name, dimmed, and Restore.
+    private func archivedRow(_ workspace: Tenant) -> some View {
+        HStack(spacing: 10) {
+            DSAvatar(name: workspace.title, size: 24)
+                .opacity(0.55)
+            Text(workspace.title)
+                .font(.ds(13, .medium))
+                .foregroundStyle(DS.text3)
+                .lineLimit(1)
+            Spacer()
+            if working == workspace.id {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Restore") { run(workspace) { await app.unarchive(workspace) } }
+                    .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 24))
+                    .disabled(working != nil)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
     }
 
     private func run(_ workspace: Tenant, _ work: @escaping () async -> String?) {

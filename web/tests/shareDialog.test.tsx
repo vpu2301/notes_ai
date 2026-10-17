@@ -278,3 +278,38 @@ function LINK_BASE() {
     send_count: 0,
   };
 }
+
+describe("share sheet — public link modal", () => {
+  const PUBLIC = {
+    id: "pl-1",
+    token: "tok",
+    path: "/p/tok",
+    label: null,
+    recipient_email: null,
+    created_at: "2026-10-17T10:00:00Z",
+    expires_at: null,
+    view_count: 0,
+  };
+
+  it("turning on 'Anyone with the link' opens the link with its type, Copy and Send", async () => {
+    const calls = server({
+      ...LOADED,
+      [`POST /v1/notes/${NOTE}/public-link`]: { body: { ...SHARING, public_link: PUBLIC } },
+    });
+
+    sheet();
+    await userEvent.click(await screen.findByRole("checkbox", { name: /anyone with the link/i }));
+
+    const modal = await screen.findByRole("dialog", { name: "Public link" });
+    expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/public-link"))).toBe(true);
+    expect(within(modal).getByLabelText("Public link")).toHaveValue(`${window.location.origin}/p/tok`);
+    expect(within(modal).getByText(/permanent · never expires/i)).toBeInTheDocument();
+    expect(within(modal).getByRole("button", { name: /copy/i })).toBeInTheDocument();
+    expect(within(modal).getByRole("button", { name: /send/i })).toBeInTheDocument();
+
+    await userEvent.click(within(modal).getByRole("button", { name: /^done$/i }));
+    expect(screen.queryByRole("dialog", { name: "Public link" })).toBeNull();
+    // The share sheet is still there underneath.
+    expect(screen.getByRole("dialog", { name: "Share note" })).toBeInTheDocument();
+  });
+});

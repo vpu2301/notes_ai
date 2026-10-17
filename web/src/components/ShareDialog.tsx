@@ -28,14 +28,13 @@ import { levelLabel } from "../lib/noteLevel";
 import { useToast } from "./Toaster";
 import { AlertIcon, CheckIcon, CloseIcon, CopyIcon, GlobeIcon, LockIcon, MailIcon, UsersIcon } from "./icons";
 import { speakerInitials, speakerTint } from "../lib/speakers";
+import { PUBLIC_EXPIRY_OPTIONS, PublicLinkDialog, publicLinkUrl } from "./PublicLinkDialog";
 import { Select } from "./Select";
 import { Segmented } from "./Segmented";
 import { CharCount, ChipResults, EMAIL_RE, EmailChips, useEmailChips, type ChipResult } from "./EmailChips";
 import { ApiError } from "../api/http";
 
 const EXPIRY_OPTIONS = [7, 30, 90, 180] as const;
-/** Public links may also live forever (0 = never). */
-const PUBLIC_EXPIRY_OPTIONS = [0, 7, 30, 90, 180] as const;
 
 function opened(link: LinkView): string {
   if (!link.first_viewed_at) return "Not opened";
@@ -69,10 +68,7 @@ export function labelFromEmail(email: string): string {
   return domain ? `${local} @ ${domain}` : email.trim();
 }
 
-/** Full URL an outsider opens for a public link. */
-export function publicLinkUrl(path: string): string {
-  return `${window.location.origin}${path}`;
-}
+export { publicLinkUrl };
 
 const ROLE_OPTIONS: { value: CollaboratorRole; label: string }[] = [
   { value: "view", label: "Can view" },
@@ -149,6 +145,8 @@ export function ShareDialog({
   // How long the next public link lives; 0 = never.
   const [publicDays, setPublicDays] = useState<(typeof PUBLIC_EXPIRY_OPTIONS)[number]>(0);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
+  // The public link's own modal, opened when the link is made.
+  const [publicOpen, setPublicOpen] = useState(false);
 
   // People: invite by role.
   const invitees = useEmailChips();
@@ -417,7 +415,11 @@ export function ShareDialog({
       : "Only you and the people you share it with can open it.";
   const togglePublicLink = (on: boolean) =>
     on
-      ? void run(() => createPublicLink(noteId, publicDays || undefined), "Anyone with the link can now open it")
+      ? void run(async () => {
+          const next = await createPublicLink(noteId, publicDays || undefined);
+          setPublicOpen(true);
+          return next;
+        })
       : void run(() => revokePublicLink(noteId), "Public link turned off");
 
   /** Expiry is set at mint time: changing it mints a new link and the old one stops working. */
@@ -869,6 +871,15 @@ export function ShareDialog({
           </button>
         </div>
       </div>
+      {publicOpen && view?.public_link && (
+        <PublicLinkDialog
+          noteId={noteId}
+          noteTitle={noteTitle}
+          link={view.public_link}
+          onChange={setView}
+          onClose={() => setPublicOpen(false)}
+        />
+      )}
     </div>
   );
 }

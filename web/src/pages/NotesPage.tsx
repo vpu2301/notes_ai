@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { messageFor } from "../lib/errorCopy";
 import { deleteNote, searchNotes, type SearchScope } from "../api/notes";
 import type { SearchHit, SharingView } from "../api/types";
@@ -12,23 +12,15 @@ import { EmptyState } from "../components/EmptyState";
 import { AlertIcon, FolderIcon, LayersIcon, MicIcon, PlusIcon, SearchIcon, TrashIcon, UploadIcon, WaveformIcon } from "../components/icons";
 import { Menu, type MenuItem } from "../components/Menu";
 import { SearchField } from "../components/SearchField";
-import { Segmented } from "../components/Segmented";
 import { canManageNote } from "../lib/noteLevel";
 import { SkeletonRow } from "../components/Skeleton";
 import { Snippet } from "../components/Snippet";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toaster";
 import { createBlankNote } from "../lib/createBlankNote";
-import { relativeTime } from "../lib/time";
 import { useCaptures, type Capture } from "../lib/useCaptures";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { useSpaces } from "../spaces/SpacesContext";
-
-const SCOPES: { value: SearchScope; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "mine", label: "Mine" },
-  { value: "shared_with_me", label: "Shared with me" },
-];
 
 /** In-progress captures shown before "Show N more" — the notes come first. */
 const CAPTURES_SHOWN = 3;
@@ -49,17 +41,21 @@ function todayLabel(): string {
   return new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
 }
 
-/** "Today" / "Yesterday" / … for the list's day groups. */
+/** "Today" / "Yesterday" / "Saturday, October 10" for the list's day groups, as the Mac's `dayTitle`. */
 function dayGroup(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "Earlier";
   const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const days = Math.round((start(new Date()) - start(d)) / 86_400_000);
-  if (days <= 0) return "Today";
+  if (days === 0) return "Today";
   if (days === 1) return "Yesterday";
-  if (days < 7) return "This week";
-  if (days < 30) return "This month";
-  return "Earlier";
+  if (days === -1) return "Tomorrow";
+  return d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+}
+
+/** "12:27" beside a row, as the Mac's shortened time. */
+function timeOf(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 function CaptureRow({
@@ -172,14 +168,10 @@ function NoteRow({
             </span>
           )}
         </span>
-        {hit.snippet && (
-          <span className="row-2 snippet">
-            <Snippet text={hit.snippet} />
-          </span>
-        )}
+        <span className="row-2 snippet">{hit.snippet ? <Snippet text={hit.snippet} /> : "No summary yet"}</span>
       </span>
       {access && <AccessMenu hit={hit} access={access} onChange={onAccessChange} />}
-      <span className="row-time">{relativeTime(hit.updated_at)}</span>
+      <span className="row-time">{timeOf(hit.updated_at)}</span>
       <span className="row-side" onClick={(e) => e.stopPropagation()}>
         {menuItems.length > 0 && <Menu anchored items={menuItems} label={`Actions for “${hit.title || "Untitled note"}”`} />}
       </span>
@@ -217,8 +209,10 @@ export function NotesPage() {
   const realName = auth?.identity?.display_name?.trim() ?? "";
   // A guest sees only what was shared with them, and cannot start anything here.
   const guest = auth?.activeRole === "guest";
-  const [scopePick, setScopePick] = useState<SearchScope>("all");
-  const scope: SearchScope = guest ? "shared_with_me" : scopePick;
+  // The sidebar's All notes / My notes / Shared with me rows set `?scope=`.
+  const [params] = useSearchParams();
+  const picked = params.get("scope");
+  const scope: SearchScope = guest ? "shared_with_me" : picked === "mine" || picked === "shared_with_me" ? picked : "all";
   const firstName = realName.includes("@") ? "" : realName.split(/\s+/)[0];
   useDocumentTitle(space ? space.name : "Notes");
 
@@ -394,7 +388,7 @@ export function NotesPage() {
         {!guest && (
           <div className="home-start" role="group" aria-label="Start a note">
             <button ref={newMeetingRef} className="btn accent" onClick={() => navigate("/meeting/new")} title="New meeting (N)">
-              <MicIcon size={14} /> New meeting
+              <MicIcon size={14} /> New meeting <kbd>N</kbd>
             </button>
             <Menu
               anchored
@@ -411,13 +405,6 @@ export function NotesPage() {
       </div>
 
       {!searching && !spaceId && !guest && <ComingUp invite={hasSomething} />}
-
-      {/* A guest's list is "Shared with me" only: the server returns nothing else. */}
-      {!spaceId && !guest && (
-        <div className="home-scope">
-          <Segmented label="Show notes" options={SCOPES} value={scope} onChange={setScopePick} />
-        </div>
-      )}
 
       {!spaceId && !guest && captures && captures.length > 0 && (
         <section className="home-group" aria-label="In progress">

@@ -125,6 +125,37 @@ describe("workspace header", () => {
     expect(within(menu).getByRole("menuitem", { name: "New workspace…" })).toBeInTheDocument();
   });
 
+  it("lists an archived workspace apart, with Restore instead of a switch", async () => {
+    const OLD = "44444444-4444-4444-8444-444444444444";
+    const tenant = (id: string, display_name: string, kind: string, status: string) => ({
+      id, name: display_name, display_name, slug: null, status, is_active: status === "active", logo_url: "", my_role: "owner", kind,
+    });
+    let restored = false;
+    const calls = serve(meFor(PERSONAL, null), (c) => {
+      if (c.path === "/tenants")
+        return {
+          body: {
+            items: [tenant(PERSONAL, "Sam", "personal", "active"), tenant(OLD, "Old Team", "team", restored ? "active" : "archived")],
+          },
+        };
+      if (c.method === "POST" && c.path === `/tenants/${OLD}/unarchive`) {
+        restored = true;
+        return { body: tenant(OLD, "Old Team", "team", "active") };
+      }
+      return undefined;
+    });
+    mount("/", header());
+    await userEvent.click(await screen.findByRole("button", { name: /^Personal/ }));
+    const menu = await screen.findByRole("menu", { name: "Workspaces" });
+    await within(menu).findByText("Archived");
+    expect(within(menu).queryByRole("menuitemradio", { name: /Old Team/ })).toBeNull();
+
+    await userEvent.click(within(menu).getByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(calls.some((c) => c.path === `/tenants/${OLD}/unarchive`)).toBe(true));
+    expect(await within(menu).findByRole("menuitemradio", { name: /Old Team/ })).toBeInTheDocument();
+    expect(within(menu).queryByText("Archived")).toBeNull();
+  });
+
   it("collapsed: a first letter in a circle, the name as the tooltip", async () => {
     serve(meFor(TEAM, "member"));
     mount("/", header(true));

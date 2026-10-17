@@ -390,6 +390,8 @@
 }
 .sb-user-menu-row > svg { color: var(--text-3); flex: none; }
 .sb-user-menu-row .grow { flex: 1; }
+.sb-user-menu-row.archived { color: var(--text-3); }
+.sb-user-menu-row.archived .sb-ws-mark { opacity: .55; }
 .sb-user-menu-hint { margin-left: auto; font-size: calc(11px * var(--fs)); color: var(--muted); }
 /* Workspace switcher inside the account menu */
 .sb-user-menu-label {
@@ -462,6 +464,62 @@
 .tb-crumbs .cur { color: var(--text-1); font-weight: 500; padding: calc(3px * var(--density)) calc(6px * var(--density)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tb-spacer { flex: 1; }
 .tb-actions { display: flex; align-items: center; gap: calc(6px * var(--density)); }
+/* Where you are (`SpaceLabel`): mark, name, and whether it is private or shared. */
+.tb-space { display: flex; align-items: center; gap: calc(8px * var(--density)); min-width: 0; flex-shrink: 0; }
+.tb-space-btn {
+  display: inline-flex; align-items: center; gap: calc(7px * var(--density));
+  height: 28px; padding: 0 calc(8px * var(--density)) 0 calc(4px * var(--density));
+  border-radius: var(--radius-sm);
+  transition: background var(--t-fast) var(--ease);
+}
+.tb-space-btn:hover, .tb-space-btn.open { background: var(--surface-2); }
+.tb-space-btn > svg { flex: none; color: var(--muted); transition: transform var(--t-fast) var(--ease); }
+.tb-space-btn.open > svg { transform: rotate(180deg); }
+.tb-space-menu { left: 0; right: auto; width: 260px; }
+.tb-space-name { font-size: calc(13.5px * var(--fs)); font-weight: 500; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+.tb-space-kind { font-size: calc(12px * var(--fs)); color: var(--muted); white-space: nowrap; }
+.tb-space-sep { color: var(--text-3); opacity: .55; margin-right: calc(8px * var(--density)); }
+/* Who is in it (`SpacePeople`): the roster's avatars, a click away from Members. */
+.tb-people {
+  display: inline-flex; align-items: center;
+  height: 32px; padding: 0 calc(8px * var(--density));
+  border-radius: var(--radius-pill);
+  transition: background var(--t-fast) var(--ease);
+}
+.tb-people:hover { background: var(--surface-2); }
+/* Hovering the avatars names everyone: a card under them, not the browser's tooltip. */
+.tb-people-host { position: relative; display: inline-flex; }
+.people-card {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
+  width: 260px;
+  padding: 6px;
+  background: var(--surface);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  animation: people-card-in var(--t-fast) var(--ease);
+}
+/* Bridges the 6px gap so the pointer can move onto the card without closing it. */
+.people-card::before { content: ""; position: absolute; left: 0; right: 0; top: -8px; height: 8px; }
+@keyframes people-card-in { from { opacity: 0; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .people-card { animation: none; } }
+.people-card-head { padding: 6px 8px 8px; font-size: calc(11.5px * var(--fs)); color: var(--muted); }
+.people-card ul { list-style: none; margin: 0; padding: 0; max-height: 280px; overflow-y: auto; }
+.people-card li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--radius-sm); }
+.people-card .speaker-avatar { width: 24px; height: 24px; font-size: 10px; margin: 0; flex: none; }
+.people-card-name { flex: 1; min-width: 0; font-size: calc(13px * var(--fs)); color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.people-card-role { flex: none; font-size: calc(11.5px * var(--fs)); color: var(--muted); }
+/* Invite: a soft moss pill, the one call to action in the bar. */
+.tb-invite {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 14px 0 11px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft); color: var(--accent-text);
+  font-size: calc(12.5px * var(--fs)); font-weight: 500;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.tb-invite:hover { background: var(--accent-fill); color: var(--accent-ink); }
+.tb-invite:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
 .tb .icon-btn { width: 32px; height: 32px; border-radius: var(--radius-sm); }
 
 /* Dropdown anchored under the topbar bell */

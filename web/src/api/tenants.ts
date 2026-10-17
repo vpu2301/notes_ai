@@ -8,6 +8,7 @@ import type {
   MemberList,
   TenantMember,
   TenantProfile,
+  TenantSummary,
   WorkspaceToken,
 } from "./types";
 
@@ -67,6 +68,19 @@ export function dissolveWorkspace(id: string, confirmName: string): Promise<Diss
     json: { confirm_name: confirmName },
     credentials: true,
   });
+}
+
+/** Owner only: closed for everyone, nothing deleted. The token is for Personal when this session was in it. */
+export function archiveWorkspace(id: string): Promise<{ status: "archived"; token: WorkspaceToken | null }> {
+  return api<{ status: "archived"; token: WorkspaceToken | null }>("auth", `/tenants/${id}/archive`, {
+    method: "POST",
+    credentials: true,
+  });
+}
+
+/** Owner only: the archived workspace opens again, members and notes as they were. */
+export function unarchiveWorkspace(id: string): Promise<TenantSummary> {
+  return api<TenantSummary>("auth", `/tenants/${id}/unarchive`, { method: "POST", credentials: true });
 }
 
 // ── invitations (owner/admin; step-up gated, `http.ts` handles reauth) ──

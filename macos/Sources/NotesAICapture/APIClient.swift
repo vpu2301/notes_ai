@@ -445,6 +445,23 @@ actor APIClient {
         return try decode(DissolveResult.self, from: data)
     }
 
+    /// Owner only: closed for everyone, nothing deleted. When this session was in it, the server already moved it to Personal.
+    func archiveWorkspace(tenantId: String) async throws {
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/archive",
+                                  method: "POST", authorized: true)
+        borrowedTokens[tenantId] = nil
+        if let token = try decode(ArchivedWorkspace.self, from: data).token {
+            await adoptActivated(token)
+        }
+    }
+
+    /// Owner only: the archived workspace opens again, members and notes as they were.
+    func unarchiveWorkspace(tenantId: String) async throws -> Tenant {
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/unarchive",
+                                  method: "POST", authorized: true)
+        return try decode(Tenant.self, from: data)
+    }
+
     /// A token for `tenantId`, minted or reused, without moving the session.
     func token(for tenantId: String) async throws -> String {
         if tenantId == self.tenantId {
@@ -999,9 +1016,11 @@ actor APIClient {
     }
 
     /// Idempotent: returns the note's live link, minting one if needed.
-    func createPublicLink(id: String) async throws -> SharingView {
+    /// `expiresInDays` nil = a permanent link.
+    func createPublicLink(id: String, expiresInDays: Int? = nil) async throws -> SharingView {
+        let body = try JSONSerialization.data(withJSONObject: expiresInDays.map { ["expires_in_days": $0] } ?? [:])
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/public-link", method: "POST",
-                                  authorized: true)
+                                  jsonBody: body, authorized: true)
         return try decode(SharingView.self, from: data)
     }
 

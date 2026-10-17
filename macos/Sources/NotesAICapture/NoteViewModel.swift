@@ -1316,9 +1316,22 @@ final class NoteViewModel: ObservableObject {
         if sharing?.publicLink == nil {
             await sharingAction { try await self.api.createPublicLink(id: self.noteId) }
         }
+        return publicURL(webAppURL: webAppURL)
+    }
+
+    /// The live public link as a full URL; nil while there is none.
+    func publicURL(webAppURL: String) -> URL? {
         guard let path = sharing?.publicLink?.path,
               let root = URL(string: webAppURL.trimmingCharacters(in: .whitespaces)) else { return nil }
         return root.appending(path: String(path.dropFirst()))
+    }
+
+    /// Expiry is set when a link is made: a new lifetime mints a new link and the old one stops working.
+    func renewPublicLink(expiresInDays: Int?) async {
+        await sharingAction {
+            _ = try await self.api.revokePublicLink(id: self.noteId)
+            return try await self.api.createPublicLink(id: self.noteId, expiresInDays: expiresInDays)
+        }
     }
 
     func revokePublicLink() async {

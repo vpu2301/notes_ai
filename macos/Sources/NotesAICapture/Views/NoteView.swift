@@ -291,9 +291,18 @@ struct NoteView: View {
                 }
             }
             .frame(maxWidth: .infinity)
+            // The text scrolling under the composer blurs and fades: a ~20pt band over the bar, down to the edge.
             .background(
-                LinearGradient(colors: [DS.bg.opacity(0), DS.bg], startPoint: .top, endPoint: .bottom)
-                    .allowsHitTesting(false)
+                ZStack {
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+                        .mask(LinearGradient(
+                            stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.3)],
+                            startPoint: .top, endPoint: .bottom
+                        ))
+                    LinearGradient(colors: [DS.bg.opacity(0), DS.bg], startPoint: .top, endPoint: .bottom)
+                }
+                .allowsHitTesting(false)
             )
         }
         .onChange(of: model.tab) { _, _ in model.endSelection() }
@@ -478,30 +487,27 @@ struct NoteView: View {
                 .lineLimit(1...8)
                 .focused($askFocused)
                 .onSubmit { sendQuestion() }
+            // Claude's composer: the tool row sits right, a quiet label beside an accent send square.
             HStack(spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.dsIcon(12, .medium))
-                        .foregroundStyle(DS.accentText)
-                    Text("This note")
-                        .font(.ds(13))
-                        .foregroundStyle(DS.text3)
-                }
                 Spacer(minLength: 0)
+                Text("This note")
+                    .font(.ds(14))
+                    .foregroundStyle(DS.text3)
+                    .padding(.horizontal, 8)
                 Button { sendQuestion() } label: {
                     Image(systemName: "arrow.up")
                         .font(.dsIcon(13, .semibold))
-                        .foregroundStyle(DS.inkText)
+                        .foregroundStyle(DS.accentInk)
                         .frame(width: 32, height: 32)
                         .background(
-                            RoundedRectangle(cornerRadius: DS.radiusSm + 2, style: .continuous)
-                                .fill(DS.ink)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(DS.accentFill)
                         )
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(askEmpty)
-                .opacity(askEmpty ? 0.35 : 1)
+                .opacity(askEmpty ? 0.4 : 1)
                 .keyboardShortcut(.return, modifiers: .command)
                 .help("Send (Return)")
                 .accessibilityLabel("Send")
@@ -527,7 +533,7 @@ struct NoteView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 40)
         .padding(.bottom, 14)
-        .padding(.top, 6)
+        .padding(.top, 20)
     }
 
     private var askEmpty: Bool {

@@ -31,6 +31,7 @@ import {
 } from "../api/notes";
 import type {
   FieldMetadata,
+  LinkView,
   ItemView,
   NameSource,
   NameSuggestion,
@@ -107,6 +108,7 @@ import { pickableNames, segmentIndicesOf, speakerInitials, speakerTint } from ".
 import { SpeakerRoster, useOnline } from "../components/SpeakerRoster";
 import { NameSuggestionChip } from "../components/NameSuggestionChip";
 import { copyText, movedAnnouncement } from "../i18n/speakers";
+import { PublicLinkDialog } from "../components/PublicLinkDialog";
 import { ShareDialog, publicLinkUrl } from "../components/ShareDialog";
 import { CommentsPanel, NOTE_ANCHOR, useComments, type CommentAnchor } from "../components/CommentsPanel";
 import { PresenceAvatars } from "../components/PresenceAvatars";
@@ -1507,6 +1509,8 @@ export function NoteEditorPage() {
   const [busy, setBusy] = useState(false);
   /** Who may manage/delete and whether a public link exists; null until read (then everything is offered). */
   const [sharing, setSharing] = useState<SharingView | null>(null);
+  // A link made from the ⋯ menu opens its modal; an existing one is just copied.
+  const [madeLink, setMadeLink] = useState<LinkView | null>(null);
   const [askReset, setAskReset] = useState(0);
   const [chatCount, setChatCount] = useState(0);
   const [showComments, setShowComments] = useState(false);
@@ -1869,7 +1873,7 @@ export function NoteEditorPage() {
     try {
       const view = await createPublicLink(noteId);
       setSharing(view);
-      if (view.public_link) await copyToClipboard(publicLinkUrl(view.public_link.path), "Public link created and copied");
+      if (view.public_link) setMadeLink(view.public_link);
     } catch (err) {
       toast.error(messageFor(err));
     } finally {
@@ -2523,6 +2527,15 @@ export function NoteEditorPage() {
                 : undefined
           }
           onClose={() => setShowShare(false)}
+        />
+      )}
+      {madeLink && (
+        <PublicLinkDialog
+          noteId={noteId}
+          noteTitle={shownContent.title ?? ""}
+          link={madeLink}
+          onChange={setSharing}
+          onClose={() => setMadeLink(null)}
         />
       )}
     </div>

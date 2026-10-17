@@ -25,7 +25,6 @@ struct HomeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Color.clear.frame(height: DS.titlebarInset - 24)
                 header
                 if app.isFirstRun {
                     FirstRunCard()
@@ -64,6 +63,7 @@ struct HomeView: View {
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 40)
+            .padding(.top, 8)
             .padding(.bottom, 60)
         }
         .background(ZStack { DS.bg; DSDots() }.ignoresSafeArea())
@@ -364,6 +364,10 @@ private struct NoteRow: View {
     let failed: (String) -> Void
     @State private var hover = false
     @State private var accessMenuOpen = false
+    /// A link made from the access pill opens its sheet; an existing one is just copied.
+    @State private var madeLink: PublicLink?
+    @State private var linkBusy = false
+    @State private var linkError: String?
 
     var body: some View {
         Button {
@@ -424,6 +428,22 @@ private struct NoteRow: View {
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .accessibilityValue(note.access?.help ?? "")
+        .sheet(isPresented: Binding(get: { madeLink != nil }, set: { if !$0 { madeLink = nil } })) {
+            PublicLinkSheet(
+                noteTitle: note.title,
+                link: madeLink,
+                url: app.publicURL(madeLink),
+                busy: linkBusy,
+                error: linkError,
+                renew: { days in
+                    await linkAction { madeLink = try await app.renewPublicLink(noteId: note.noteId, expiresInDays: days).publicLink }
+                },
+                turnOff: {
+                    await linkAction { try await app.revokePublicLink(noteId: note.noteId) }
+                    return linkError == nil
+                },
+                onClose: { madeLink = nil })
+        }
         .contextMenu {
             Button("Open") { app.openNote(note.noteId) }
             Button("Open in Web App") { app.openNoteInBrowser(note.noteId) }
@@ -451,8 +471,15 @@ private struct NoteRow: View {
             .separator,
             .header("Public link", hint: access.publicLinkHint),
             .item(access.hasPublicLink ? "Copy public link" : "Create public link", symbol: "globe") {
+                let had = access.hasPublicLink
                 run {
-                    if let url = try await app.publicLink(noteId: id) { copy(url.absoluteString) }
+                    let link = try await app.publicLink(noteId: id).publicLink
+                    if !had {
+                        linkError = nil
+                        madeLink = link
+                    } else if let url = app.publicURL(link) {
+                        copy(url.absoluteString)
+                    }
                 }
             },
         ]
@@ -462,6 +489,13 @@ private struct NoteRow: View {
             })
         }
         return items
+    }
+
+    private func linkAction(_ work: () async throws -> Void) async {
+        linkBusy = true
+        linkError = nil
+        defer { linkBusy = false }
+        do { try await work() } catch { linkError = error.localizedDescription }
     }
 
     private func run(_ work: @escaping () async throws -> Void) {

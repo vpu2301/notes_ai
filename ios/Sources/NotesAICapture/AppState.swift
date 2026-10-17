@@ -772,7 +772,8 @@ final class AppState: ObservableObject {
         if !force, let last = lastWorkspaceRefresh,
            Date().timeIntervalSince(last) < Self.workspaceRefreshInterval { return }
         do {
-            let list = try await api.workspaces()
+            // Archived workspaces cannot be entered; restoring them is done on the Mac or the web.
+            let list = try await api.workspaces().filter { $0.status != "archived" }
             lastWorkspaceRefresh = Date()
             workspaces = list
             // A gone membership is the one thing only this call can discover.

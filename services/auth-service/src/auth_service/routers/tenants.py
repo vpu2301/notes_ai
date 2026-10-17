@@ -182,6 +182,12 @@ class DissolveOut(_Strict):
     token: TokenResponse | None = None
 
 
+class ArchiveOut(_Strict):
+    status: str
+    # The session moved to Personal (null when this session was elsewhere or cannot switch).
+    token: TokenResponse | None = None
+
+
 class LeaveOut(_Strict):
     # The session already moved to Personal; null only for a session that cannot switch.
     token: TokenResponse | None
@@ -912,6 +918,86 @@ async def dissolve_workspace(
     return DissolveOut(
         status="dissolved", restore_until=datetime.now(UTC) + timedelta(days=30), token=token
     )
+
+
+async def _owned_team_workspace(tenant_id: UUID, claims: Claims, action: str) -> asyncpg.Record:
+    """Archive and restore are the owner's, on a team workspace only."""
+    my_role = await _require_member(tenant_id, claims)
+    if my_role != "owner":
+        raise as_problem(ApiError("owner_only", 403, detail=f"only an owner can {action}"))
+    state = get_state()
+    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+        tenant = await repo.get_tenant(conn, tenant_id=tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tenant not found")
+    if tenant["kind"] == "personal":
+        raise as_problem(
+            ApiError("personal_workspace", 409, detail=f"a personal workspace cannot {action}")
+        )
+    return tenant
+
+
+@router.post(
+    "/{tenant_id}/archive",
+    response_model=ArchiveOut,
+    summary="Archive a team workspace (owner): closed for everyone, nothing deleted, restorable any time",
+    dependencies=[Depends(manage_step_up)],
+)
+async def archive_workspace(
+    tenant_id: UUID,
+    claims: Annotated[Claims, Depends(current_user)],
+) -> ArchiveOut:
+    tenant = await _owned_team_workspace(tenant_id, claims, "archive")
+    if tenant["status"] != "active":
+        raise as_problem(
+            ApiError("not_active", 409, detail="only an active workspace can be archived")
+        )
+    state = get_state()
+    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+        await repo.archive(conn, tenant_id=tenant_id)
+    # Nobody can join a closed workspace: open invitations go.
+    revoked = 0
+    service = getattr(state, "invitation_service", None)
+    if service is not None:
+        revoked = await service.revoke_all_for_tenant(tenant_id, actor=claims.sub)
+    await _audit(
+        claims,
+        tenant_id=tenant_id,
+        kind=audit_kinds.TENANT_ARCHIVED,
+        target_id=tenant_id,
+        payload={"revoked_invitations": revoked},
+        severity=Severity.SEC,
+    )
+    # Other sessions heal to Personal on their next refresh; do it now for this one.
+    token = await _move_to_personal(claims) if claims.tid == tenant_id else None
+    return ArchiveOut(status="archived", token=token)
+
+
+@router.post(
+    "/{tenant_id}/unarchive",
+    response_model=TenantSummary,
+    summary="Restore an archived workspace (owner); its members get it back as it was",
+)
+async def unarchive_workspace(
+    tenant_id: UUID,
+    claims: Annotated[Claims, Depends(current_user)],
+) -> TenantSummary:
+    tenant = await _owned_team_workspace(tenant_id, claims, "restore")
+    if tenant["status"] != "archived":
+        raise as_problem(ApiError("not_archived", 409, detail="this workspace is not archived"))
+    state = get_state()
+    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+        await repo.unarchive(conn, tenant_id=tenant_id)
+        row = await repo.get_tenant(conn, tenant_id=tenant_id)
+    await _audit(
+        claims,
+        tenant_id=tenant_id,
+        kind=audit_kinds.TENANT_UNARCHIVED,
+        target_id=tenant_id,
+        payload={},
+        severity=Severity.SEC,
+    )
+    return _summary(row, "owner")
 
 
 async def _move_to_personal(claims: Claims) -> TokenResponse | None:

@@ -206,8 +206,11 @@ describe("members page", () => {
     mount("/settings/members", members);
     expect(await screen.findByText(/only owner, so you can't leave/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Leave…" })).toBeDisabled();
-    // Someone else is still in it, so dissolving waits too.
-    expect(screen.getByRole("button", { name: "Dissolve…" })).toBeDisabled();
+    // Someone else is still in it: Delete offers Archive, and deleting itself waits.
+    await userEvent.click(screen.getByRole("button", { name: "Delete…" }));
+    const offer = screen.getByRole("alertdialog", { name: /archive .* instead/i });
+    expect(within(offer).getByRole("button", { name: "Delete anyway…" })).toBeDisabled();
+    expect(within(offer).getByRole("button", { name: "Archive instead" })).toBeEnabled();
   });
 
   it("a member leaves and lands in Personal", async () => {
@@ -221,13 +224,32 @@ describe("members page", () => {
     // A member neither invites nor sees the danger zone.
     await screen.findByText("In this workspace");
     expect(screen.queryByRole("textbox", { name: "Email" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Dissolve…" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete…" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Archive…" })).toBeNull();
 
     await userEvent.click(await screen.findByRole("button", { name: "Leave…" }));
     await userEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Leave" }));
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(`/|${PERSONAL}|`));
     expect(getAccessToken()).toBe("at-personal");
     expect(calls.some((c) => c.method === "DELETE" && c.path.endsWith("/members/me"))).toBe(true);
+  });
+
+  it("delete offers archive first, and archiving lands in Personal", async () => {
+    const calls = serve({ me: meFor("owner") }, (c) => {
+      if (c.path === `/tenants/${TEAM}/members`) return { body: { items: [member(SUB, "owner"), member("bbbb", "member")] } };
+      if (c.path === `/tenants/${TEAM}/archive`)
+        return { body: { status: "archived", token: { access_token: "at-personal", expires_in: 900, tenant_id: PERSONAL, roles: ["owner"] } } };
+      return undefined;
+    });
+    mount("/settings/members", members);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete…" })).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "Delete…" }));
+    await userEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Archive instead" }));
+
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(`/|${PERSONAL}|`));
+    expect(getAccessToken()).toBe("at-personal");
+    expect(calls.some((c) => c.method === "POST" && c.path === `/tenants/${TEAM}/archive`)).toBe(true);
+    expect(calls.some((c) => c.path.endsWith("/dissolve"))).toBe(false);
   });
 
   it("dissolve needs the exact name typed", async () => {
@@ -238,10 +260,11 @@ describe("members page", () => {
       return undefined;
     });
     mount("/settings/members", members);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Dissolve…" })).toBeEnabled());
-    await userEvent.click(screen.getByRole("button", { name: "Dissolve…" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete…" })).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "Delete…" }));
+    await userEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete anyway…" }));
     const dialog = screen.getByRole("alertdialog");
-    const confirm = within(dialog).getByRole("button", { name: "Dissolve" });
+    const confirm = within(dialog).getByRole("button", { name: "Delete" });
     expect(confirm).toBeDisabled();
     const input = within(dialog).getByRole("textbox");
     await userEvent.type(input, "sunrise studio");

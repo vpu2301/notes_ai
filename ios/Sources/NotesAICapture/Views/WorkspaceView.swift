@@ -32,6 +32,74 @@ struct WorkspaceChip: View {
     }
 }
 
+/// The head of the home page: the chip, whether the place is private or shared, who is in it, and Invite.
+struct SpaceHeader: View {
+    @EnvironmentObject private var app: AppState
+    @State private var members: [TenantMember] = []
+
+    private static let shown = 4
+
+    var body: some View {
+        if let active = app.activeWorkspace {
+            HStack(spacing: 8) {
+                WorkspaceChip()
+                Text(active.isPersonal ? "Private · only you" : "Workspace")
+                    .font(.ds(12.5))
+                    .foregroundStyle(DS.muted)
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                if !active.isPersonal, !members.isEmpty {
+                    Button {
+                        app.settingsTab = .account
+                        app.settingsPresented = true
+                    } label: {
+                        people
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(members.count) \(members.count == 1 ? "person" : "people") in \(active.title)")
+                }
+                if !active.isPersonal, app.canManageMembers {
+                    Button("Invite") { app.invitePresented = true }
+                        .buttonStyle(DSButtonStyle(kind: .secondary, size: 13, height: 30))
+                        .accessibilityHint("Invite people to \(active.title)")
+                }
+            }
+            .task(id: app.tenantId) { await loadMembers() }
+            // The invite sheet is also where members are removed: the row follows it.
+            .onChange(of: app.invitePresented) { _, shown in
+                if !shown { Task { await loadMembers() } }
+            }
+        }
+    }
+
+    /// The roster's avatars, overlapping; the rest as "+N".
+    private var people: some View {
+        HStack(spacing: -6) {
+            ForEach(members.prefix(Self.shown)) { member in
+                DSAvatar(name: member.title, size: 24)
+                    .overlay(Circle().strokeBorder(DS.bg, lineWidth: 1.5))
+            }
+            if members.count > Self.shown {
+                Text("+\(members.count - Self.shown)")
+                    .font(.ds(11, .medium))
+                    .foregroundStyle(DS.muted)
+                    .padding(.leading, 10)
+            }
+        }
+        .contentShape(Capsule())
+    }
+
+    /// A guest cannot read the roster, and Personal has nobody else in it: no request either way.
+    private func loadMembers() async {
+        guard let active = app.activeWorkspace, !active.isPersonal, !active.isGuest else {
+            members = []
+            return
+        }
+        let loaded = (try? await app.api.tenantMembers(tenantId: active.id)) ?? []
+        members = loaded.filter { $0.status == "active" }
+    }
+}
+
 /// The switcher itself.
 struct WorkspacePicker: View {
     @EnvironmentObject private var app: AppState
