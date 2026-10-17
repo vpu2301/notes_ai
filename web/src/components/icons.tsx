@@ -220,12 +220,33 @@ export function UserIcon({ size = 16 }: IconProps) {
   );
 }
 
+export function HomeIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M3.5 9 10 3.5 16.5 9" />
+      <path d="M5.25 7.75v8.5h9.5v-8.5" />
+      <path d="M8.5 16.25v-4.5h3v4.5" />
+    </svg>
+  );
+}
+
 export function UsersIcon({ size = 16 }: IconProps) {
   return (
     <svg {...base(size)}>
       <circle cx="7.5" cy="7.5" r="2.75" />
       <path d="M2.5 16.5a5 5 0 0 1 10 0" />
       <path d="M13 4.9a2.75 2.75 0 0 1 0 5.2M15 12.2a5 5 0 0 1 2.5 4.3" />
+    </svg>
+  );
+}
+
+/** A person with a plus: invite (the Mac's `person.badge.plus`). */
+export function UserPlusIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <circle cx="8" cy="7" r="2.75" />
+      <path d="M3 16.5a5 5 0 0 1 10 0" />
+      <path d="M15.5 7.5v5M13 10h5" />
     </svg>
   );
 }
@@ -262,6 +283,14 @@ export function PenIcon({ size = 16 }: IconProps) {
     <svg {...base(size)}>
       <path d="m3.5 16.5 1-4L13.5 3.5l3 3-9 9z" />
       <path d="m11.5 5.5 3 3" />
+    </svg>
+  );
+}
+
+export function CommentIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M3.5 4.75h13v8.5h-7.5L5.5 16.5v-3.25h-2z" />
     </svg>
   );
 }

@@ -1,4 +1,4 @@
-.PHONY: meeting-quality-dashboard meeting-quality-backfill check-routing-report smoke-ios eval-asr eval-asr-assert eval-asr-validate eval-notes eval-notes-assert local-bakeoff eval-notes-validate test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers weekly-notes test-integration-db test-isolation run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
+.PHONY: workspace-smoke meeting-quality-dashboard meeting-quality-backfill check-routing-report smoke-ios eval-asr eval-asr-assert eval-asr-validate eval-notes eval-notes-assert local-bakeoff eval-notes-validate test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers weekly-notes test-integration-db test-isolation run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
 
 COMPOSE = docker compose
 COMPOSE_FILE = docker-compose.yml
@@ -36,6 +36,10 @@ dev-logs: ## Tail logs from all containers
 
 smoke: ## Run smoke tests against the local stack (alias of smoke-test)
 	@bash scripts/smoke-test.sh
+	@bash scripts/dev/workspace-smoke.sh
+
+workspace-smoke: ## W1 — e-mail-code sign-in, switch, refresh, borrow, logout on web/macos/ios transports (dual|native + Mailpit)
+	@bash scripts/dev/workspace-smoke.sh
 
 smoke-test: smoke ## Legacy alias of `smoke`
 

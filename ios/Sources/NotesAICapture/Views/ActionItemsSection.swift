@@ -3,6 +3,8 @@ import SwiftUI
 /// "Action items" above the sections: one row per item with chips and badges; tap for the responses.
 struct ActionItemsSection: View {
     @ObservedObject var model: NoteViewModel
+    /// "Comment…" on a row (by `item_key`); nil when the person cannot comment.
+    var comment: ((String) -> Void)? = nil
     @State private var expanded = true
     @State private var selected: ActionItem?
 
@@ -31,6 +33,13 @@ struct ActionItemsSection: View {
                 VStack(spacing: 0) {
                     ForEach(model.items) { item in
                         ActionItemRow(item: item) { selected = item }
+                            .contextMenu {
+                                if let comment {
+                                    Button { comment(item.itemKey) } label: {
+                                        Label("Comment…", systemImage: "text.bubble")
+                                    }
+                                }
+                            }
                         if item.id != model.items.last?.id { DSDivider() }
                     }
                 }
@@ -124,8 +133,10 @@ struct ItemDetailSheet: View {
                                             Text(response.linkLabel.isEmpty ? "A recipient" : response.linkLabel)
                                                 .font(.ds(13, .medium)).foregroundStyle(DS.text1)
                                             Spacer()
-                                            Button("Clear") { Task { await model.clear(response) } }
-                                                .font(.dsMeta)
+                                            if model.editable {
+                                                Button("Clear") { Task { await model.clear(response) } }
+                                                    .font(.dsMeta)
+                                            }
                                         }
                                         if let comment = response.comment {
                                             // Recipient-authored: shown as text, nothing else.
@@ -151,7 +162,7 @@ struct ItemDetailSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Close", action: onClose) }
                 ToolbarItem(placement: .topBarTrailing) {
-                    if let item {
+                    if let item, model.editable {
                         Button(item.status == .done ? "Reopen" : "Mark done") { Task { await model.markDone(item) } }
                     }
                 }

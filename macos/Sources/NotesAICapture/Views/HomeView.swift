@@ -25,7 +25,6 @@ struct HomeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Color.clear.frame(height: DS.titlebarInset - 24)
                 header
                 if app.isFirstRun {
                     FirstRunCard()
@@ -56,11 +55,15 @@ struct HomeView: View {
                 if app.selectedSpaceId == nil, !app.pending.isEmpty {
                     PendingUploadsSection(pending: app.pending)
                 }
+                if app.selectedSpaceId == nil, !app.orphanedMeetingNotes.isEmpty {
+                    OrphanedMeetingNotesSection(notes: app.orphanedMeetingNotes)
+                }
                 notesSection
             }
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 40)
+            .padding(.top, 8)
             .padding(.bottom, 60)
         }
         .background(ZStack { DS.bg; DSDots() }.ignoresSafeArea())
@@ -123,7 +126,7 @@ struct HomeView: View {
             .layoutPriority(searchShown ? 0 : 1)
             Spacer(minLength: 8)
             search
-            if case .idle = capture.phase {
+            if case .idle = capture.phase, app.capabilities.canRecord {
                 HStack(spacing: 4) {
                     NewMeetingButton(height: 34)
                     DSMenu(width: 236, items: startItems) {
@@ -227,7 +230,9 @@ struct HomeView: View {
 
     /// Hidden only when there is nothing to offer: no Google client, nothing connected, and no calendar access.
     private var showComingUp: Bool {
-        google.isConnected || google.available != false || google.linkAvailable || calendar.access != .unavailable
+        // Its rows start recordings; a guest cannot record here.
+        guard app.capabilities.canRecord else { return false }
+        return google.isConnected || google.available != false || google.linkAvailable || calendar.access != .unavailable
     }
 
     // MARK: - Meetings in flight
@@ -284,12 +289,16 @@ struct HomeView: View {
     private var emptyTitle: String {
         if !searchQuery.isEmpty { return "Nothing matches “\(searchQuery)”" }
         if app.selectedSpaceId != nil { return "Nothing in this space yet" }
+        if app.capabilities.isGuest || app.noteScope == .sharedWithMe { return "Nothing shared with you yet" }
         return "No notes yet"
     }
 
     private var emptyHint: String {
         if !searchQuery.isEmpty { return "Try other words — the search also looks inside the notes." }
         if app.selectedSpaceId != nil { return "Use “Move to …” in a note's ⋯ menu to file it here." }
+        if app.capabilities.isGuest || app.noteScope == .sharedWithMe {
+            return "Notes people share with you, and notes everyone in the workspace can open, show up here."
+        }
         return "Press New meeting when one starts. Stop when it ends and the note is drafted for you."
     }
 
@@ -355,6 +364,10 @@ private struct NoteRow: View {
     let failed: (String) -> Void
     @State private var hover = false
     @State private var accessMenuOpen = false
+    /// A link made from the access pill opens its sheet; an existing one is just copied.
+    @State private var madeLink: PublicLink?
+    @State private var linkBusy = false
+    @State private var linkError: String?
 
     var body: some View {
         Button {
@@ -369,6 +382,10 @@ private struct NoteRow: View {
                             .lineLimit(1)
                         if let status = note.status, status != .draft {
                             DSChip(text: status.label, tint: status.tint, soft: status.soft)
+                        }
+                        // Someone else's note: what this person may do with it.
+                        if let level = note.myLevel, !level.canManage {
+                            DSChip(text: level.label, tint: DS.text3, soft: DS.surface2)
                         }
                         if let spaceId = app.spaceOf[note.noteId],
                            app.selectedSpaceId == nil,
@@ -387,7 +404,7 @@ private struct NoteRow: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                if hover || accessMenuOpen, let access = note.access {
+                if hover || accessMenuOpen, canManage, let access = note.access {
                     DSMenu(width: 250, onOpenChange: { accessMenuOpen = $0 }, items: { accessItems(access) }) {
                         AccessPill(access: access)
                     }
@@ -411,13 +428,34 @@ private struct NoteRow: View {
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .accessibilityValue(note.access?.help ?? "")
+        .sheet(isPresented: Binding(get: { madeLink != nil }, set: { if !$0 { madeLink = nil } })) {
+            PublicLinkSheet(
+                noteTitle: note.title,
+                link: madeLink,
+                url: app.publicURL(madeLink),
+                busy: linkBusy,
+                error: linkError,
+                renew: { days in
+                    await linkAction { madeLink = try await app.renewPublicLink(noteId: note.noteId, expiresInDays: days).publicLink }
+                },
+                turnOff: {
+                    await linkAction { try await app.revokePublicLink(noteId: note.noteId) }
+                    return linkError == nil
+                },
+                onClose: { madeLink = nil })
+        }
         .contextMenu {
             Button("Open") { app.openNote(note.noteId) }
             Button("Open in Web App") { app.openNoteInBrowser(note.noteId) }
-            Divider()
-            Button("Move to Trash") { trash() }
+            if canManage {
+                Divider()
+                Button("Move to Trash") { trash() }
+            }
         }
     }
+
+    /// Visibility, links and the trash belong to the note's author team. Unknown (older server): as before.
+    private var canManage: Bool { note.myLevel?.canManage ?? true }
 
     /// The pill's menu: who can open the note. The server decides whether this person may change it.
     private func accessItems(_ access: NoteAccess) -> [DSMenuItem] {
@@ -433,8 +471,15 @@ private struct NoteRow: View {
             .separator,
             .header("Public link", hint: access.publicLinkHint),
             .item(access.hasPublicLink ? "Copy public link" : "Create public link", symbol: "globe") {
+                let had = access.hasPublicLink
                 run {
-                    if let url = try await app.publicLink(noteId: id) { copy(url.absoluteString) }
+                    let link = try await app.publicLink(noteId: id).publicLink
+                    if !had {
+                        linkError = nil
+                        madeLink = link
+                    } else if let url = app.publicURL(link) {
+                        copy(url.absoluteString)
+                    }
                 }
             },
         ]
@@ -444,6 +489,13 @@ private struct NoteRow: View {
             })
         }
         return items
+    }
+
+    private func linkAction(_ work: () async throws -> Void) async {
+        linkBusy = true
+        linkError = nil
+        defer { linkBusy = false }
+        do { try await work() } catch { linkError = error.localizedDescription }
     }
 
     private func run(_ work: @escaping () async throws -> Void) {
@@ -465,7 +517,7 @@ private struct NoteRow: View {
                 if let url = app.noteURL(note.noteId) { copy(url.absoluteString) }
             },
         ]
-        if !app.spaces.isEmpty {
+        if app.capabilities.showsSpaces, !app.spaces.isEmpty {
             items.append(.separator)
             let current = app.spaceOf[note.noteId]
             for space in app.spaces {
@@ -474,8 +526,10 @@ private struct NoteRow: View {
                 })
             }
         }
-        items.append(.separator)
-        items.append(.item("Move to trash", symbol: "trash", danger: true) { trash() })
+        if canManage {
+            items.append(.separator)
+            items.append(.item("Move to trash", symbol: "trash", danger: true) { trash() })
+        }
         return items
     }
 }

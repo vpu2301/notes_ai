@@ -186,7 +186,7 @@ def test_admin_with_purpose_is_named_the_author(make_client) -> None:  # noqa: A
 
 def test_shared_with_reads_as_collaborator(make_client) -> None:  # noqa: ANN001
     note = _note_row(primary_author_id=OTHER_AUTHOR)
-    note.shared_with_ids = [REQUESTER_SUB]
+    note.collaborators = {REQUESTER_SUB: "view"}
     client = make_client(claims=_claims("member"), note=note)
     resp = client.get(f"/v1/notes/{NOTE_ID}")
     assert resp.status_code == 200

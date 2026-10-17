@@ -1,6 +1,12 @@
 import { api, apiBlob, ApiError, buildUrl } from "./http";
+import { invite } from "./tenants";
 import { ASK_HISTORY_LIMIT } from "./types";
 import type {
+  CollaboratorRole,
+  CommentAnchorKind,
+  NoteComment,
+  PresenceViewer,
+  ShareGranted,
   AskResponse,
   AskTurn,
   AttachTranscriptResponse,
@@ -80,16 +86,22 @@ export function updateDraft(
   });
 }
 
+/** `mine` = I author it; `shared_with_me` = I can see it but did not author it (W3). */
+export type SearchScope = "all" | "mine" | "shared_with_me";
+
 export function searchNotes(params: {
   q?: string;
   status?: string[];
   cursor?: string;
   limit?: number;
+  scope?: SearchScope;
   signal?: AbortSignal;
 }): Promise<SearchResponse> {
   return api<SearchResponse>("note", "/v1/notes/search", {
     query: {
       q: params.q || undefined,
+      // `all` is the server default: left off so an older server sees the same request.
+      scope: params.scope && params.scope !== "all" ? params.scope : undefined,
       status: params.status && params.status.length > 0 ? params.status : undefined,
       cursor: params.cursor,
       limit: params.limit ?? 25,
@@ -273,15 +285,65 @@ export function setVisibility(id: string, visibility: NoteVisibility): Promise<S
   });
 }
 
-/** Give a workspace member read access; 404 `not_a_member` if the address is unknown. */
-export function shareWithMember(id: string, email: string): Promise<SharingView> {
-  return api<SharingView>("note", `/v1/notes/${id}/share`, { method: "POST", json: { email } });
+/** What giving one address access did: a member got it now, anyone else got an invitation. */
+export type ShareOutcome = { kind: "granted"; sharing: SharingView } | { kind: "invited" };
+
+/**
+ * Give one person a role on the note. A member is granted at once; a non-member
+ * (404 `not_a_member` with `can_invite`) is invited as a guest of this workspace
+ * through auth-service, which mails them — note-service never mails outsiders.
+ */
+export async function shareNote(
+  id: string,
+  tenantId: string | null,
+  body: { email: string; role: CollaboratorRole; message?: string },
+): Promise<ShareOutcome> {
+  try {
+    const granted = await api<ShareGranted>("note", `/v1/notes/${id}/share`, {
+      method: "POST",
+      json: { email: body.email, role: body.role, message: body.message || undefined },
+    });
+    return { kind: "granted", sharing: granted.sharing };
+  } catch (err) {
+    const invitable =
+      err instanceof ApiError && err.code === "not_a_member" && err.extra<boolean>("can_invite") === true;
+    if (!invitable || !tenantId) throw err;
+    await invite(tenantId, {
+      email: body.email,
+      role: "guest",
+      note_id: id,
+      note_role: body.role,
+      message: body.message || undefined,
+    });
+    return { kind: "invited" };
+  }
 }
 
-/** Server-sent mail: members are granted access, everyone else gets their own link. */
+/** Change a collaborator's role. 404 `not_a_member`, 409 `is_author`. */
+export function setCollaborator(id: string, sub: string, role: CollaboratorRole): Promise<SharingView> {
+  return api<SharingView>("note", `/v1/notes/${id}/collaborators/${sub}`, { method: "PUT", json: { role } });
+}
+
+export function removeCollaborator(id: string, sub: string): Promise<void> {
+  return api<void>("note", `/v1/notes/${id}/collaborators/${sub}`, { method: "DELETE" });
+}
+
+/** "Include transcript" for view/comment collaborators and guests. */
+export function setTranscriptSharing(id: string, shared: boolean): Promise<SharingView> {
+  return api<SharingView>("note", `/v1/notes/${id}/transcript-sharing`, { method: "PUT", json: { shared } });
+}
+
+/** Server-sent mail. `mode: "link"` mails anyone who is not a member their own recipient link. */
 export function shareByEmail(
   id: string,
-  body: { recipients: string[]; message?: string; lang?: string; expires_in_days?: number },
+  body: {
+    recipients: string[];
+    message?: string;
+    lang?: string;
+    expires_in_days?: number;
+    role?: CollaboratorRole;
+    mode?: "invite" | "link";
+  },
 ): Promise<ShareEmailResponse> {
   return api<ShareEmailResponse>("note", `/v1/notes/${id}/share/email`, {
     method: "POST",
@@ -291,13 +353,12 @@ export function shareByEmail(
       expires_in_days: body.expires_in_days,
       // The sender's UI language; the recipient's is unknowable.
       lang: body.lang ?? navigator.language,
+      role: body.role,
+      mode: body.mode,
     },
   });
 }
 
-export function unshareMember(id: string, sub: string): Promise<SharingView> {
-  return api<SharingView>("note", `/v1/notes/${id}/share/${sub}`, { method: "DELETE" });
-}
 
 /** Idempotent (returns the existing live link). `expiresInDays` undefined → never expires. */
 export function createPublicLink(id: string, expiresInDays?: number): Promise<SharingView> {
@@ -436,6 +497,46 @@ export function getSharedNote(token: string): Promise<SharedNoteView> {
 
 export function downloadSharedPdf(token: string): Promise<Blob> {
   return apiBlob("note", `/v1/shared/${encodeURIComponent(token)}/pdf`, { auth: false });
+}
+
+// ── comments ──────────────────────────────────────────────────────────
+// 403 `insufficient_role` (extra `required`) when the level is too low; 429 `rate_limited`.
+
+export function listComments(id: string): Promise<NoteComment[]> {
+  return api<{ items: NoteComment[] }>("note", `/v1/notes/${id}/comments`).then((r) => r.items);
+}
+
+export function addComment(
+  id: string,
+  body: { anchor_kind: CommentAnchorKind; anchor_key?: string; body: string },
+): Promise<NoteComment> {
+  return api<NoteComment>("note", `/v1/notes/${id}/comments`, { method: "POST", json: body });
+}
+
+export function editComment(id: string, commentId: string, body: string): Promise<NoteComment> {
+  return api<NoteComment>("note", `/v1/notes/${id}/comments/${commentId}`, { method: "PATCH", json: { body } });
+}
+
+export function setCommentResolved(id: string, commentId: string, resolved: boolean): Promise<NoteComment> {
+  return api<NoteComment>("note", `/v1/notes/${id}/comments/${commentId}/${resolved ? "resolve" : "unresolve"}`, {
+    method: "POST",
+  });
+}
+
+export function deleteComment(id: string, commentId: string): Promise<void> {
+  return api<void>("note", `/v1/notes/${id}/comments/${commentId}`, { method: "DELETE" });
+}
+
+// ── presence ──────────────────────────────────────────────────────────
+
+/** "I have this note open"; repeated every 20 s, forgotten by the server after 45 s. */
+export function heartbeatPresence(id: string): Promise<void> {
+  return api<void>("note", `/v1/notes/${id}/presence`, { method: "POST" });
+}
+
+/** Who else has it open (the caller is left out). */
+export function getPresence(id: string): Promise<PresenceViewer[]> {
+  return api<{ viewers: PresenceViewer[] }>("note", `/v1/notes/${id}/presence`).then((r) => r.viewers);
 }
 
 // ── ask this note ─────────────────────────────────────────────────────

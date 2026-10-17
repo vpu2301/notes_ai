@@ -27,6 +27,8 @@ KINDS: Final[tuple[str, ...]] = (
     "signup_verify",
     "signup_exists",
     "concierge_welcome",
+    # W2 workspace invitation.
+    "invitation",
 )
 SUPPORTED_LANGS: Final[tuple[str, ...]] = ("en", "de", "uk")
 

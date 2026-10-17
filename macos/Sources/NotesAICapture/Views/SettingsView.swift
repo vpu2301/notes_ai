@@ -64,6 +64,10 @@ struct SettingsView: View {
         .sheet(isPresented: $capture.callAudioConsentPresented) {
             CallAudioConsentSheet()
         }
+        // Step-up asked from in here (sessions, dissolving a workspace).
+        .sheet(item: $app.reauth) { prompt in
+            ReauthSheet(prompt: prompt)
+        }
         .alert("Remove local data?",
                isPresented: Binding(get: { removingIdentity != nil },
                                     set: { if !$0 { removingIdentity = nil } })) {
@@ -298,7 +302,7 @@ struct SettingsView: View {
     private var workspacesGroup: some View {
         group("Workspaces") {
             VStack(alignment: .leading, spacing: 8) {
-                WorkspaceList(onSwitch: { onClose?() })
+                WorkspaceList(onSwitch: { onClose?() }, manage: true)
                 Text("Notes, spaces and meetings belong to a workspace. Switching changes what this Mac shows and what new meetings are filed under.")
                     .font(.dsMeta)
                     .foregroundStyle(DS.muted)

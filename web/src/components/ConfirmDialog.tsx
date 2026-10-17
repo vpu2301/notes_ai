@@ -9,6 +9,8 @@ interface ConfirmDialogProps {
   confirmLabel?: string;
   confirmDanger?: boolean;
   busy?: boolean;
+  /** keeps the confirm button off until the dialog's own input is right (e.g. a typed name) */
+  confirmDisabled?: boolean;
   /** shown as a problem banner inside the dialog (e.g. validation detail) */
   error?: string | null;
   onConfirm: () => void;
@@ -22,6 +24,7 @@ export function ConfirmDialog({
   confirmLabel = "Confirm",
   confirmDanger = false,
   busy = false,
+  confirmDisabled = false,
   error,
   onConfirm,
   onCancel,
@@ -63,7 +66,7 @@ export function ConfirmDialog({
             ref={confirmRef}
             className={`btn ${confirmDanger ? "danger" : "primary"}`}
             onClick={onConfirm}
-            disabled={busy}
+            disabled={busy || confirmDisabled}
           >
             {busy ? "Working…" : confirmLabel}
           </button>

@@ -93,7 +93,7 @@ async def update_draft(
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         # A private note the caller was not given is a 404.
-        row = access.require_view(await repo.lock_note_for_update(conn, note_id=note_id), claims)
+        row = access.require_edit(await repo.lock_note_for_update(conn, note_id=note_id), claims)
         if row.status != NoteStatus.DRAFT:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,

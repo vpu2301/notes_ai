@@ -40,9 +40,13 @@ final class NoteViewModel: ObservableObject {
     @Published private(set) var version = 0
     @Published private(set) var saveState: SaveState = .saved
     @Published private(set) var conflict = false
+    /// Who saved the version that beat this phone's write (`created_by_display`); nil until known.
+    @Published private(set) var conflictBy: String?
     /// Set for an oversight read (not ours, not shared); every read sends it and the screen says so.
     @Published private(set) var readPurpose: ReadPurpose?
     @Published private(set) var loadError: String?
+    /// The HTTP status behind `loadError`: 404 = not in this workspace, 403 = maybe no longer a member.
+    @Published private(set) var loadErrorStatus: Int?
     @Published private(set) var isLoading = true
     @Published private(set) var busy = false
     @Published var actionError: String?
@@ -106,7 +110,7 @@ final class NoteViewModel: ObservableObject {
     var textTurns: [TranscriptText.Turn] {
         transcriptSections.flatMap { TranscriptText.turns(content?.section($0.id).text ?? "") }
     }
-    var hasTranscript: Bool { jobId != nil || !transcriptSections.isEmpty }
+    var hasTranscript: Bool { canReadTranscript && (jobId != nil || !transcriptSections.isEmpty) }
     /// Set when an export is ready; the view presents the share sheet.
     @Published var shareItem: ShareItem?
 
@@ -243,8 +247,8 @@ final class NoteViewModel: ObservableObject {
         let name = note?.primaryAuthorName?.trimmingCharacters(in: .whitespaces) ?? ""
         return name.isEmpty ? "A colleague's note" : "\(name)'s note"
     }
-    /// Editable while a draft and not reading an old version.
-    var editable: Bool { isDraft && viewing == nil }
+    /// Editable while a draft, not reading an old version, and the person may edit (W3 level).
+    var editable: Bool { isDraft && viewing == nil && NoteLevel.allowsEdit(level) }
 
     // MARK: - History
 
@@ -289,6 +293,7 @@ final class NoteViewModel: ObservableObject {
 
     func load() async {
         loadError = nil
+        loadErrorStatus = nil
         isLoading = note == nil
         do {
             let envelope: NoteEnvelope
@@ -309,6 +314,7 @@ final class NoteViewModel: ObservableObject {
             version = envelope.currentVersionNumber
             saveState = .saved
             conflict = false
+            conflictBy = nil
             if let templateId = envelope.content?.templateId,
                let template = try? await api.fetchTemplate(id: templateId) {
                 templateName = template.name
@@ -324,6 +330,7 @@ final class NoteViewModel: ObservableObject {
             }
         } catch {
             loadError = error.localizedDescription
+            loadErrorStatus = (error as? APIError)?.status
         }
         isLoading = false
     }
@@ -390,7 +397,7 @@ final class NoteViewModel: ObservableObject {
     }
 
     func loadTranscript() async {
-        guard turns == nil, transcriptError == nil, let jobId else { return }
+        guard turns == nil, transcriptError == nil, canReadTranscript, let jobId else { return }
         do {
             apply(try await api.transcript(jobId: jobId))
         } catch {
@@ -660,6 +667,7 @@ final class NoteViewModel: ObservableObject {
     /// Readable job, online, nothing in flight, no re-label running.
     var canEditSpeakers: Bool {
         jobId != nil && transcriptError == nil && online && !renamingSpeaker && relabel != .running
+            && NoteLevel.allowsEdit(level)
     }
 
     /// Whether this turn can be moved (the server sent its segments).
@@ -1467,10 +1475,34 @@ final class NoteViewModel: ObservableObject {
         } catch let error as APIError where error.isConflict {
             conflict = true
             saveState = .error
+            await loadConflictAuthor()
         } catch {
             saveState = .error
             actionError = error.localizedDescription
         }
+    }
+
+    /// Name whoever saved the newest version, for the conflict banner. Best effort.
+    private func loadConflictAuthor() async {
+        guard let list = try? await api.versions(noteId: noteId, purpose: readPurpose) else { return }
+        conflictBy = Self.newestAuthor(list)
+    }
+
+    nonisolated static func newestAuthor(_ versions: [NoteVersionSummary]) -> String? {
+        let name = versions.max { $0.versionNumber < $1.versionNumber }?.createdByDisplay?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+        return name.isEmpty ? nil : name
+    }
+
+    /// The conflict banner's line: who saved, when the server said.
+    var conflictLine: String {
+        conflictBy.map { "\($0) saved a newer version of this note." }
+            ?? "Someone else saved a newer version of this note."
+    }
+
+    /// "Copy my text": what this phone holds, so a reload never loses it.
+    func copyMyText() {
+        copyToPasteboard(markdown())
     }
 
     /// Fetch the PDF and hand it to the share sheet (Files, Mail, AirDrop…).
@@ -1534,6 +1566,79 @@ final class NoteViewModel: ObservableObject {
 
     func revokePublicLink() async {
         await sharingAction { try await self.api.revokePublicLink(id: self.noteId) }
+    }
+
+    // MARK: - People and roles (W3)
+
+    /// What this person may do here; nil from a server that predates W3.
+    var level: NoteLevel? { sharing?.myLevel ?? note?.myLevel }
+
+    /// Comments are offered to commenters and up, on a server that has them.
+    var canComment: Bool { NoteLevel.allowsComment(level) && viewing == nil }
+
+    /// Share sheet, visibility, transcript inclusion: the author team only.
+    var canManage: Bool { level.map(\.canManage) ?? (sharing?.canManage ?? true) }
+
+    /// The transcript and its audio follow the note's role; the server already left the job id out.
+    var canReadTranscript: Bool { note?.canReadTranscript ?? true }
+
+    /// Invite one or more addresses with one role, one at a time; a line per address says what
+    /// happened (members get access now, anyone else an e-mailed guest invitation to this note).
+    func invite(emails: [String], role: NoteLevel, message: String) async -> [InviteResult] {
+        busy = true
+        actionError = nil
+        defer { busy = false }
+        var results: [InviteResult] = []
+        for email in emails {
+            do {
+                let (outcome, view) = try await api.shareOrInvite(noteId: noteId, email: email, role: role,
+                                                                  message: message)
+                if let view { sharing = view }
+                results.append(InviteResult(email: email, ok: true, text: outcome == .granted
+                    ? "Has access · \(role.label.lowercased())"
+                    : "Invited — they'll sign in to see this note"))
+            } catch {
+                results.append(InviteResult(email: email, ok: false,
+                                            text: "Did not get access — \(CollaborationCopy.message(for: error))"))
+            }
+        }
+        await loadSharing()
+        return results
+    }
+
+    func setRole(_ person: NotePerson, _ role: NoteLevel) async {
+        guard role != person.level else { return }
+        await sharingAction { try await self.api.setCollaborator(id: self.noteId, sub: person.sub, role: role) }
+    }
+
+    func remove(_ person: NotePerson) async {
+        busy = true
+        actionError = nil
+        defer { busy = false }
+        do {
+            try await api.removeCollaborator(id: noteId, sub: person.sub)
+            await loadSharing()
+        } catch {
+            actionError = CollaborationCopy.message(for: error)
+        }
+    }
+
+    /// Withdraw an invitation to this note (it lives in the workspace's invitations).
+    func revoke(_ invite: PendingNoteInvite) async {
+        busy = true
+        actionError = nil
+        defer { busy = false }
+        do {
+            guard let tenantId = await api.tenantId else { return }
+            try await api.revokeInvitation(tenantId: tenantId, id: invite.invitationId)
+            await loadSharing()
+        } catch {
+            actionError = CollaborationCopy.message(for: error)
+        }
+    }
+
+    func setTranscriptShared(_ shared: Bool) async {
+        await sharingAction { try await self.api.setTranscriptSharing(id: self.noteId, shared: shared) }
     }
 
     // MARK: - Per-recipient links (Sprint 19)

@@ -47,3 +47,14 @@ export function formatOffset(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
+
+/** "in 3h", "in 13d", "today" for a future instant; "expired" once it has passed. */
+export function timeUntil(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return iso;
+  const seconds = Math.round((then - Date.now()) / 1000);
+  if (seconds <= 0) return "expired";
+  if (seconds < 3600) return `in ${Math.max(1, Math.round(seconds / 60))}m`;
+  if (seconds < 86400) return `in ${Math.round(seconds / 3600)}h`;
+  return `in ${Math.round(seconds / 86400)}d`;
+}

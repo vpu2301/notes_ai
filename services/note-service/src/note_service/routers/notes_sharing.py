@@ -44,8 +44,8 @@ from ..domain import action_items_repository as items_repo
 from ..domain import notes_repository as repo
 from ..domain.branding import load_tenant_branding
 from ..domain.share_tokens import hash_token, token_for
-from ..notifications import emit_note_event
-from ..share_metrics import links_created
+from ..notifications import emit_note_access_changed, emit_note_event
+from ..share_metrics import links_created, share_blocked_no_account, share_total
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +102,35 @@ class LinkView(BaseModel):
     last_send_error: str = ""
 
 
+Level = Literal["manage", "edit", "comment", "view"]
+CollaboratorRole = Literal["view", "comment", "edit"]
+
+
+class Person(BaseModel):
+    """Someone with access and why (W3)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sub: UUID
+    email: str
+    display_name: str
+    level: Level
+    source: Literal["author", "collaborator", "workspace_role"]
+    # Their membership role here (owner|admin|member|viewer|guest); null when unknown.
+    membership_role: str | None = None
+    # Whether the caller may change or remove this grant.
+    can_change: bool = False
+
+
+class PendingNoteInvite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    invitation_id: UUID
+    email_masked: str
+    note_role: CollaboratorRole
+    expires_at: str
+
+
 class SharingView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -109,6 +138,7 @@ class SharingView(BaseModel):
     visibility: Visibility
     can_manage: bool
     can_delete: bool
+    # DEPRECATED (W3): the collaborators, for clients that predate `people`.
     shared_with: list[Member]
     # The live public link, kept for clients that predate `links`.
     public_link: LinkView | None
@@ -116,6 +146,12 @@ class SharingView(BaseModel):
     links: list[LinkView]
     # The workspace's effective rules, so clients can hide what the server would refuse.
     constraints: sharing_policy.Constraints
+    # W3: the caller's own level, everyone with access, pending note invitations (manage only).
+    my_level: Level | None = None
+    people: list[Person] = Field(default_factory=list)
+    pending: list[PendingNoteInvite] = Field(default_factory=list)
+    transcript_shared: bool = False
+    workspace_kind: str = "team"
 
 
 class VisibilityRequest(BaseModel):
@@ -129,6 +165,28 @@ class ShareRequest(BaseModel):
 
     # Loose shape check only; the real test is "is this a member".
     email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    # W3: the level the person gets; `edit` keeps the pre-W3 behaviour for old clients.
+    role: CollaboratorRole = "edit"
+    message: str = Field(default="", max_length=500)
+
+
+class ShareGrant(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["granted"] = "granted"
+    sharing: SharingView
+
+
+class CollaboratorRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: CollaboratorRole
+
+
+class TranscriptSharingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shared: bool
 
 
 # Loose shape check: keeps nonsense and a header-injection newline out of the SMTP envelope.
@@ -145,6 +203,10 @@ class ShareEmailRequest(BaseModel):
     lang: str = Field(default=share_mail_copy.DEFAULT_LANG, max_length=16)
     # None → the deployment default, always clipped to the workspace ceiling.
     expires_in_days: int | None = Field(default=None, ge=1, le=365)
+    # W3: the level members get. `link` (default, as before W3) mails outsiders a recipient
+    # link; `invite` gives them none and lists them in `invite_needed` for a guest invitation.
+    role: CollaboratorRole = "edit"
+    mode: Literal["invite", "link"] = "link"
 
     @field_validator("recipients")
     @classmethod
@@ -180,6 +242,8 @@ class ShareEmailResponse(BaseModel):
     results: list[ShareEmailOutcome]
     # Kept for older clients; always False now that outsiders get recipient links.
     public_link_created: bool = False
+    # W3, mode "invite": outsiders who got nothing — invite each as a guest (auth-service).
+    invite_needed: list[str] = Field(default_factory=list)
 
 
 class PublicLinkRequest(BaseModel):
@@ -251,10 +315,65 @@ def _link_view(link: repo.ShareLinkRow, *, response_count: int = 0) -> LinkView:
     )
 
 
+def _mask(address: str) -> str:
+    local, _, domain = address.partition("@")
+    if not domain:
+        return "***"
+    return f"{local[:1]}***@{domain}" if len(local) <= 2 else f"{local[0]}***{local[-1]}@{domain}"
+
+
+async def _people(conn: object, note: repo.NoteRow, *, manage: bool) -> list[Person]:
+    """The author team, then every collaborator — each with the level they hold and why."""
+    authors = [note.primary_author_id, *note.co_author_ids]
+    subs = list(dict.fromkeys([*authors, *note.collaborators]))
+    profiles = {m.sub: m for m in await repo.fetch_members(conn, subs=subs)}  # type: ignore[arg-type]
+    roles = await repo.membership_roles(conn, subs=subs)  # type: ignore[arg-type]
+    people: list[Person] = []
+    for sub in subs:
+        profile = profiles.get(sub)
+        if profile is None:
+            continue
+        is_author = sub in authors
+        people.append(
+            Person(
+                sub=sub,
+                email=profile.email,
+                display_name=profile.display_name,
+                level="manage" if is_author else note.collaborators[sub],  # type: ignore[arg-type]
+                source="author" if is_author else "collaborator",
+                membership_role=roles.get(sub),
+                can_change=manage and not is_author,
+            )
+        )
+    return people
+
+
+async def _pending(conn: object, note_id: UUID) -> list[PendingNoteInvite]:
+    """Open note invitations (W2 entity; app_role reads its own workspace's rows)."""
+    rows = await conn.fetch(  # type: ignore[attr-defined]
+        """
+        SELECT id, email, note_role, expires_at FROM tenant_invitations
+         WHERE note_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
+           AND expires_at > now()
+         ORDER BY created_at
+        """,
+        note_id,
+    )
+    return [
+        PendingNoteInvite(
+            invitation_id=r["id"],
+            email_masked=_mask(r["email"]),
+            note_role=r["note_role"],
+            expires_at=r["expires_at"].isoformat(),
+        )
+        for r in rows
+    ]
+
+
 async def _sharing_view(conn: object, note: repo.NoteRow, claims: Claims) -> SharingView:
-    members = await repo.fetch_members(conn, subs=note.shared_with_ids)  # type: ignore[arg-type]
     links = await repo.list_live_share_links(conn, note_id=note.id)  # type: ignore[arg-type]
     manage = access.can_manage(note, claims)
+    people = await _people(conn, note, manage=manage)
     policy, _plan = await sharing_policy.load_policy(conn, tenant_id=claims.tid)  # type: ignore[arg-type]
     # Tokens are credentials: a reader who cannot manage sees that links exist, not what they are.
     views: list[LinkView] = []
@@ -267,11 +386,18 @@ async def _sharing_view(conn: object, note: repo.NoteRow, claims: Claims) -> Sha
         can_manage=manage,
         can_delete=access.can_delete(note, claims),
         shared_with=[
-            Member(sub=m.sub, email=m.email, display_name=m.display_name) for m in members
+            Member(sub=p.sub, email=p.email, display_name=p.display_name)
+            for p in people
+            if p.source == "collaborator"
         ],
         public_link=next((v for v in views if v.kind == "public"), None),
         links=views,
         constraints=_constraints(policy),
+        my_level=access.level(note, claims),  # type: ignore[arg-type]
+        people=people,
+        pending=await _pending(conn, note.id) if manage else [],
+        transcript_shared=note.transcript_shared,
+        workspace_kind=await sharing_policy.tenant_kind(conn, tenant_id=claims.tid),  # type: ignore[arg-type]
     )
 
 
@@ -336,23 +462,42 @@ async def _audit(claims: Claims, kind: str, note_id: UUID, payload: dict[str, ob
 
 
 async def _grant_member(
-    conn: object, note: repo.NoteRow, member_sub: UUID
+    conn: object, note: repo.NoteRow, member_sub: UUID, *, role: str, granted_by: UUID
 ) -> tuple[repo.NoteRow, bool]:
-    """Give one member read access. Returns (note, newly_granted). Idempotent: re-sharing is a no-op."""
-    if member_sub in note.shared_with_ids or access.is_author_team(note, member_sub):
+    """Give one member a role on the note (W3). Returns (note, newly_granted); re-sharing changes the role."""
+    if access.is_author_team(note, member_sub):
         return note, False
-    await repo.add_shared_with(conn, note_id=note.id, user_sub=member_sub)  # type: ignore[arg-type]
+    if note.collaborators.get(member_sub) == role:
+        return note, False
+    previous = await repo.upsert_collaborator(
+        conn,  # type: ignore[arg-type]
+        note_id=note.id,
+        tenant_id=note.tenant_id,
+        user_sub=member_sub,
+        role=role,
+        granted_by=granted_by,
+    )
     refreshed = await repo.fetch_note(conn, note_id=note.id)  # type: ignore[arg-type]
-    return (refreshed or note), True
+    return (refreshed or note), previous is None
 
 
 async def _notify_shared(
-    claims: Claims, note: repo.NoteRow, member_sub: UUID, sharer_display: str
+    claims: Claims,
+    note: repo.NoteRow,
+    member_sub: UUID,
+    sharer_display: str,
+    *,
+    role: str = "edit",
+    via: str = "member",
 ) -> None:
     """The in-app + e-mail ping. Content-free by contract (ADR-0031)."""
     state = get_state()
+    share_total.add(1, {"role": role, "kind": "granted"})
     await _audit(
-        claims, audit_kinds.NOTE_SHARED, note.id, {"with": str(member_sub), "via": "member"}
+        claims,
+        audit_kinds.NOTE_SHARED,
+        note.id,
+        {"with": str(member_sub), "via": via, "role": role},
     )
     await emit_note_event(
         state.redis,
@@ -363,7 +508,23 @@ async def _notify_shared(
         actor_user_id=claims.sub,
         # The recipient hint IS the sharee — nobody else is told.
         primary_author_id=member_sub,
-        extra_payload={"shared_by_display": sharer_display},
+        extra_payload={"shared_by_display": sharer_display, "role": role},
+    )
+
+
+async def _notify_access_changed(
+    claims: Claims, note: repo.NoteRow, user_sub: UUID, *, role: str | None
+) -> None:
+    """In-app: your role on a note changed (``role``) or was revoked (None) (W3). Best-effort."""
+    state = get_state()
+    await emit_note_access_changed(
+        state.redis,
+        tenant_id=claims.tid,
+        note_id=note.id,
+        note_code=note.code,
+        actor_user_id=claims.sub,
+        user_sub=user_sub,
+        role=role,
     )
 
 
@@ -411,6 +572,17 @@ async def set_visibility(
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         note = access.require_manage(await repo.fetch_note(conn, note_id=note_id), claims)
+        if (
+            body.visibility == access.VISIBILITY_WORKSPACE
+            and await sharing_policy.tenant_kind(conn, tenant_id=claims.tid) == "personal"
+        ):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "personal_workspace",
+                    "detail": "a personal workspace has nobody to share with",
+                },
+            )
         previous = note.visibility
         if previous != body.visibility:
             await repo.set_visibility(conn, note_id=note_id, visibility=body.visibility)
@@ -426,31 +598,119 @@ async def set_visibility(
     return view
 
 
-@router.post("/{note_id}/share", response_model=SharingView)
+@router.post("/{note_id}/share", response_model=ShareGrant, status_code=status.HTTP_201_CREATED)
 async def share_with_member(
     note_id: UUID,
     body: ShareRequest,
     claims: Annotated[Claims, Depends(requires("note.write", "note"))],
-) -> SharingView:
+) -> ShareGrant:
+    """Give a workspace member a role on the note. A non-member answers 404 ``not_a_member``
+    with ``can_invite``: the client invites them as a guest through auth-service (W2 entity),
+    because note-service never mails people who are not members."""
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         note = access.require_manage(await repo.fetch_note(conn, note_id=note_id), claims)
         member = await repo.find_member_by_email(conn, email=str(body.email))
         if member is None:
+            share_blocked_no_account.add(1)
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND,
                 detail={
                     "code": "not_a_member",
                     "detail": "nobody in your workspace has that e-mail address",
+                    "can_invite": True,
                 },
             )
-        note, granted = await _grant_member(conn, note, member.sub)
+        note, granted = await _grant_member(
+            conn, note, member.sub, role=body.role, granted_by=claims.sub
+        )
         # The sharer's name for the notification — a person, not a sub.
         (me,) = await repo.fetch_members(conn, subs=[claims.sub]) or [None]
         view = await _sharing_view(conn, note, claims)
 
     if granted:
-        await _notify_shared(claims, note, member.sub, me.display_name if me else "A colleague")
+        await _notify_shared(
+            claims, note, member.sub, me.display_name if me else "A colleague", role=body.role
+        )
+    return ShareGrant(sharing=view)
+
+
+@router.put("/{note_id}/collaborators/{user_sub}", response_model=SharingView)
+async def set_collaborator(
+    note_id: UUID,
+    user_sub: UUID,
+    body: CollaboratorRequest,
+    claims: Annotated[Claims, Depends(requires("note.write", "note"))],
+) -> SharingView:
+    """Grant or change one person's role. They must hold an active membership here (guests too)."""
+    state = get_state()
+    async with tenant_connection(state.app_pool, claims.tid) as conn:
+        note = access.require_manage(await repo.fetch_note(conn, note_id=note_id), claims)
+        if access.is_author_team(note, user_sub):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "is_author", "detail": "the note's authors always manage it"},
+            )
+        if user_sub not in await repo.membership_roles(conn, subs=[user_sub]):
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail={"code": "not_a_member", "detail": "that person is not in this workspace"},
+            )
+        previous = note.collaborators.get(user_sub)
+        note, _ = await _grant_member(conn, note, user_sub, role=body.role, granted_by=claims.sub)
+        view = await _sharing_view(conn, note, claims)
+    if previous is None:
+        await _notify_shared(claims, note, user_sub, "A colleague", role=body.role, via="role")
+    elif previous != body.role:
+        await _audit(
+            claims,
+            audit_kinds.NOTE_SHARED,
+            note_id,
+            {"with": str(user_sub), "via": "role_change", "role": body.role},
+        )
+        await _notify_access_changed(claims, note, user_sub, role=body.role)
+    return view
+
+
+@router.delete("/{note_id}/collaborators/{user_sub}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_collaborator(
+    note_id: UUID,
+    user_sub: UUID,
+    claims: Annotated[Claims, Depends(requires("note.write", "note"))],
+) -> Response:
+    """Revoke one person's grant. A guest left with no grants is removed by the sweeper (24 h)."""
+    state = get_state()
+    async with tenant_connection(state.app_pool, claims.tid) as conn:
+        note = access.require_manage(await repo.fetch_note(conn, note_id=note_id), claims)
+        removed = await repo.remove_collaborator(conn, note_id=note_id, user_sub=user_sub)
+    if removed:
+        await _audit(claims, audit_kinds.NOTE_UNSHARED, note_id, {"with": str(user_sub)})
+        await _notify_access_changed(claims, note, user_sub, role=None)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put("/{note_id}/transcript-sharing", response_model=SharingView)
+async def set_transcript_sharing(
+    note_id: UUID,
+    body: TranscriptSharingRequest,
+    claims: Annotated[Claims, Depends(requires("note.write", "note"))],
+) -> SharingView:
+    """ "Include transcript" for view/comment collaborators and guests (editors always see it)."""
+    state = get_state()
+    async with tenant_connection(state.app_pool, claims.tid) as conn:
+        note = access.require_manage(await repo.fetch_note(conn, note_id=note_id), claims)
+        changed = note.transcript_shared != body.shared
+        if changed:
+            await repo.set_transcript_shared(conn, note_id=note_id, shared=body.shared)
+            note = await repo.fetch_note(conn, note_id=note_id) or note
+        view = await _sharing_view(conn, note, claims)
+    if changed:
+        await _audit(
+            claims,
+            audit_kinds.NOTE_TRANSCRIPT_SHARING_CHANGED,
+            note_id,
+            {"shared": body.shared},
+        )
     return view
 
 
@@ -496,6 +756,7 @@ async def share_by_email(
 
     base = settings.app_base_url.rstrip("/")
     granted: list[UUID] = []
+    invite_needed: list[str] = []
     recipients: list[share_email.Recipient] = []
     created_links: list[repo.ShareLinkRow] = []
     outsider_links: dict[str, repo.ShareLinkRow] = {}
@@ -508,7 +769,9 @@ async def share_by_email(
         for address in body.recipients:
             member = await repo.find_member_by_email(conn, email=address)
             if member is not None:
-                note, newly = await _grant_member(conn, note, member.sub)
+                note, newly = await _grant_member(
+                    conn, note, member.sub, role=body.role, granted_by=claims.sub
+                )
                 if newly:
                     granted.append(member.sub)
                 recipients.append(
@@ -518,6 +781,10 @@ async def share_by_email(
                         link_url=f"{base}/notes/{note_id}",
                     )
                 )
+                continue
+            if body.mode == "invite":
+                # W3: outsiders become guests through auth-service; nothing is mailed from here.
+                invite_needed.append(address)
                 continue
             _require_external(policy)
             link, created = await share_links.create_recipient_link(
@@ -583,7 +850,7 @@ async def share_by_email(
             claims, audit_kinds.NOTE_LINK_CREATED, note_id, _link_created_payload(link, via="email")
         )
     for member_sub in granted:
-        await _notify_shared(claims, note, member_sub, sharer_name)
+        await _notify_shared(claims, note, member_sub, sharer_name, role=body.role, via="email")
     await _audit(
         claims,
         audit_kinds.NOTE_LINK_EMAILED,
@@ -604,6 +871,7 @@ async def share_by_email(
             ShareEmailOutcome(email=o.email, access=o.access, status=o.status)  # type: ignore[arg-type]
             for o in outcomes
         ],
+        invite_needed=invite_needed,
     )
 
 
@@ -616,11 +884,14 @@ async def unshare_member(
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         note = access.require_manage(await repo.fetch_note(conn, note_id=note_id), claims)
-        if user_sub in note.shared_with_ids:
-            await repo.remove_shared_with(conn, note_id=note_id, user_sub=user_sub)
+        # Kept for old clients; the same revoke as DELETE /collaborators/{sub}.
+        removed = await repo.remove_collaborator(conn, note_id=note_id, user_sub=user_sub)
+        if removed:
             note = await repo.fetch_note(conn, note_id=note_id) or note
         view = await _sharing_view(conn, note, claims)
-    await _audit(claims, audit_kinds.NOTE_UNSHARED, note_id, {"with": str(user_sub)})
+    if removed:
+        await _audit(claims, audit_kinds.NOTE_UNSHARED, note_id, {"with": str(user_sub)})
+        await _notify_access_changed(claims, note, user_sub, role=None)
     return view
 
 

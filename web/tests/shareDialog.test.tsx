@@ -184,7 +184,7 @@ describe("share sheet — client links (Sprint 19)", () => {
       },
     });
     sheet();
-    const list = await screen.findByLabelText(/people with access/i);
+    const list = await screen.findByLabelText(/^links$/i);
     expect(list).toHaveTextContent("Tom @ Client");
     expect(list).toHaveTextContent("Not opened");
     expect(list).toHaveTextContent(/Opened (17 Sep|Sep 17)/);
@@ -216,9 +216,11 @@ describe("share sheet — send from the product (Sprint 22)", () => {
         recipients: ["tom@client.com"],
         message: "See you Friday",
         expires_in_days: 30,
+        // Outsiders get a link only when the sender asked for one (W3).
+        mode: "link",
       }),
     );
-    const list = await screen.findByLabelText(/people with access/i);
+    const list = await screen.findByLabelText(/^links$/i);
     expect(list).toHaveTextContent("Tom @ Client");
     expect(list).toHaveTextContent(/Sent/);
   });
@@ -230,7 +232,7 @@ describe("share sheet — send from the product (Sprint 22)", () => {
       },
     });
     sheet();
-    const list = await screen.findByLabelText(/people with access/i);
+    const list = await screen.findByLabelText(/^links$/i);
     expect(list).toHaveTextContent("Opted out");
     expect(within(list).queryByRole("button", { name: /^(send|resend|retry)$/i })).not.toBeInTheDocument();
     expect(within(list).getByRole("button", { name: /^copy$/i })).toBeInTheDocument();
@@ -249,7 +251,7 @@ describe("share sheet — send from the product (Sprint 22)", () => {
       },
     });
     sheet();
-    await screen.findByLabelText(/people with access/i);
+    await screen.findByLabelText(/^links$/i);
     expect(screen.getByRole("button", { name: /^retry$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^resend$/i })).toBeInTheDocument();
   });
@@ -276,3 +278,38 @@ function LINK_BASE() {
     send_count: 0,
   };
 }
+
+describe("share sheet — public link modal", () => {
+  const PUBLIC = {
+    id: "pl-1",
+    token: "tok",
+    path: "/p/tok",
+    label: null,
+    recipient_email: null,
+    created_at: "2026-10-17T10:00:00Z",
+    expires_at: null,
+    view_count: 0,
+  };
+
+  it("turning on 'Anyone with the link' opens the link with its type, Copy and Send", async () => {
+    const calls = server({
+      ...LOADED,
+      [`POST /v1/notes/${NOTE}/public-link`]: { body: { ...SHARING, public_link: PUBLIC } },
+    });
+
+    sheet();
+    await userEvent.click(await screen.findByRole("checkbox", { name: /anyone with the link/i }));
+
+    const modal = await screen.findByRole("dialog", { name: "Public link" });
+    expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/public-link"))).toBe(true);
+    expect(within(modal).getByLabelText("Public link")).toHaveValue(`${window.location.origin}/p/tok`);
+    expect(within(modal).getByText(/permanent · never expires/i)).toBeInTheDocument();
+    expect(within(modal).getByRole("button", { name: /copy/i })).toBeInTheDocument();
+    expect(within(modal).getByRole("button", { name: /send/i })).toBeInTheDocument();
+
+    await userEvent.click(within(modal).getByRole("button", { name: /^done$/i }));
+    expect(screen.queryByRole("dialog", { name: "Public link" })).toBeNull();
+    // The share sheet is still there underneath.
+    expect(screen.getByRole("dialog", { name: "Share note" })).toBeInTheDocument();
+  });
+});

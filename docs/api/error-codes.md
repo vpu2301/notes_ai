@@ -62,6 +62,20 @@ responses (`problem_extras["code"]` on the raising side). Clients branch on
 | `try_again` | 503 | `POST /auth/oauth/token` | Redis is unreachable so the lock cannot be checked. This endpoint fails **closed** — the one place in the program where availability yields, because the alternative is unlimited secret guessing. Retry after 5 s. |
 | `rotation_in_progress` | 409 | `POST .../rotate` | The credential already holds two live secrets. Deploy or expire one first. |
 | `personal_workspace` | 409 | `POST /tenants/{id}/devices` | A personal workspace has one member and no meeting room. |
+| `personal_workspace` (W1/W2) | 409/422 | `PATCH /tenants/{id}` (status), `POST /tenants/{id}/invitations`, `POST /tenants/{id}/dissolve`, `DELETE /tenants/{id}/members/me` | A personal workspace is never suspended, dissolved, left or joined. |
+| `use_invitations` | 410/409 | `POST /admin/users/invite`, `POST /tenants/{id}/members` with an `email` (dual/native) | People join by invitation; call `POST /tenants/{id}/invitations`. |
+| `already_member` | 409 | `POST /tenants/{id}/invitations` | That address already holds an active membership here. Visible to managers only. |
+| `invalid_role` | 422 | `POST /tenants/{id}/invitations` | Invitations offer `member`, `admin`, `viewer`. |
+| `invite_unavailable` | 503 | invitation create/resend | The send limiter is down; invitations fail **closed** (mail to strangers). Retry later. |
+| `not_pending` | 409 | `POST …/invitations/{inv}/resend`, `DELETE …/invitations/{inv}` | Already accepted or revoked; refresh the list. |
+| `invitation_not_found` | 404 | `GET /auth/invitations/{token}`, accept, decline | Unknown, expired, revoked or accepted — one body for all; the link says nothing more. |
+| `invitation_email_mismatch` | 403 | `POST /auth/invitations/{token}/accept` | Signed in as another address than the one invited. Nothing was granted; offer sign-out. |
+| `last_owner` | 409 | `DELETE /tenants/{id}/members/me`, `PATCH`/`DELETE /tenants/{id}/members/{sub}` | The only owner cannot leave, be demoted or be removed; make someone else an owner first. |
+| `owner_only` | 403 | `POST /tenants/{id}/dissolve`, `PATCH`/`DELETE /tenants/{id}/members/{sub}` | Only an owner may dissolve a workspace, or change, remove or create an owner. |
+| `has_other_members` | 409 | `POST /tenants/{id}/dissolve` | Remove the other members first; dissolving never takes people's work with it. |
+| `confirm_name_mismatch` | 422 | `POST /tenants/{id}/dissolve` | The typed name is not the workspace's name. |
+| `insufficient_role` | 403 | note write routes (draft, items, comments, sharing…), asr speaker/rediarize/delete | You can see this note but your level (`required` extra: comment, edit, manage) does not allow this. Hide the action; never retry. |
+| `is_author` | 409 | `PUT /v1/notes/{id}/collaborators/{sub}` | The note's authors always manage it; there is no role to set. |
 | `model_not_configured` | 503 | `POST /v1/notes/{id}/ask` | No chat backend resolves in this environment. |
 | `model_unavailable` | 503 | `POST /v1/notes/{id}/ask` | The model backend failed; `kind` names the failure class. |
 

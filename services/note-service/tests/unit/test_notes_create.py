@@ -83,6 +83,12 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
     monkeypatch.setattr(notes.repo, "create_note_with_v1", _create)
 
+    # W3 default visibility reads the tenant kind + template code; covered in test_note_access.
+    async def _default_visibility(conn, *, tenant_id, template_id, meeting_type=None):  # noqa: ANN001
+        return "workspace"
+
+    monkeypatch.setattr(notes.visibility_defaults, "default_for_new_note", _default_visibility)
+
     app = create_app()
     app.dependency_overrides[deps.current_user] = _member_claims
     c = TestClient(app)
@@ -121,6 +127,7 @@ def test_create_201_author_is_caller(client: TestClient) -> None:
     assert create["primary_author_id"] == REQUESTER_SUB
     assert create["co_author_ids"] == []
     assert create["template_id"] == TEMPLATE_ID
+    assert create["visibility"] == "workspace"
 
     (event,) = client.audit_calls  # type: ignore[attr-defined]
     assert event["kind"] == "note.created"

@@ -241,9 +241,11 @@ def test_admin_keeps_the_aggregate_door():
 
 
 def test_authors_hold_note_permissions():
-    for role in ("member", "viewer"):
-        assert can(role, "note.read", "note") is True, role
-        assert can(role, "note.write", "note") is True, role
+    assert can("member", "note.read", "note") is True
+    assert can("member", "note.write", "note") is True
+    # W3: a viewer reads (and comments through the resource rule), never writes.
+    assert can("viewer", "note.read", "note") is True
+    assert can("viewer", "note.write", "note") is False
     assert can("auditor", "note.read", "note") is False
     assert can("service", "note.read", "note") is True  # S2S export pipeline
     assert can("service", "note.write", "note") is False
@@ -304,3 +306,23 @@ def test_dual_role_admin_member_keeps_authoring():
     both = _make_claims(roles=["tenant_admin", "member"])
     check(both, action="note.write", target_kind="note")  # no raise
     check(both, action="tenant.update", target_kind="tenant")  # no raise
+
+
+def test_guest_reaches_notes_and_nothing_else():
+    """W3: a guest token reads/writes notes (access.py narrows it to its grants) and nothing else."""
+    assert "guest" in KNOWN_ROLES
+    granted = {(action, target) for role, action, target in ALLOW if role == "guest"}
+    assert granted == {
+        ("tenant.read", "tenant"),
+        ("note.read", "note"),
+        ("note.write", "note"),
+        ("notification.read", "notification"),
+        ("notification.write", "notification"),
+    }
+    for action, target in (
+        ("asr.read", "asr_job"),
+        ("dictation.start", "dictation_session"),
+        ("template.read", "template"),
+        ("autocomplete.read", "phrase"),
+    ):
+        assert not can("guest", action, target)

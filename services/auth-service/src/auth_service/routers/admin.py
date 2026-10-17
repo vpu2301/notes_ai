@@ -1,4 +1,9 @@
-"""Admin user management: invite, deactivate/reactivate, list/get, MFA reminders, roles."""
+"""Admin user management: invite, deactivate/reactivate, list/get, MFA reminders, roles.
+
+W1 (ADR-0069): in dual/native mode the people of a workspace are its memberships, so
+deactivate/reactivate/roles act on `tenant_memberships` and invite answers 410
+(`use_invitations`, W2 ships the replacement). Keycloak mode is unchanged.
+"""
 
 from __future__ import annotations
 
@@ -16,26 +21,66 @@ from auth.perms import KNOWN_ROLES
 from db import tenant_connection
 
 from .. import audit_kinds
+from .. import tenants_repository as tenants_repo
 from ..config import settings
 from ..deps import get_state, requires, requires_mfa
+from ..domain.errors import ApiError
+from ..domain.identity_repository import platform_roles_for, primary_role
 from ..keycloak_client import KeycloakError
 from ..notifications import emit_mfa_reminder
+from .native_common import as_problem
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 _ROLE_VALUES: frozenset[str] = frozenset({"tenant_admin", "member", "viewer", "auditor"})
 
-# Highest-privilege-wins order for collapsing a role set into ``users.role``.
-_ROLE_PRECEDENCE: tuple[str, ...] = ("tenant_admin", "member", "viewer", "auditor", "service")
+# dual/native: the membership role a platform role set collapses to. No entry = no
+# membership carries it (auditor/service/device are not people in a workspace).
+_MEMBERSHIP_ROLE_FOR: dict[str, str] = {
+    "tenant_admin": "admin",
+    "member": "member",
+    "viewer": "viewer",
+    "guest": "guest",
+}
 
 
-def _primary_role(roles: set[str]) -> str:
-    """Collapse a role set to the single value the ``users.role`` column holds."""
-    for role in _ROLE_PRECEDENCE:
-        if role in roles:
-            return role
-    return sorted(roles)[0]
+def _memberships_are_people() -> bool:
+    return settings.idp_mode != "keycloak"
+
+
+async def _membership_or_404(tenant_id: UUID, sub: UUID) -> Any:
+    """The target's membership in the caller's workspace (writer pool, scoped to that tenant)."""
+    state = get_state()
+    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+        member = await tenants_repo.get_membership(conn, tenant_id=tenant_id, user_sub=sub)
+    if member is None:
+        raise HTTPException(status_code=404, detail="user not found in this tenant")
+    return member
+
+
+async def _refuse_last_owner(tenant_id: UUID, member: Any) -> None:
+    """Never strip or suspend the last active owner of a workspace."""
+    if member["role"] != "owner" or member["status"] != "active":
+        return
+    state = get_state()
+    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+        others = await tenants_repo.count_active_owners(
+            conn, tenant_id=tenant_id, exclude_sub=member["user_sub"]
+        )
+    if others == 0:
+        raise HTTPException(status_code=409, detail="cannot remove the last owner of the workspace")
+
+
+async def _set_membership_status(tenant_id: UUID, sub: UUID, status_value: str) -> None:
+    state = get_state()
+    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+        await conn.execute(
+            "UPDATE tenant_memberships SET status = $3 WHERE tenant_id = $1 AND user_sub = $2",
+            tenant_id,
+            sub,
+            status_value,
+        )
 
 
 class InviteRequest(BaseModel):
@@ -65,6 +110,11 @@ async def invite_user(
     body: InviteRequest,
     claims: Annotated[Claims, Depends(requires("user.invite", "user"))],
 ) -> InviteResponse:
+    if _memberships_are_people():
+        # A Keycloak user + `users` row is no person in dual/native mode; W2 adds invitations.
+        raise as_problem(
+            ApiError("use_invitations", 410, detail="invitations replace this endpoint (W2)")
+        )
     if body.role not in _ROLE_VALUES:
         raise HTTPException(status_code=422, detail=f"role must be one of {sorted(_ROLE_VALUES)}")
 
@@ -124,24 +174,30 @@ async def deactivate_user(
     state = get_state()
     tenant_id = claims.tid
 
-    # Explicit 404 for a target outside the caller's tenant.
-    async with tenant_connection(state.app_pool, tenant_id) as conn:
-        existing = await conn.fetchrow("SELECT sub, status FROM users WHERE sub = $1", sub)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="user not found in this tenant")
+    if _memberships_are_people():
+        member = await _membership_or_404(tenant_id, sub)
+        await _refuse_last_owner(tenant_id, member)
+        await _set_membership_status(tenant_id, sub, "suspended")
+        existing: Any = member
+    else:
+        # Explicit 404 for a target outside the caller's tenant.
+        async with tenant_connection(state.app_pool, tenant_id) as conn:
+            existing = await conn.fetchrow("SELECT sub, status FROM users WHERE sub = $1", sub)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="user not found in this tenant")
 
-    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
-        await conn.execute("UPDATE users SET status = 'deactivated' WHERE sub = $1", sub)
+        async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+            await conn.execute("UPDATE users SET status = 'deactivated' WHERE sub = $1", sub)
 
-    try:
-        await state.keycloak.set_user_enabled(sub, enabled=False)
-        await state.keycloak.logout_user(sub)
-    except KeycloakError as exc:
-        # The DB change has already committed; log and continue.
-        logger.warning(
-            "admin.deactivate.kc_partial_failure",
-            extra={"sub": str(sub), "kc_status": exc.status, "body": exc.body},
-        )
+        try:
+            await state.keycloak.set_user_enabled(sub, enabled=False)
+            await state.keycloak.logout_user(sub)
+        except KeycloakError as exc:
+            # The DB change has already committed; log and continue.
+            logger.warning(
+                "admin.deactivate.kc_partial_failure",
+                extra={"sub": str(sub), "kc_status": exc.status, "body": exc.body},
+            )
 
     # Keycloak logout only stops refreshes; denylist the outstanding ACCESS tokens too.
     if state.denylist is not None:
@@ -298,23 +354,27 @@ async def reactivate_user(
     state = get_state()
     tenant_id = claims.tid
 
-    async with tenant_connection(state.app_pool, tenant_id) as conn:
-        existing = await conn.fetchrow("SELECT sub, status FROM users WHERE sub = $1", sub)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="user not found in this tenant")
+    if _memberships_are_people():
+        existing: Any = await _membership_or_404(tenant_id, sub)
+        await _set_membership_status(tenant_id, sub, "active")
+    else:
+        async with tenant_connection(state.app_pool, tenant_id) as conn:
+            existing = await conn.fetchrow("SELECT sub, status FROM users WHERE sub = $1", sub)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="user not found in this tenant")
 
-    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
-        await conn.execute(
-            "UPDATE users SET status = 'active', updated_at = now() WHERE sub = $1", sub
-        )
+        async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+            await conn.execute(
+                "UPDATE users SET status = 'active', updated_at = now() WHERE sub = $1", sub
+            )
 
-    try:
-        await state.keycloak.set_user_enabled(sub, enabled=True)
-    except KeycloakError as exc:
-        logger.warning(
-            "admin.reactivate.kc_partial_failure",
-            extra={"sub": str(sub), "kc_status": exc.status, "body": exc.body},
-        )
+        try:
+            await state.keycloak.set_user_enabled(sub, enabled=True)
+        except KeycloakError as exc:
+            logger.warning(
+                "admin.reactivate.kc_partial_failure",
+                extra={"sub": str(sub), "kc_status": exc.status, "body": exc.body},
+            )
 
     # Lift the deactivation's sub-level deny.
     if state.denylist is not None:
@@ -488,6 +548,9 @@ async def set_user_roles(
     tenant_id = claims.tid
     desired_set = set(desired)
 
+    if _memberships_are_people():
+        return await _set_membership_role(sub, desired_set, claims)
+
     # RLS → 404 for a target outside the caller's tenant.
     async with tenant_connection(state.app_pool, tenant_id) as conn:
         existing = await conn.fetchrow("SELECT sub, role FROM users WHERE sub = $1", sub)
@@ -522,7 +585,7 @@ async def set_user_roles(
         await conn.execute(
             "UPDATE users SET role = $2, updated_at = now() WHERE sub = $1",
             sub,
-            _primary_role(desired_set),
+            primary_role(desired_set),
         )
 
     await state.audit_writer.write_event(
@@ -537,3 +600,38 @@ async def set_user_roles(
     )
 
     return RolesResponse(sub=str(sub), roles=desired)
+
+
+async def _set_membership_role(sub: UUID, desired: set[str], claims: Claims) -> RolesResponse:
+    """dual/native: the platform role set becomes one membership role; JWTs follow on refresh."""
+    tenant_id = claims.tid
+    target = _MEMBERSHIP_ROLE_FOR.get(primary_role(desired))
+    if target is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"a workspace member's roles must include one of {sorted(_MEMBERSHIP_ROLE_FOR)}",
+        )
+    member = await _membership_or_404(tenant_id, sub)
+    # An owner asked for tenant_admin stays owner; anything less is a demotion.
+    if member["role"] == "owner" and target == "admin":
+        target = "owner"
+    if target != "owner":
+        await _refuse_last_owner(tenant_id, member)
+
+    state = get_state()
+    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+        await tenants_repo.update_member_role(conn, tenant_id=tenant_id, user_sub=sub, role=target)
+
+    old_roles = sorted(platform_roles_for(member["role"]))
+    new_roles = sorted(platform_roles_for(target))
+    await state.audit_writer.write_event(
+        tenant_id=tenant_id,
+        kind=audit_kinds.USER_ROLE_CHANGED,
+        actor_sub=claims.sub,
+        actor_role="tenant_admin",
+        target_kind="user",
+        target_id=str(sub),
+        payload={"old_roles": old_roles, "new_roles": new_roles},
+        severity=Severity.SEC,
+    )
+    return RolesResponse(sub=str(sub), roles=new_roles)

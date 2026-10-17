@@ -97,8 +97,8 @@ async def create_clip(
 
     started = time.perf_counter()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        # A private note the caller was not given is a 404.
-        note = access.require_view(await repo.fetch_note(conn, note_id=body.note_id), claims)
+        # A private note the caller was not given is a 404; so is audio not shared with them (W3).
+        note = access.require_transcript(await repo.fetch_note(conn, note_id=body.note_id), claims)
         is_author = _enforce_read_purpose(note, claims, purpose)
         try:
             source = await clips.resolve_audio_source(conn, note_id=body.note_id)
@@ -217,6 +217,11 @@ async def stream_clip(
         raise HTTPException(
             status.HTTP_410_GONE,
             detail={"code": "clip_expired", "detail": "clips are ephemeral — request a fresh one"},
+        )
+    # W3: a minted link outlives a revoked grant or "Include transcript" turned off; re-check.
+    async with tenant_connection(state.app_pool, claims.tid) as conn:
+        access.require_transcript(
+            await repo.fetch_note(conn, note_id=UUID(entry["note_id"])), claims
         )
     try:
         opus = await state.clips_store.get(

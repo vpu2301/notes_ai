@@ -31,6 +31,7 @@ import {
 } from "../api/notes";
 import type {
   FieldMetadata,
+  LinkView,
   ItemView,
   NameSource,
   NameSuggestion,
@@ -47,7 +48,7 @@ import type {
   TranscriptResult,
   TranscriptTurn,
 } from "../api/types";
-import { defaultSpeakerName } from "../api/types";
+import { defaultSpeakerName, workspaceLabel } from "../api/types";
 import { AskNote } from "../components/AskNote";
 import { CarriedItems } from "../components/CarriedItems";
 import { GenerationStatus } from "../components/GenerationStatus";
@@ -67,6 +68,7 @@ import {
   ArrowLeftIcon,
   CalendarIcon,
   CheckIcon,
+  CommentIcon,
   CopyIcon,
   DownloadIcon,
   FileDownIcon,
@@ -87,7 +89,8 @@ import { RichText, type LineExtra } from "../components/RichText";
 import { LineEvidence } from "../components/EvidencePopover";
 import { CorrectionsPanel } from "../components/CorrectionsPanel";
 import { useGeneratedLines } from "../lib/useGeneratedLines";
-import { lineKey } from "../lib/itemKey";
+import { lineKey, stripMarker } from "../lib/itemKey";
+import type { CommentAnchorKind } from "../api/types";
 import type { GeneratedItem, TranscriptNoise } from "../api/types";
 import { isTranscript, parseRichText } from "../lib/richText";
 import {
@@ -105,7 +108,11 @@ import { pickableNames, segmentIndicesOf, speakerInitials, speakerTint } from ".
 import { SpeakerRoster, useOnline } from "../components/SpeakerRoster";
 import { NameSuggestionChip } from "../components/NameSuggestionChip";
 import { copyText, movedAnnouncement } from "../i18n/speakers";
+import { PublicLinkDialog } from "../components/PublicLinkDialog";
 import { ShareDialog, publicLinkUrl } from "../components/ShareDialog";
+import { CommentsPanel, NOTE_ANCHOR, useComments, type CommentAnchor } from "../components/CommentsPanel";
+import { PresenceAvatars } from "../components/PresenceAvatars";
+import { canCommentNote, canEditNote, canManageNote, readOnlyStrip } from "../lib/noteLevel";
 import { Skeleton } from "../components/Skeleton";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toaster";
@@ -414,6 +421,10 @@ interface TranscriptViewProps {
   /** Open at this moment (ms); `seekKey` changes per click so the same range can reopen. */
   seekMs?: number | null;
   seekKey?: number;
+  /** Read only (a view or comment level): no renaming, moving, merging or spelling review. */
+  readOnly?: boolean;
+  /** The job answered 404: the caller may not read this transcript, so the tab goes. */
+  onUnavailable?: () => void;
 }
 
 /** Transcript from the note text (no readable job); a rename rewrites the note's turns. */
@@ -640,6 +651,8 @@ export function TranscriptView({
   fallback,
   seekMs,
   seekKey,
+  readOnly = false,
+  onUnavailable,
 }: TranscriptViewProps) {
   const toast = useToast();
   const online = useOnline();
@@ -822,10 +835,15 @@ export function TranscriptView({
         setResult(r);
         setNames(r.speaker_names ?? {});
       })
-      .catch((err) => !cancelled && setError(messageFor(err)));
+      .catch((err) => {
+        if (cancelled) return;
+        if (onUnavailable && err instanceof ApiError && err.status === 404) onUnavailable();
+        else setError(messageFor(err));
+      });
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
   const turns = result?.turns ?? [];
@@ -838,14 +856,14 @@ export function TranscriptView({
   // Spelling overlay: banner, review sheet, underlines.
   const [reviewOpen, setReviewOpen] = useState(false);
   const [hoverSpelling, setHoverSpelling] = useState<string | null>(null);
-  const spellingBanner = correctionsBanner(result?.entity_corrections, result?.language);
+  const spellingBanner = readOnly ? null : correctionsBanner(result?.entity_corrections, result?.language);
   const echoLine = promptEchoLine(result?.diagnostics);
   const speakerCount = useMemo(() => new Set(turns.map((t) => t.speaker).filter(Boolean)).size, [turns]);
   const diarized = speakerCount > 0;
   const roster = result?.speakers ?? [];
   // Moving turns needs the server revision (stale guard), a connection, and no re-label in flight.
   const canMove =
-    diarized && roster.length > 0 && online && !relabelRunning && typeof result?.result_rev === "number";
+    !readOnly && diarized && roster.length > 0 && online && !relabelRunning && typeof result?.result_rev === "number";
   const moveLocked = !canMove || saving;
 
   const copy = async () => {
@@ -915,6 +933,7 @@ export function TranscriptView({
   // ── name suggestions ──
   /** Suggestions still worth asking about: a live label nobody has named, not turned down. */
   const openSuggestions = (result?.name_suggestions ?? []).filter((sg) => {
+    if (readOnly) return false;
     if (!roster.includes(sg.label) || dismissed.has(suggestionKey(sg))) return false;
     const current = names[sg.label];
     return current === undefined || current === defaultSpeakerName(sg.label);
@@ -1075,7 +1094,7 @@ export function TranscriptView({
     <div className={`transcript ${selected.size > 0 ? "selecting" : ""}`}>
       {region}
       <div className="transcript-bar">
-        {(hasRoster || result.relabel_available === true) && (
+        {!readOnly && (hasRoster || result.relabel_available === true) && (
           <SpeakerRoster
             jobId={jobId}
             speakers={diarized ? (result.speakers ?? []) : []}
@@ -1110,13 +1129,13 @@ export function TranscriptView({
             onReset={() => relabelled("rerun")}
           />
         )}
-        {!hasRoster && (
+        {(!hasRoster || readOnly) && (
           <span className="help">
             {turns.length === 0
               ? "Nothing was said."
               : !diarized
                 ? "Speakers were not told apart in this recording."
-                : `${speakerCount === 1 ? "1 speaker" : `${speakerCount} speakers`} · click a name to rename`}
+                : `${speakerCount === 1 ? "1 speaker" : `${speakerCount} speakers`}${readOnly ? "" : " · click a name to rename"}`}
           </span>
         )}
         <span className="grow" />
@@ -1220,14 +1239,20 @@ export function TranscriptView({
           >
             {diarized && (
               <span className="turn-avatar-host" style={{ "--tint": speakerTint(name) } as React.CSSProperties}>
-                <Menu
-                  anchored
-                  label={`${name} — move this turn`}
-                  triggerClassName="speaker-avatar turn-avatar"
-                  disabled={moveLocked}
-                  items={moveItems([i], new Set([t.speaker]))}
-                  trigger={speakerInitials(name)}
-                />
+                {readOnly ? (
+                  <span className="speaker-avatar turn-avatar" aria-hidden="true">
+                    {speakerInitials(name)}
+                  </span>
+                ) : (
+                  <Menu
+                    anchored
+                    label={`${name} — move this turn`}
+                    triggerClassName="speaker-avatar turn-avatar"
+                    disabled={moveLocked}
+                    items={moveItems([i], new Set([t.speaker]))}
+                    trigger={speakerInitials(name)}
+                  />
+                )}
                 {t.uncertain && (
                   <span className="turn-uncertain" role="img" aria-label={UNCERTAIN_COPY} title={UNCERTAIN_COPY}>
                     ?
@@ -1250,6 +1275,8 @@ export function TranscriptView({
                     onPick={(n) => void commitRename(n)}
                     onCancel={() => setEditing(null)}
                   />
+                ) : t.speaker && readOnly ? (
+                  <span className="turn-speaker">{name}</span>
                 ) : t.speaker ? (
                   <button
                     type="button"
@@ -1269,7 +1296,7 @@ export function TranscriptView({
                   {t.language}
                 </span>
               )}
-              {diarized && (
+              {diarized && !readOnly && (
                 <input
                   type="checkbox"
                   className="chk turn-select"
@@ -1425,10 +1452,16 @@ function SpacePill({ noteId }: { noteId: string }) {
 // "client" is what someone outside the workspace sees.
 type Tab = "notes" | "transcript" | "responses" | "client";
 
+/** A 404 when the person has other workspaces: the note may live there. Never probed (privacy). */
+const NOT_HERE = "Not in this workspace. Try switching.";
+
 export function NoteEditorPage() {
   const { noteId = "" } = useParams();
   const toast = useToast();
-  const { identity } = useAuth();
+  const { identity, memberships, activeTenantId, activeRole, switchWorkspace } = useAuth();
+  const guest = activeRole === "guest";
+  const otherWorkspaces = memberships.filter((m) => m.tenant_id !== activeTenantId);
+  const hasOtherWorkspaces = otherWorkspaces.length > 0;
   const navigate = useNavigate();
   const { spaces, spaceOf, file: fileInSpace, forgetNote } = useSpaces();
 
@@ -1450,6 +1483,8 @@ export function NoteEditorPage() {
   const [detail, setDetail] = useState<DetailLevel>(() => readDetail(noteId));
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [conflict, setConflict] = useState(false);
+  /** Who saved the version this tab's edit collided with; null until the version list answers. */
+  const [conflictBy, setConflictBy] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   /** Oversight read (admin on a colleague's note): every read carries this purpose, recorded server-side. */
   const [readPurpose, setReadPurpose] = useState<ReadPurpose | null>(null);
@@ -1460,6 +1495,8 @@ export function NoteEditorPage() {
   const [items, setItems] = useState<ItemView[]>([]);
   const [responses, setResponses] = useState<ResponseView[]>([]);
   const [sourceJobId, setSourceJobId] = useState<string | null>(() => jobForNote(noteId));
+  /** asr-service answered 404 for the job: this person may not read the transcript. */
+  const [transcriptGone, setTranscriptGone] = useState(false);
 
   const [versions, setVersions] = useState<NoteVersionSummary[] | null>(null);
   const [showVersions, setShowVersions] = useState(false);
@@ -1472,8 +1509,15 @@ export function NoteEditorPage() {
   const [busy, setBusy] = useState(false);
   /** Who may manage/delete and whether a public link exists; null until read (then everything is offered). */
   const [sharing, setSharing] = useState<SharingView | null>(null);
+  // A link made from the ⋯ menu opens its modal; an existing one is just copied.
+  const [madeLink, setMadeLink] = useState<LinkView | null>(null);
   const [askReset, setAskReset] = useState(0);
   const [chatCount, setChatCount] = useState(0);
+  const [showComments, setShowComments] = useState(false);
+  const [commentAnchor, setCommentAnchor] = useState<CommentAnchor>(NOTE_ANCHOR);
+  // Comments need a server that knows levels (W3); an older one sends no `my_level`.
+  const commentsEnabled = note !== null && note.my_level !== undefined && note.status !== "cancelled";
+  const { comments, setComments, error: commentsError, reload: reloadComments } = useComments(noteId, commentsEnabled);
 
   const saveTimer = useRef<number | null>(null);
   const latest = useRef<{ content: NoteContent; version: number } | null>(null);
@@ -1537,6 +1581,7 @@ export function NoteEditorPage() {
       setVersion(env.current_version_number);
       setSaveState("saved");
       setConflict(false);
+      setConflictBy(null);
       setViewing(null);
       if (env.content?.template_id) {
         try {
@@ -1558,17 +1603,20 @@ export function NoteEditorPage() {
         setSections([]);
       }
     } catch (err) {
-      setLoadError(messageFor(err));
+      setLoadError(err instanceof ApiError && err.status === 404 && hasOtherWorkspaces ? NOT_HERE : messageFor(err));
     }
-  }, [noteId]);
+  }, [noteId, hasOtherWorkspaces]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   // Source transcription for the Transcript tab; the envelope doesn't say, so ask (cached per browser).
+  // Not asked when the server already said this person may not read it.
+  const transcriptRefused = note?.can_read_transcript === false;
+  const noteLoaded = note !== null;
   useEffect(() => {
-    if (sourceJobId) return;
+    if (sourceJobId || !noteLoaded || transcriptRefused) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -1585,7 +1633,7 @@ export function NoteEditorPage() {
     return () => {
       cancelled = true;
     };
-  }, [noteId, sourceJobId]);
+  }, [noteId, sourceJobId, noteLoaded, transcriptRefused]);
 
   // ── autosave ────────────────────────────────────────────────────────
 
@@ -1602,12 +1650,22 @@ export function NoteEditorPage() {
       if (err instanceof ApiError && err.isConflict) {
         setConflict(true);
         setSaveState("error");
+        // Name who saved: the newest version says.
+        listVersions(noteId, readPurpose ?? undefined)
+          .then((all) => {
+            const newest = all.reduce<NoteVersionSummary | null>(
+              (best, v) => (!best || v.version_number > best.version_number ? v : best),
+              null,
+            );
+            setConflictBy(newest?.created_by_display ?? null);
+          })
+          .catch(() => undefined);
       } else {
         setSaveState("error");
         toast.error(messageFor(err));
       }
     }
-  }, [noteId, toast]);
+  }, [noteId, toast, readPurpose]);
 
   const scheduleSave = useCallback(
     (next: NoteContent, fromVersion: number) => {
@@ -1626,9 +1684,13 @@ export function NoteEditorPage() {
     [],
   );
 
-  // Editable until cancelled (ADR-0051).
+  // Editable until cancelled (ADR-0051), and only at the edit or manage level (W3).
   const isDraft = note !== null && note.status !== "cancelled";
-  const editable = isDraft && !viewing;
+  const myLevel = note?.my_level;
+  const editable = isDraft && !viewing && canEditNote(myLevel);
+  const canComment = isDraft && canCommentNote(myLevel);
+  // The job id is withheld, or the job refused, when the transcript is not this person's to read.
+  const jobId = transcriptRefused || transcriptGone ? null : sourceJobId;
 
   const onContentChange = (next: NoteContent) => {
     setContent(next);
@@ -1746,6 +1808,25 @@ export function NoteEditorPage() {
     saveBlob(new Blob([md], { type: "text/markdown;charset=utf-8" }), `${fileBase()}.md`);
   };
 
+  /** What this tab typed and could not save, as Markdown on the clipboard, before "Reload latest" replaces it. */
+  const copyUnsaved = async () => {
+    if (!content || !sections) return;
+    const md = noteToMarkdown({
+      title: content.title ?? "",
+      code: note?.code ?? "",
+      sections: noteBlocks(content, sections, { editable: false }).map((block) => ({
+        name: block.title ?? "",
+        text: block.section.text ?? "",
+      })),
+    });
+    try {
+      await navigator.clipboard.writeText(md);
+      toast.success("Your unsaved text is on the clipboard");
+    } catch {
+      toast.error("Could not copy. Select the text and copy it by hand.");
+    }
+  };
+
   const onDelete = async () => {
     setBusy(true);
     setActionError(null);
@@ -1792,7 +1873,7 @@ export function NoteEditorPage() {
     try {
       const view = await createPublicLink(noteId);
       setSharing(view);
-      if (view.public_link) await copyToClipboard(publicLinkUrl(view.public_link.path), "Public link created and copied");
+      if (view.public_link) setMadeLink(view.public_link);
     } catch (err) {
       toast.error(messageFor(err));
     } finally {
@@ -1820,6 +1901,7 @@ export function NoteEditorPage() {
   const toggleVersions = async () => {
     const opening = !showVersions;
     setShowVersions(opening);
+    if (opening) setShowComments(false);
     setViewing(null);
     if (opening && versions === null) {
       try {
@@ -1847,7 +1929,7 @@ export function NoteEditorPage() {
   const transcriptDefs = (sections ?? []).filter(
     (def) => shownContent !== null && isTranscript(sectionOf(shownContent, def.id).text ?? ""),
   );
-  const hasTranscript = sourceJobId !== null || transcriptDefs.length > 0;
+  const hasTranscript = jobId !== null || (!transcriptRefused && !transcriptGone && transcriptDefs.length > 0);
   // Structure follows content: no section is drawn just for being in the template.
   const allBlocks = noteBlocks(shownContent, sections ?? [], { editable });
   // Evidence and the detail toggle only for the current, engine-written note.
@@ -1874,6 +1956,58 @@ export function NoteEditorPage() {
     }
   }, [saveState, conflict]);
 
+  // ── comments ────────────────────────────────────────────────────────
+  const openComments = (anchor?: CommentAnchor) => {
+    if (anchor) setCommentAnchor(anchor);
+    setShowComments(true);
+    setShowVersions(false);
+    void reloadComments();
+  };
+  const openCommentCount = (comments ?? []).filter((c) => !c.resolved_at).length;
+  const commentsOn = (kind: CommentAnchorKind, key: string) =>
+    (comments ?? []).filter((c) => !c.resolved_at && c.anchor_kind === kind && c.anchor_key === key).length;
+  /** Item lines by key, and the section each sits in, for the panel's headings and jumps. */
+  const itemLines = useMemo(() => {
+    const out = new Map<string, { text: string; section: string }>();
+    for (const block of allBlocks) {
+      for (const line of (block.section.text ?? "").split("\n")) {
+        const text = stripMarker(line);
+        if (text) out.set(lineKey(line), { text, section: block.key });
+      }
+    }
+    return out;
+  }, [allBlocks]);
+  const commentLabel = (kind: CommentAnchorKind, key: string | null): string => {
+    if (kind === "section") return allBlocks.find((b) => b.key === key)?.title ?? "A section";
+    const line = key ? itemLines.get(key)?.text : undefined;
+    return line ? `“${line.length > 60 ? `${line.slice(0, 57)}…` : line}”` : "A line";
+  };
+  const jumpTo = (kind: CommentAnchorKind, key: string) => {
+    const section = kind === "item" ? itemLines.get(key)?.section : key;
+    if (!section) return;
+    setTab("notes");
+    document.getElementById(`sec-${section}`)?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+  };
+  /** Action-item lines take a comment of their own. */
+  const itemCommentExtra = (base: LineExtra | undefined): LineExtra => (raw) => (
+    <>
+      {base?.(raw)}
+      <button
+        type="button"
+        className="icon-btn line-comment"
+        aria-label="Comment on this line"
+        title="Comment on this line"
+        onClick={(e) => {
+          e.stopPropagation();
+          openComments({ kind: "item", key: lineKey(raw) });
+        }}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <CommentIcon size={12} />
+      </button>
+    </>
+  );
+
   if (loadError) {
     return (
       <div className="doc">
@@ -1882,9 +2016,22 @@ export function NoteEditorPage() {
           <span className="grow">{loadError}</span>
         </div>
         <div className="center-row">
-          <button className="btn" onClick={() => void load()}>
-            Try again
-          </button>
+          {loadError === NOT_HERE ? (
+            // Switching remounts this page in the chosen workspace, which re-reads the note.
+            otherWorkspaces.map((m) => (
+              <button
+                key={m.tenant_id}
+                className="btn"
+                onClick={() => void switchWorkspace(m.tenant_id).catch((err) => toast.error(messageFor(err)))}
+              >
+                Open in {workspaceLabel(m)}
+              </button>
+            ))
+          ) : (
+            <button className="btn" onClick={() => void load()}>
+              Try again
+            </button>
+          )}
           <Link to="/" className="btn ghost">
             Back to notes
           </Link>
@@ -1904,24 +2051,27 @@ export function NoteEditorPage() {
     );
   }
 
-  const canManage = sharing?.can_manage ?? true;
-  const canDelete = sharing?.can_delete ?? true;
+  // A level from the envelope decides; an older server falls back to the sharing read.
+  const canManage = myLevel ? canManageNote(myLevel) : (sharing?.can_manage ?? true);
+  const canDelete = canManage && (sharing?.can_delete ?? true);
   const hasLink = sharing?.public_link != null;
+  const levelStrip = viewing ? null : readOnlyStrip(myLevel);
   const menu: MenuItem[] = [
-    { label: "Share…", icon: <ShareIcon size={14} />, onClick: () => setShowShare("any") },
+    ...(canManage ? [{ label: "Share…", icon: <ShareIcon size={14} />, onClick: () => setShowShare("any") }] : []),
     {
       label: "Copy link",
       icon: <CopyIcon size={14} />,
       onClick: () => void copyToClipboard(`${window.location.origin}/notes/${noteId}`, "Link copied"),
     },
   ];
-  if (!viewing && note.status !== "cancelled") {
+  // Sharing actions are the manager's; anyone else does not see them at all.
+  if (!viewing && note.status !== "cancelled" && canManage) {
     menu.push(
-      { label: "Share with client…", icon: <UsersIcon size={14} />, sep: true, disabled: busy || !canManage, onClick: () => setShowShare("client") },
+      { label: "Share with client…", icon: <UsersIcon size={14} />, sep: true, disabled: busy, onClick: () => setShowShare("client") },
       {
         label: "Mark all confirmed items done",
         icon: <CheckIcon size={14} />,
-        disabled: busy || !canManage || confirmedOpen.length === 0,
+        disabled: busy || confirmedOpen.length === 0,
         onClick: () => {
           setActionError(null);
           setConfirmMarkDone(true);
@@ -1931,17 +2081,17 @@ export function NoteEditorPage() {
         label: "Visible to everyone in the workspace",
         icon: <UsersIcon size={14} />,
         checked: sharing?.visibility === "workspace",
-        disabled: busy || !canManage || !sharing,
+        disabled: busy || !sharing,
         onClick: () =>
           void sharingAction(
             () => setVisibility(noteId, sharing?.visibility === "workspace" ? "private" : "workspace"),
             sharing?.visibility === "workspace" ? "Only people it is shared with can open it" : "Everyone in the workspace can open it",
           ),
       },
-      { label: hasLink ? "Copy public link" : "Create public link", icon: <GlobeIcon size={14} />, disabled: busy || !canManage, onClick: () => void onPublicLink() },
-      { label: "Send by email…", icon: <MailIcon size={14} />, disabled: busy || !canManage, onClick: () => setShowShare("people") },
+      { label: hasLink ? "Copy public link" : "Create public link", icon: <GlobeIcon size={14} />, disabled: busy, onClick: () => void onPublicLink() },
+      { label: "Send by email…", icon: <MailIcon size={14} />, disabled: busy, onClick: () => setShowShare("people") },
     );
-    if (hasLink && canManage) {
+    if (hasLink) {
       menu.push({
         label: "Turn off public link",
         icon: <LinkOffIcon size={14} />,
@@ -1955,7 +2105,7 @@ export function NoteEditorPage() {
     { label: "Download PDF", icon: <DownloadIcon size={14} />, onClick: () => void onPdf() },
     { label: "Download Markdown", icon: <FileDownIcon size={14} />, onClick: onMarkdown },
   );
-  if (!viewing && spaces.length > 0) {
+  if (!viewing && !guest && spaces.length > 0) {
     const current = spaceOf[noteId];
     spaces.forEach((sp, i) => {
       menu.push({
@@ -1969,14 +2119,14 @@ export function NoteEditorPage() {
   if (!viewing && chatCount > 0) {
     menu.push({ label: "Clear chat", icon: <SparkleIcon size={14} />, sep: true, onClick: () => setAskReset((k) => k + 1) });
   }
-  if (sourceJobId) {
-    menu.push({ label: "Copy job ID", icon: <CopyIcon size={14} />, sep: true, onClick: () => void copyToClipboard(sourceJobId, "Job ID copied") });
+  if (jobId) {
+    menu.push({ label: "Copy job ID", icon: <CopyIcon size={14} />, sep: true, onClick: () => void copyToClipboard(jobId, "Job ID copied") });
   }
   if (!viewing && canDelete) {
     menu.push({
       label: "Delete note",
       icon: <TrashIcon size={14} />,
-      sep: !sourceJobId,
+      sep: !jobId,
       danger: true,
       disabled: busy,
       onClick: () => {
@@ -2000,6 +2150,11 @@ export function NoteEditorPage() {
             </span>
           </div>
         )}
+        {levelStrip && (
+          <div className="banner banner-info note-level-strip" role="status">
+            <span className="grow">{levelStrip}</span>
+          </div>
+        )}
         <div className="doc-bar">
           <Link to="/" className="tb-back" title="Back to notes" aria-label="Back to notes">
             <ArrowLeftIcon size={15} />
@@ -2015,7 +2170,20 @@ export function NoteEditorPage() {
             note.status === "cancelled" && <StatusBadge status={note.status} />
           )}
           <span className="grow" />
-          {isDraft && !viewing && (
+          {myLevel !== undefined && <PresenceAvatars noteId={noteId} />}
+          {commentsEnabled && (
+            <button
+              className={`btn ghost sm doc-comments-btn ${showComments ? "on" : ""}`}
+              aria-label={openCommentCount > 0 ? `Comments, ${openCommentCount} open` : "Comments"}
+              aria-pressed={showComments}
+              title="Comments"
+              onClick={() => (showComments ? setShowComments(false) : openComments())}
+            >
+              <CommentIcon size={14} />
+              {openCommentCount > 0 && <span className="count">{openCommentCount}</span>}
+            </button>
+          )}
+          {editable && (
             <span className="save-status" data-state={saveState} role="status">
               <span className="dot" aria-hidden="true" />
               {saveLabel}
@@ -2037,12 +2205,15 @@ export function NoteEditorPage() {
           <span className="doc-pill" title={`Updated ${formatDateTime(note.updated_at)}`}>
             Updated {relativeTime(note.updated_at)}
           </span>
-          <span className="doc-pill">
-            <UserIcon size={13} />
-            {readPurpose ? authorName : "Me"}
-          </span>
+          {/* A collaborator's note is not "Me"; whose it is shows in Share. */}
+          {(readPurpose || !identity || note.primary_author_id === identity.id) && (
+            <span className="doc-pill">
+              <UserIcon size={13} />
+              {readPurpose ? authorName : "Me"}
+            </span>
+          )}
           <DocTypePill templateName={templateName} recordingType={recordingType} />
-          <SpacePill noteId={noteId} />
+          {!guest && <SpacePill noteId={noteId} />}
           <span className="doc-pill mono" title="This note's code">
             {note.code}
           </span>
@@ -2051,7 +2222,18 @@ export function NoteEditorPage() {
         {conflict && (
           <div className="banner banner-warn" role="alert">
             <AlertIcon size={15} />
-            <span className="grow">Someone else saved a newer version of this note.</span>
+            <span className="grow">
+              {conflictBy ? (
+                <>
+                  <strong>{conflictBy}</strong> saved a newer version of this note.
+                </>
+              ) : (
+                "Someone else saved a newer version of this note."
+              )}
+            </span>
+            <button className="btn ghost sm" onClick={() => void copyUnsaved()}>
+              Copy my unsaved text
+            </button>
             <button className="btn sm" onClick={() => void load()}>
               Reload latest
             </button>
@@ -2084,18 +2266,20 @@ export function NoteEditorPage() {
               </button>
             )}
             {/* Before sending anything, see what they will actually get. */}
-            <button
-              className={`tab ${tab === "client" ? "on" : ""}`}
-              role="tab"
-              aria-selected={tab === "client"}
-              onClick={() => setTab("client")}
-            >
-              Client version
-            </button>
+            {canManage && (
+              <button
+                className={`tab ${tab === "client" ? "on" : ""}`}
+                role="tab"
+                aria-selected={tab === "client"}
+                onClick={() => setTab("client")}
+              >
+                Client version
+              </button>
+            )}
           </div>
         )}
 
-        {tab === "client" ? (
+        {tab === "client" && canManage ? (
           <ClientVersionPanel noteId={noteId} />
         ) : tab === "responses" && hasResponsesTab ? (
           <ResponsesPanel
@@ -2109,7 +2293,7 @@ export function NoteEditorPage() {
             onItems={setItems}
             onResponses={setResponses}
           />
-        ) : tab === "transcript" && (sourceJobId || transcriptDefs.length > 0) ? (
+        ) : tab === "transcript" && hasTranscript ? (
           (() => {
             const textView =
               transcriptDefs.length > 0 ? (
@@ -2119,7 +2303,7 @@ export function NoteEditorPage() {
                   onRename={onSpeakerRenamed}
                 />
               ) : undefined;
-            return sourceJobId ? (
+            return jobId ? (
               <>
                 <RememberTermPrompt
                   pending={pendingTerm}
@@ -2137,7 +2321,12 @@ export function NoteEditorPage() {
                   </div>
                 )}
                 <TranscriptView
-                  jobId={sourceJobId}
+                  jobId={jobId}
+                  readOnly={!canEditNote(myLevel)}
+                  onUnavailable={() => {
+                    setTranscriptGone(true);
+                    setTab("notes");
+                  }}
                   onSpeakerRenamed={onSpeakerRenamed}
                   onSpeakersMerged={onSpeakersMerged}
                   onSpeakerMergeUndone={onSpeakerMergeUndone}
@@ -2154,12 +2343,12 @@ export function NoteEditorPage() {
             {/* Never blocks the page. */}
             <GenerationStatus
               noteId={noteId}
-              canGenerate={editable && sourceJobId !== null}
+              canGenerate={editable && jobId !== null}
               canRegenerate={editable}
               onFinished={load}
               onView={(view) => setRecordingType(view?.recording_type ?? null)}
               onSeek={
-                sourceJobId
+                jobId
                   ? (ms) => {
                       setSeek({ ms, key: Date.now() });
                       setTab("transcript");
@@ -2192,13 +2381,28 @@ export function NoteEditorPage() {
                     {responseCount} response{responseCount === 1 ? "" : "s"}
                   </button>
                 ) : null;
+              const commentable = commentsEnabled && canComment && !viewing;
+              const onSection = commentable ? commentsOn("section", block.key) : 0;
+              const itemSection = block.key === "action_items" || block.key === "next_steps";
               return (
-                <section key={block.key} className={`doc-section${block.title ? "" : " untitled"}`}>
+                <section key={block.key} id={`sec-${block.key}`} className={`doc-section${block.title ? "" : " untitled"}`}>
                   <div className="field">
                     {(block.title || badge) && (
                       <span className="section-name">
                         {block.title}
                         {badge}
+                        {commentable && block.title && (
+                          <button
+                            type="button"
+                            className={`icon-btn section-comment ${onSection > 0 ? "has" : ""}`}
+                            aria-label={`Comment on ${block.title}`}
+                            title="Comment on this section"
+                            onClick={() => openComments({ kind: "section", key: block.key })}
+                          >
+                            <CommentIcon size={13} />
+                            {onSection > 0 && <span className="count">{onSection}</span>}
+                          </button>
+                        )}
                       </span>
                     )}
                     <SectionField
@@ -2206,7 +2410,7 @@ export function NoteEditorPage() {
                       section={sectionOf(shownContent, block.key)}
                       readOnly={!editable}
                       onChange={(next) => onContentChange(withSection(shownContent, next))}
-                      lineExtra={lineExtra}
+                      lineExtra={commentable && itemSection ? itemCommentExtra(lineExtra) : lineExtra}
                       generated={isGeneratedSection(block.key, genSectionKeys)}
                     />
                     {alsoSaid && (alsoSaid.get(block.key)?.length ?? 0) > 0 && (
@@ -2265,6 +2469,21 @@ export function NoteEditorPage() {
         </aside>
       )}
 
+      {showComments && commentsEnabled && (
+        <CommentsPanel
+          noteId={noteId}
+          comments={comments}
+          error={commentsError}
+          onComments={setComments}
+          canComment={canComment}
+          anchor={commentAnchor}
+          onAnchor={setCommentAnchor}
+          labelFor={commentLabel}
+          onJump={jumpTo}
+          onClose={() => setShowComments(false)}
+        />
+      )}
+
       {confirmDelete && (
         <ConfirmDialog
           title="Delete this note?"
@@ -2297,6 +2516,8 @@ export function NoteEditorPage() {
         <ShareDialog
           noteId={noteId}
           noteTitle={shownContent.title ?? ""}
+          tenantId={activeTenantId}
+          meSub={identity?.id}
           initialFocus={showShare === "any" ? undefined : showShare}
           owner={
             identity && note.primary_author_id === identity.id
@@ -2306,6 +2527,15 @@ export function NoteEditorPage() {
                 : undefined
           }
           onClose={() => setShowShare(false)}
+        />
+      )}
+      {madeLink && (
+        <PublicLinkDialog
+          noteId={noteId}
+          noteTitle={shownContent.title ?? ""}
+          link={madeLink}
+          onChange={setSharing}
+          onClose={() => setMadeLink(null)}
         />
       )}
     </div>

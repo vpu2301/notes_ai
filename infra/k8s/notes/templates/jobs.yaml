@@ -48,6 +48,9 @@ spec:
           env:
             - name: DATABASE_URL
               value: {{ .Values.jobs.migrate.databaseUrl | quote }}
+            # prod: DEV_ONLY migrations (demo tenants) are recorded as skipped, not run.
+            - name: MDX_ENV
+              value: {{ .Values.jobs.migrate.mdxEnv | default "dev" | quote }}
       {{- if .Values.stateful.inCluster }}
       volumes:
         - name: initdb

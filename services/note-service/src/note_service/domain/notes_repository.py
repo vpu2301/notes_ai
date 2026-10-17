@@ -50,8 +50,13 @@ class NoteRow:
     source_asr_job_id: UUID | None = None
     # Defaults keep older call sites and fixtures valid.
     visibility: str = "workspace"
+    # DEPRECATED (W3): still loaded for rollback, never read for access; dropped in W4.
     shared_with_ids: list[UUID] = field(default_factory=list)
     deleted_at: datetime | None = None
+    # W3: per-note grants (`note_collaborators`) of people still active here, sub → view|comment|edit.
+    collaborators: dict[UUID, str] = field(default_factory=dict)
+    # W3: "Include transcript" for view/comment collaborators and guests.
+    transcript_shared: bool = False
 
 
 @dataclass(slots=True)
@@ -85,7 +90,16 @@ async def fetch_note(
                n.primary_author_id, n.co_author_ids,
                n.title, n.created_at, n.updated_at, n.finalized_at,
                n.cancelled_at, n.source_session_id, n.source_asr_job_id,
-               n.visibility, n.shared_with_ids, n.deleted_at
+               n.visibility, n.shared_with_ids, n.deleted_at, n.transcript_shared,
+               ARRAY(
+                   SELECT c.user_sub::text || ':' || c.role::text
+                     FROM note_collaborators c
+                    WHERE c.note_id = n.id
+                      -- A grant outlives a membership only on paper (sweepers tidy it).
+                      AND EXISTS (SELECT 1 FROM tenant_memberships m
+                                   WHERE m.tenant_id = n.tenant_id AND m.user_sub = c.user_sub
+                                     AND m.status = 'active')
+               ) AS collaborators
         FROM notes n
         LEFT JOIN note_versions v ON v.id = n.current_version_id
         WHERE n.id = $1
@@ -115,7 +129,17 @@ async def fetch_note(
         visibility=str(row["visibility"]),
         shared_with_ids=list(row["shared_with_ids"] or []),
         deleted_at=row["deleted_at"],
+        collaborators=_collaborators(row["collaborators"]),
+        transcript_shared=bool(row["transcript_shared"]),
     )
+
+
+def _collaborators(packed: list[str] | None) -> dict[UUID, str]:
+    out: dict[UUID, str] = {}
+    for item in packed or []:
+        sub, _, role = item.partition(":")
+        out[UUID(sub)] = role
+    return out
 
 
 # ── Visibility, sharing, delete ──────────────────────────────────────
@@ -129,29 +153,67 @@ async def set_visibility(conn: asyncpg.Connection, *, note_id: UUID, visibility:
     )
 
 
-async def add_shared_with(conn: asyncpg.Connection, *, note_id: UUID, user_sub: UUID) -> None:
-    """Idempotent: sharing twice with the same person is one grant."""
-    await conn.execute(
-        """
-        UPDATE notes
-        SET shared_with_ids = array_append(shared_with_ids, $2), updated_at = now()
-        WHERE id = $1 AND NOT ($2 = ANY(shared_with_ids))
-        """,
+async def upsert_collaborator(
+    conn: asyncpg.Connection,
+    *,
+    note_id: UUID,
+    tenant_id: UUID,
+    user_sub: UUID,
+    role: str,
+    granted_by: UUID,
+) -> str | None:
+    """Grant or change a per-note role (W3); returns the previous role (None = new grant)."""
+    previous: str | None = await conn.fetchval(
+        "SELECT role::text FROM note_collaborators WHERE note_id = $1 AND user_sub = $2",
         note_id,
         user_sub,
     )
-
-
-async def remove_shared_with(conn: asyncpg.Connection, *, note_id: UUID, user_sub: UUID) -> None:
     await conn.execute(
         """
-        UPDATE notes
-        SET shared_with_ids = array_remove(shared_with_ids, $2), updated_at = now()
-        WHERE id = $1
+        INSERT INTO note_collaborators (note_id, tenant_id, user_sub, role, granted_by)
+        VALUES ($1, $2, $3, $4::note_collab_role, $5)
+        ON CONFLICT (note_id, user_sub)
+        DO UPDATE SET role = EXCLUDED.role, granted_by = EXCLUDED.granted_by, updated_at = now()
         """,
         note_id,
+        tenant_id,
         user_sub,
+        role,
+        granted_by,
     )
+    await conn.execute("UPDATE notes SET updated_at = now() WHERE id = $1", note_id)
+    return previous
+
+
+async def remove_collaborator(conn: asyncpg.Connection, *, note_id: UUID, user_sub: UUID) -> bool:
+    """Revoke is a hard delete; the audit trail carries the history."""
+    result = await conn.execute(
+        "DELETE FROM note_collaborators WHERE note_id = $1 AND user_sub = $2", note_id, user_sub
+    )
+    return result.endswith(" 1")
+
+
+async def set_transcript_shared(conn: asyncpg.Connection, *, note_id: UUID, shared: bool) -> None:
+    await conn.execute(
+        "UPDATE notes SET transcript_shared = $2, updated_at = now() WHERE id = $1",
+        note_id,
+        shared,
+    )
+
+
+async def membership_roles(conn: asyncpg.Connection, *, subs: list[UUID]) -> dict[UUID, str]:
+    """Active membership role of each sub in the scoped workspace (app_role reads its own roster)."""
+    if not subs:
+        return {}
+    rows = await conn.fetch(
+        """
+        SELECT user_sub, role FROM tenant_memberships
+         WHERE tenant_id = current_setting('app.tenant_id', true)::uuid
+           AND user_sub = ANY($1::uuid[]) AND status = 'active'
+        """,
+        subs,
+    )
+    return {r["user_sub"]: r["role"] for r in rows}
 
 
 async def soft_delete_note(conn: asyncpg.Connection, *, note_id: UUID, actor_sub: UUID) -> None:
@@ -771,6 +833,8 @@ async def create_note_with_v1(
     source_asr_job_id: UUID | None = None,
     # "default" when the generation job may name the note; None when never titled automatically.
     title_source: str | None = None,
+    # W3: `domain.visibility.default_for_new_note`; None keeps the column default (private).
+    visibility: str | None = None,
 ) -> tuple[UUID, UUID]:
     """Two-step insert (ADR-0020):
 
@@ -790,9 +854,10 @@ async def create_note_with_v1(
         INSERT INTO notes (
             tenant_id, code, status, primary_author_id, co_author_ids,
             template_id, template_schema_version,
-            title, source_session_id, source_asr_job_id, title_source
+            title, source_session_id, source_asr_job_id, title_source, visibility
         )
-        VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10)
+        VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10,
+                coalesce($11, 'private')::note_visibility)
         RETURNING id
         """,
         tenant_id,
@@ -805,6 +870,7 @@ async def create_note_with_v1(
         source_session_id,
         source_asr_job_id,
         title_source,
+        visibility,
     )
 
     version_id: UUID = await conn.fetchval(

@@ -152,15 +152,82 @@ async def get_job(conn: asyncpg.Connection, *, job_id: UUID) -> TranscriptionJob
     return _row_to_view(row)
 
 
+@dataclass(frozen=True)
+class NoteAccess:
+    """What the note linked to a job lets the caller do (W3, migration 0075)."""
+
+    # manage | edit | comment | view; None = linked to a note the caller may not see.
+    level: str | None
+    transcript: bool
+
+
+class NoteAccessUnavailableError(Exception):
+    """``note_access_for_job`` could not be called (e.g. a partial deploy).
+    Callers fail closed: the job reads as not found."""
+
+
+logger = logging.getLogger(__name__)
+
+
+async def note_access_for_job(
+    conn: asyncpg.Connection, *, job_id: UUID, sub: UUID, roles: list[str]
+) -> NoteAccess | None:
+    """The caller's access through the note linked to ``job_id``; ``None``
+    when the function returns no row (no linked note the caller holds a
+    grant on — asr-service's own rule applies). Runs under the caller's
+    tenant RLS. In a savepoint so a failure leaves the caller's
+    transaction usable."""
+    try:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT level, transcript FROM public.note_access_for_job($1, $2, $3::text[])",
+                job_id,
+                sub,
+                list(roles),
+            )
+    except asyncpg.PostgresError as exc:
+        logger.error(
+            "asr.note_access_unavailable",
+            extra={"job_id": str(job_id), "error_class": type(exc).__name__},
+        )
+        raise NoteAccessUnavailableError from exc
+    if row is None:
+        return None
+    level = row["level"]
+    return NoteAccess(
+        level=str(level) if level is not None else None, transcript=bool(row["transcript"])
+    )
+
+
 async def list_jobs(
     conn: asyncpg.Connection,
     *,
     limit: int,
+    sub: UUID,
+    roles: list[str],
     status: JobStatus | None = None,
     since: datetime | None = None,
+    own_only: bool = False,
 ) -> list[TranscriptionJobView]:
+    """Newest first. Jobs whose linked note gives the caller no transcript
+    are left out unless the caller requested them; the filter sits before
+    ``LIMIT`` so a page is never short. ``own_only`` lists the caller's
+    own jobs without calling the note function (its fail-closed fallback).
+
+    Cost: the walk follows ``transcription_jobs (tenant_id, queued_at DESC)``
+    and stops at ``LIMIT``; the function runs only for rows walked that the
+    caller did not request."""
     where_parts: list[str] = []
-    args: list[Any] = []
+    args: list[Any] = [sub]
+    if own_only:
+        where_parts.append("j.requester_sub = $1")
+    else:
+        args.append(list(roles))
+        where_parts.append(
+            "(j.requester_sub = $1 OR NOT EXISTS ("
+            "SELECT 1 FROM public.note_access_for_job(j.id, $1, $2::text[]) a"
+            " WHERE NOT a.transcript))"
+        )
     if status is not None:
         where_parts.append(f"j.status = ${len(args) + 1}")
         args.append(str(status))
@@ -169,16 +236,22 @@ async def list_jobs(
         args.append(since)
     where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
     args.append(limit)
-    rows = await conn.fetch(
-        f"""
+    sql = f"""
         SELECT j.*
         FROM transcription_jobs j
         {where_sql}
         ORDER BY j.queued_at DESC
         LIMIT ${len(args)}
-        """,
-        *args,
-    )
+    """
+    if own_only:
+        rows = await conn.fetch(sql, *args)
+        return [_row_to_view(r) for r in rows]
+    try:
+        async with conn.transaction():
+            rows = await conn.fetch(sql, *args)
+    except asyncpg.PostgresError as exc:
+        logger.error("asr.note_access_unavailable", extra={"error_class": type(exc).__name__})
+        raise NoteAccessUnavailableError from exc
     return [_row_to_view(r) for r in rows]
 
 

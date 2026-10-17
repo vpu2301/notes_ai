@@ -275,6 +275,7 @@ struct NewMeetingButton: View {
 
 /// The strip pinned to the bottom of every screen: the one button, or the live card (full or folded).
 struct CaptureBar: View {
+    @EnvironmentObject private var app: AppState
     @EnvironmentObject private var capture: CaptureViewModel
     /// The keyboard is up: the idle button steps aside; the live card stays.
     @State private var keyboardShown = false
@@ -283,7 +284,8 @@ struct CaptureBar: View {
     var body: some View {
         Group {
             if case .idle = capture.phase {
-                if !keyboardShown {
+                // A guest cannot record in this workspace: no button at all.
+                if !keyboardShown, app.capabilities.canRecord {
                     VStack(spacing: 8) {
                         MeetingTypePicker()
                         NewMeetingButton(fill: true, height: 50)

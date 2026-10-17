@@ -141,7 +141,60 @@ struct NotificationsSheet: View {
         }
     }
 
+    @State private var joining: String?
+    @State private var joinError: String?
+
+    @ViewBuilder
     private func row(_ item: NotificationItem) -> some View {
+        if let invitationId = item.invitationId {
+            invitationRow(item, invitationId: invitationId)
+        } else {
+            noteRow(item)
+        }
+    }
+
+    /// "You're invited to a workspace": Join right here while it is still open; the row opens Invitations.
+    private func invitationRow(_ item: NotificationItem, invitationId: String) -> some View {
+        let open = app.myInvitations.contains { $0.id == invitationId }
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 4) {
+                NavigationLink {
+                    InvitationsView(onJoined: onClose)
+                } label: {
+                    label(item, chevron: false)
+                }
+                .buttonStyle(.plain)
+                .simultaneousGesture(TapGesture().onEnded { Task { await model.markRead(item) } })
+                if joining == invitationId {
+                    ProgressView().controlSize(.small).padding(.top, 14).padding(.trailing, 16)
+                } else if open {
+                    Button("Join") {
+                        joining = invitationId
+                        joinError = nil
+                        Task {
+                            await model.markRead(item)
+                            joinError = await app.acceptInvitation(id: invitationId)
+                            joining = nil
+                            if joinError == nil { onClose() }
+                        }
+                    }
+                    .buttonStyle(DSButtonStyle(kind: .primary, size: 14, height: 32))
+                    .padding(.top, 10)
+                    .padding(.trailing, 16)
+                    .disabled(joining != nil)
+                    .accessibilityLabel("Join the workspace")
+                }
+            }
+            if let joinError, joining == nil {
+                DSNotice(tone: .danger, symbol: "exclamationmark.triangle.fill", text: joinError)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+            }
+        }
+        .task { await app.refreshMyInvitations() }
+    }
+
+    private func noteRow(_ item: NotificationItem) -> some View {
         Button {
             Task { await model.markRead(item) }
             if let noteId = item.noteId {
@@ -149,6 +202,14 @@ struct NotificationsSheet: View {
                 app.openNote(noteId)
             }
         } label: {
+            label(item, chevron: item.noteId != nil)
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(item.readAt == nil ? "Unread" : "Read")
+        .accessibilityHint(item.noteId != nil ? "Opens the note" : "Marks it read")
+    }
+
+    private func label(_ item: NotificationItem, chevron: Bool) -> some View {
             HStack(alignment: .top, spacing: 10) {
                 Circle()
                     .fill(item.readAt == nil ? DS.accent : .clear)
@@ -171,7 +232,7 @@ struct NotificationsSheet: View {
                         .foregroundStyle(DS.muted)
                 }
                 Spacer(minLength: 0)
-                if item.noteId != nil {
+                if chevron {
                     Image(systemName: "chevron.right")
                         .font(.dsSymbol(12, .semibold))
                         .foregroundStyle(DS.muted)
@@ -181,9 +242,5 @@ struct NotificationsSheet: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
             .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityValue(item.readAt == nil ? "Unread" : "Read")
-        .accessibilityHint(item.noteId != nil ? "Opens the note" : "Marks it read")
     }
 }

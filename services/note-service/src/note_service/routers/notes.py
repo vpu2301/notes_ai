@@ -18,6 +18,7 @@ from .. import audit_kinds
 from ..deps import get_state, requires
 from ..domain import access, code_sequence
 from ..domain import notes_repository as repo
+from ..domain import visibility as visibility_defaults
 from ._content_guard import ensure_valid_field_metadata
 
 logger = logging.getLogger(__name__)
@@ -85,10 +86,14 @@ class NoteEnvelope(BaseModel):
     updated_at: str
     finalized_at: str | None
     cancelled_at: str | None
-    # The transcription job the note was made from.
+    # The transcription job the note was made from; null when the transcript is not shared with you.
     source_job_id: UUID | None = None
     visibility: str = "workspace"
+    # DEPRECATED (W3): always the legacy array; read `GET /{id}/sharing` instead.
     shared_with_ids: list[UUID] = Field(default_factory=list)
+    # W3: what the caller may do here, and whether transcript/audio are theirs to open.
+    my_level: str | None = None
+    can_read_transcript: bool = False
     # Only filled for an oversight read, so the client can name whose note it shows.
     primary_author_name: str | None = None
     content: NoteContent | None = None
@@ -104,7 +109,9 @@ def _envelope(
     content: NoteContent | None = None,
     section_labels: list[SectionLabel] | None = None,
     primary_author_name: str | None = None,
+    claims: Claims | None = None,
 ) -> NoteEnvelope:
+    transcript = claims is not None and access.can_read_transcript(row, claims)
     return NoteEnvelope(
         id=row.id,
         code=row.code,
@@ -118,9 +125,11 @@ def _envelope(
         updated_at=row.updated_at.isoformat(),
         finalized_at=row.finalized_at.isoformat() if row.finalized_at else None,
         cancelled_at=row.cancelled_at.isoformat() if row.cancelled_at else None,
-        source_job_id=row.source_asr_job_id,
+        source_job_id=row.source_asr_job_id if transcript else None,
         visibility=row.visibility,
         shared_with_ids=row.shared_with_ids,
+        my_level=access.level(row, claims) if claims is not None else None,
+        can_read_transcript=transcript,
         primary_author_name=primary_author_name,
         content=content,
         section_labels=section_labels,
@@ -211,6 +220,9 @@ async def create_note(
             template_schema_version=body.content.template_schema_version,
             source_session_id=body.source_session_id,
             content=body.content,
+            visibility=await visibility_defaults.default_for_new_note(
+                conn, tenant_id=claims.tid, template_id=body.content.template_id
+            ),
         )
 
     await state.audit_writer.write_event(
@@ -284,4 +296,5 @@ async def get_note(
         content=content_obj,
         section_labels=section_labels,
         primary_author_name=primary_author_name,
+        claims=claims,
     )

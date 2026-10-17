@@ -21,6 +21,18 @@ def _no_spelling_overlay(request: pytest.FixtureRequest, monkeypatch: pytest.Mon
     monkeypatch.setattr(corrections, "job_state", no_state)
 
 
+@pytest.fixture(autouse=True)
+def _unlinked_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fakes know nothing of notes: every job reads as unlinked (W3,
+    ``note_access_for_job`` returns no row) unless a test installs its own."""
+    from asr_service.domain import repository
+
+    async def unlinked(*_a: Any, **_k: Any) -> None:
+        return None
+
+    monkeypatch.setattr(repository, "note_access_for_job", unlinked)
+
+
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "overlay: run the TQ3 spelling overlay against the test's fake DB"

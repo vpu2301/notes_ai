@@ -46,7 +46,7 @@ async def send_rendered(
     rendered = templates.render(
         kind,
         lang,
-        subject=copy_mod.subject_for(kind, lang),
+        subject=copy_mod.subject_for(kind, lang, fields),
         text_body=copy_mod.text_body(kind, lang, compose.text_values(kind, lang, fields, {})),
         context=fields,
     )
@@ -73,3 +73,23 @@ async def send_rendered(
         raise
     finally:
         _send_histogram.record(time.perf_counter() - started, {"template": kind})
+
+
+class InvitationMailer:
+    """Sends the W2 invitation mail inline, like the sign-in code: a relay failure is the caller's to record."""
+
+    def __init__(self, provider: EmailProvider, *, reply_to: str, timeout_seconds: float) -> None:
+        self._provider = provider
+        self._reply_to = reply_to
+        self._timeout = timeout_seconds
+
+    async def send_invitation(self, *, to: str, lang: str, fields: dict[str, Any]) -> None:
+        await send_rendered(
+            self._provider,
+            copy_mod.KIND_INVITATION,
+            lang,
+            to=to,
+            fields=fields,
+            reply_to=self._reply_to,
+            timeout_seconds=self._timeout,
+        )

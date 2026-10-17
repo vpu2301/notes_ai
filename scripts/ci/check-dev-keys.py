@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CI gate: the dev-only signing key (infra/dev/auth-signing-dev.json) never reaches a
-non-dev config, and no other private key PEM appears under infra/ or deploy/.
+non-dev config, no other private key PEM appears under infra/ or deploy/, and the
+Keycloak realm export carries a credential value only for `dev-*` users (W1).
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 DEV_KEY_FILE = ROOT / "infra" / "dev" / "auth-signing-dev.json"
+REALM_EXPORT = ROOT / "infra" / "keycloak" / "realm-export.json"
 
 # Files that may legitimately mention the dev kid.
 ALLOWED = {
@@ -55,12 +57,25 @@ def _candidates() -> list[Path]:
     return out
 
 
+def _realm_credential_failures() -> list[str]:
+    """A plaintext password in the export is a real secret unless the user is a dev fixture."""
+    if not REALM_EXPORT.exists():
+        return []
+    realm = json.loads(REALM_EXPORT.read_text(encoding="utf-8"))
+    return [
+        f"infra/keycloak/realm-export.json: user {u.get('username')!r} carries a credential value"
+        for u in realm.get("users", [])
+        if not str(u.get("username", "")).startswith("dev-")
+        and any(c.get("value") for c in u.get("credentials", []))
+    ]
+
+
 def main() -> int:
+    failures = _realm_credential_failures()
     kids = _dev_kids()
-    if not kids:
+    if not kids and not failures:
         print("check-dev-keys: no dev signing key present; nothing to guard")
         return 0
-    failures: list[str] = []
     for path in _candidates():
         rel = path.relative_to(ROOT).as_posix()
         try:

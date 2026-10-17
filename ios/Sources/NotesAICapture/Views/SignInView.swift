@@ -47,6 +47,12 @@ struct SignInView: View {
         VStack(alignment: .leading, spacing: 18) {
             DSWordmark(size: 19)
             heading
+            if step == .email, let invite = app.pendingInvitation?.state.lookup {
+                // From an invitation link: only that address can accept it (the link shows it masked).
+                DSNotice(tone: .info, symbol: "envelope.open",
+                         text: "Sign in or sign up as \(invite.emailMasked) to join \(invite.workspaceName).")
+                    .onTapGesture { app.forgetPendingInvitation() }
+            }
             content
             if let message = errorMessage {
                 // An unconfirmed address is information with a way forward, not a refusal.
@@ -85,6 +91,11 @@ struct SignInView: View {
             // Why the app is showing this screen, if it did not start here.
             if errorMessage == nil { errorMessage = app.signedOutNotice }
             hasSavedPassword = CredentialStore.hasSaved
+            // From an invitation link: the address is the one thing left to type.
+            if app.pendingInvitation != nil, step == .email { focus = .email }
+        }
+        .onChange(of: app.pendingInvitation) { _, invite in
+            if invite != nil, step == .email { focus = .email }
         }
         .onChange(of: stepId) { _, id in
             // The resend offer belongs to the attempt that provoked it.

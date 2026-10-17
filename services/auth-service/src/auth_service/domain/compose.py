@@ -233,6 +233,54 @@ def concierge_welcome_fields(
     }
 
 
+def invite_url(*, app_base_url: str, token: str) -> str:
+    """The SPA's invitation landing page; the token only lets its holder see the invitation."""
+    return f"{_sanitise_base(app_base_url)}/invite/{token}"
+
+
+_ROLE_WORDS: Final[dict[str, dict[str, str]]] = {
+    "admin": {"en": "an admin", "de": "Admin", "uk": "адміністратор"},
+    "member": {"en": "a member", "de": "Mitglied", "uk": "учасник"},
+    "viewer": {"en": "a viewer", "de": "Leser", "uk": "читач"},
+}
+_MESSAGE_INTRO: Final[dict[str, str]] = {
+    "en": "Their message:",
+    "de": "Ihre Nachricht:",
+    "uk": "Їхнє повідомлення:",
+}
+
+
+def invitation_fields(
+    *,
+    lang: str,
+    workspace_name: str,
+    inviter_display: str,
+    role: str,
+    message: str,
+    invite_url: str,
+    expires_at: Any,
+) -> dict[str, Any]:
+    """Variables for the invitation mail. ``message`` is the inviter's text, rendered as text only."""
+    words = _ROLE_WORDS.get(role, _ROLE_WORDS["member"])
+    message = (message or "").strip()
+    return {
+        "workspace_name": workspace_name,
+        "inviter_display": inviter_display,
+        "role_words": words.get(lang, words["en"]),
+        "message": message,
+        "message_intro": _MESSAGE_INTRO.get(lang, _MESSAGE_INTRO["en"]),
+        # Plain-text part only; the HTML template renders `message` itself (autoescaped).
+        "message_block": (
+            f"\n{_MESSAGE_INTRO.get(lang, _MESSAGE_INTRO['en'])}\n\n    {message}\n"
+            if message
+            else ""
+        ),
+        "invite_url": invite_url,
+        "expires_label": _days_label(14 * 86400, lang),
+        "expires_at": copy_mod.format_moment(expires_at, lang),
+    }
+
+
 def auth_locked_fields(*, lang: str, locked_until: Any) -> dict[str, Any]:
     """Variables for the temporary-lock notice."""
     return {

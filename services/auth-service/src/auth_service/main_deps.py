@@ -91,6 +91,10 @@ class ServiceState:
     session_service: SessionService | None = None
     # Self-serve signup; None unless MDX_SIGNUP_ENABLED and a mail provider are set.
     onboarding_service: Any = None
+    # W2 invitations; None in keycloak mode or without a mail provider (routes 404).
+    invitation_service: Any = None
+    # W2 limiter for workspace creation / invitation lookups (None without Redis: fail open).
+    limiter: Any = None
     _redis: Any = None
 
     @property
@@ -447,6 +451,9 @@ async def build_state() -> ServiceState:
         _redis=redis_client,
     )
     state.session_service = build_session_service(state, token_service=token_service)
+    if redis_client is not None:
+        state.limiter = FixedWindowLimiter(redis_client, prefix="mdx:auth:rl")
+    state.invitation_service = build_invitation_service(state)
     state.account_services = build_account_services(
         state, token_service=token_service, redis_client=redis_client
     )
@@ -468,6 +475,29 @@ def _free_limits() -> dict[str, int]:
     except (ValueError, TypeError):
         logger.error("auth.signup.free_limits_invalid")
         return {"notes_per_month": 50, "members": 3}
+
+
+def build_invitation_service(state: ServiceState) -> Any:
+    """Wire W2 invitations, or return None so their routes 404 (keycloak mode or no mail provider)."""
+    if not settings.native_issuer_enabled or state.email_provider is None:
+        return None
+    from .domain.invitation_repository import InvitationRepository
+    from .domain.invitation_service import InvitationService
+    from .domain.mailing import InvitationMailer
+    from .notifications import workspace_notifier
+
+    return InvitationService(
+        repo=InvitationRepository(state.tenant_writer_pool),
+        mailer=InvitationMailer(
+            state.email_provider,
+            reply_to=settings.auth_email_reply_to,
+            timeout_seconds=settings.email_send_timeout_seconds,
+        ),
+        # `invite:*` fails closed: without Redis every invitation answers 503.
+        limiter=state.limiter,
+        app_base_url=settings.app_base_url,
+        notify=workspace_notifier(state.notification_bus),
+    )
 
 
 def build_onboarding_service(state: ServiceState, *, redis_client: Any = None) -> Any:
@@ -651,6 +681,10 @@ def build_email_code_service(
         on_account_locked=_audit_account_locked,
         # A passed email code does not become a session while a second factor is owed.
         mfa=mfa,
+        # W2: a new address accepts its open invitations and lands in the first one.
+        accept_invitations=(
+            state.invitation_service.accept_all_open if state.invitation_service else None
+        ),
     )
 
 

@@ -1,8 +1,11 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "../src/auth/AuthContext";
-import { setSessionListener } from "../src/api/http";
+import { api, refreshSession, setSessionListener, setWorkspaceMoved, WorkspaceMovedError } from "../src/api/http";
 import type { AuthResult, MeResponse } from "../src/api/types";
+import { WorkspaceMovedStrip } from "../src/shell/AppShell";
+import { listTenants } from "../src/api/account";
 
 /** The context exposes one `identity` shape whether the server sends `identity` or only `db_user`. */
 
@@ -238,5 +241,174 @@ describe("anonymous routes", () => {
       vi.unstubAllGlobals();
       window.history.pushState({}, "", "/");
     }
+  });
+});
+
+describe("workspace moved in another tab", () => {
+  const OTHER = "33333333-3333-4333-8333-333333333333";
+  const me: MeResponse = {
+    claims: CLAIMS,
+    db_user: null,
+    identity: {
+      id: CLAIMS.sub,
+      email: "sam@example.com",
+      display_name: "Sam Rivera",
+      mfa_enabled: false,
+      has_password: false,
+      status: "active",
+    },
+    memberships: [
+      { tenant_id: CLAIMS.tid, name: "Sam", kind: "personal", role: "owner", status: "active" },
+      { tenant_id: OTHER, name: "Globex", kind: "team", role: "member", status: "active" },
+    ],
+  };
+
+  /** Fetch stub whose refresh answer can change mid-test; records every path it saw. */
+  function stubSession() {
+    const state = { tenant: CLAIMS.tid, paths: [] as string[] };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) => {
+        const path = new URL(String(url)).pathname;
+        state.paths.push(path);
+        const body =
+          path === "/auth/refresh"
+            ? { access_token: `at-${state.tenant}`, expires_in: 900, tenant_id: state.tenant }
+            : path === "/auth/me"
+              ? me
+              : { items: [] };
+        return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+      }),
+    );
+    return state;
+  }
+
+  function renderShell() {
+    function Probe() {
+      const { activeTenantId } = useAuth();
+      return <span data-testid="tenant">{activeTenantId ?? "—"}</span>;
+    }
+    return render(
+      <AuthProvider>
+        <MemoryRouter>
+          <Probe />
+          <WorkspaceMovedStrip />
+        </MemoryRouter>
+      </AuthProvider>,
+    );
+  }
+
+  afterEach(() => setWorkspaceMoved(null));
+
+  it("a refresh into another workspace blocks the next note request and shows the strip", async () => {
+    const session = stubSession();
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId("tenant")).toHaveTextContent(CLAIMS.tid));
+
+    session.tenant = OTHER;
+    await act(async () => {
+      await refreshSession();
+    });
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/switched to Globex in another tab/i);
+    // The tab still shows its own workspace: nothing re-scopes silently.
+    expect(screen.getByTestId("tenant")).toHaveTextContent(CLAIMS.tid);
+    session.paths.length = 0;
+    await expect(api("note", "/v1/notes", { method: "POST", json: {} })).rejects.toBeInstanceOf(WorkspaceMovedError);
+    expect(session.paths).toEqual([]);
+  });
+
+  it("a broadcast from the switching tab does the same without waiting for a refresh", async () => {
+    const channels: { onmessage: ((e: MessageEvent) => void) | null }[] = [];
+    vi.stubGlobal(
+      "BroadcastChannel",
+      class {
+        onmessage: ((e: MessageEvent) => void) | null = null;
+        constructor(readonly name: string) {
+          channels.push(this);
+        }
+        postMessage() {}
+        close() {}
+      },
+    );
+    stubSession();
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId("tenant")).toHaveTextContent(CLAIMS.tid));
+
+    act(() => {
+      for (const ch of channels) ch.onmessage?.(new MessageEvent("message", { data: { tenant_id: OTHER } }));
+    });
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/switched to Globex/i);
+    await expect(api("note", "/v1/notes")).rejects.toBeInstanceOf(WorkspaceMovedError);
+  });
+
+  it("ignores its own workspace on the channel (the posting tab hears itself)", async () => {
+    const channels: { onmessage: ((e: MessageEvent) => void) | null }[] = [];
+    vi.stubGlobal(
+      "BroadcastChannel",
+      class {
+        onmessage: ((e: MessageEvent) => void) | null = null;
+        constructor(readonly name: string) {
+          channels.push(this);
+        }
+        postMessage() {}
+        close() {}
+      },
+    );
+    stubSession();
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId("tenant")).toHaveTextContent(CLAIMS.tid));
+
+    act(() => {
+      for (const ch of channels) ch.onmessage?.(new MessageEvent("message", { data: { tenant_id: CLAIMS.tid } }));
+    });
+
+    expect(screen.queryByRole("status")).toBeNull();
+    await expect(api("note", "/v1/notes")).resolves.toEqual({ items: [] });
+  });
+
+  it("names a workspace this tab has not heard of from the last GET /tenants", async () => {
+    const NEWER = "44444444-4444-4444-8444-444444444444";
+    const session = stubSession();
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId("tenant")).toHaveTextContent(CLAIMS.tid));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) => {
+        const path = new URL(String(url)).pathname;
+        session.paths.push(path);
+        const body =
+          path === "/auth/refresh"
+            ? { access_token: "at-new", expires_in: 900, tenant_id: NEWER }
+            : { items: [{ id: NEWER, name: "sunrise", display_name: "Sunrise Studio", kind: "team", my_role: "owner", is_active: true }] };
+        return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+      }),
+    );
+    // The switcher read it earlier.
+    await listTenants();
+    session.paths.length = 0;
+    await act(async () => {
+      await refreshSession();
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(/switched to Sunrise Studio in another tab/i);
+    expect(session.paths).toEqual(["/auth/refresh"]);
+  });
+
+  it("Continue there adopts the new workspace and lets requests through again", async () => {
+    const session = stubSession();
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId("tenant")).toHaveTextContent(CLAIMS.tid));
+    session.tenant = OTHER;
+    await act(async () => {
+      await refreshSession();
+    });
+    await screen.findByRole("status");
+
+    fireEvent.click(screen.getByRole("button", { name: /continue there/i }));
+
+    await waitFor(() => expect(screen.getByTestId("tenant")).toHaveTextContent(OTHER));
+    expect(screen.queryByRole("status")).toBeNull();
+    await expect(api("note", "/v1/notes")).resolves.toEqual({ items: [] });
   });
 });

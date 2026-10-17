@@ -22,6 +22,7 @@ from .. import audit_kinds
 from ..config import settings
 from ..deps import get_state, requires
 from ..domain import corrections, entity_unify, repository
+from .jobs import _job_not_found, require_note_access
 
 router = APIRouter(prefix="/asr", tags=["asr"])
 
@@ -78,11 +79,13 @@ async def list_corrections(
     job_id: UUID,
     claims: Annotated[Claims, Depends(requires("asr.read", "asr_job"))] = ...,
 ) -> CorrectionsView:
+    # Spellings are transcript content: the linked note's transcript rule.
+    await require_note_access(claims, job_id, "transcript")
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         view = await _view(conn, job_id)
     if view is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        raise _job_not_found()
     return view
 
 
@@ -101,6 +104,7 @@ async def decide_correction(
     reverts every occurrence. The same decision twice is a no-op."""
     if body.to_text is not None and body.status != "accepted":
         raise _problem(422, "to_text_on_reject", "a spelling can only be edited when accepting")
+    await require_note_access(claims, job_id, "edit")
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         try:
@@ -159,6 +163,7 @@ async def recompute_corrections(
 ) -> CorrectionsView:
     """For a job whose first run had no glossary (route down, terms added
     since). Idempotent: the same transcript and priors give the same rows."""
+    await require_note_access(claims, job_id, "edit")
     state = get_state()
     decision = await state.limiter.allow(
         "corrections_recompute_user",

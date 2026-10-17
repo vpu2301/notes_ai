@@ -130,10 +130,7 @@ export function AskNote({
             }}
           />
           <div className="ask-tools">
-            <span className="ask-scope">
-              <SparkleIcon size={14} />
-              This note
-            </span>
+            <span className="ask-scope">This note</span>
             <button
               type="button"
               className="ask-send"

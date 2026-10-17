@@ -1,7 +1,11 @@
-import { Fragment, type ReactNode } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useSearchParams } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
+import { workspaceLabel } from "./api/types";
+import { AlertIcon } from "./components/icons";
 import { ToasterProvider } from "./components/Toaster";
+import { scopeCaptures } from "./lib/captures";
+import { messageFor } from "./lib/errorCopy";
 import { LoginPage } from "./pages/LoginPage";
 import { AccountRecoveryPage } from "./pages/auth/AccountRecoveryPage";
 import { MfaPage } from "./pages/auth/MfaPage";
@@ -22,6 +26,8 @@ import { MeetingPage } from "./pages/MeetingPage";
 import { NewNotePage } from "./pages/NewNotePage";
 import { NoteEditorPage } from "./pages/NoteEditorPage";
 import { NotesPage } from "./pages/NotesPage";
+import { InvitationsPage } from "./pages/InvitationsPage";
+import { InvitePage } from "./pages/InvitePage";
 import { JoinPage } from "./pages/JoinPage";
 import { SharedNotePage } from "./pages/SharedNotePage";
 import { SharedPrivacyPage } from "./pages/SharedPrivacyPage";
@@ -35,7 +41,79 @@ import { SpacesProvider } from "./spaces/SpacesContext";
  */
 function WorkspaceScope({ children }: { children: ReactNode }) {
   const { activeTenantId } = useAuth();
+  // Before any child reads capture bookkeeping: those keys are per workspace.
+  if (activeTenantId) scopeCaptures(activeTenantId);
   return <Fragment key={activeTenantId ?? "no-workspace"}>{children}</Fragment>;
+}
+
+/**
+ * `?ws=<tenant_id>` on a deep link (notifications): move the session there
+ * first, then open. The server decides membership (`not_a_member`); the page
+ * is held back meanwhile so it never reads in the wrong workspace.
+ */
+export function WorkspaceFromLink({ children }: { children: ReactNode }) {
+  const { activeTenantId, memberships, switchWorkspace } = useAuth();
+  const [params, setParams] = useSearchParams();
+  const ws = params.get("ws");
+  const [error, setError] = useState<string | null>(null);
+  const asked = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!ws) return;
+    if (ws === activeTenantId) {
+      setParams(
+        (p) => {
+          p.delete("ws");
+          return p;
+        },
+        { replace: true },
+      );
+      return;
+    }
+    if (asked.current === ws) return;
+    asked.current = ws;
+    // Success remounts this tree (`WorkspaceScope`); the new instance drops `ws`.
+    switchWorkspace(ws).catch((err) => setError(messageFor(err)));
+  }, [ws, activeTenantId, switchWorkspace, setParams]);
+
+  if (error) {
+    return (
+      <div className="doc">
+        <div className="banner banner-danger" role="alert">
+          <AlertIcon size={15} />
+          <span className="grow">{error}</span>
+        </div>
+        <div className="center-row">
+          {/* The switcher: the note may live in one of these. `ws` goes first, or the remount would ask again. */}
+          {memberships
+            .filter((m) => m.tenant_id !== activeTenantId)
+            .map((m) => (
+              <button
+                key={m.tenant_id}
+                className="btn"
+                onClick={() => {
+                  setParams(
+                    (p) => {
+                      p.delete("ws");
+                      return p;
+                    },
+                    { replace: true },
+                  );
+                  switchWorkspace(m.tenant_id).catch((err) => setError(messageFor(err)));
+                }}
+              >
+                Open in {workspaceLabel(m)}
+              </button>
+            ))}
+          <Link to="/" className="btn ghost">
+            Back to notes
+          </Link>
+        </div>
+      </div>
+    );
+  }
+  if (ws && ws !== activeTenantId) return <div className="doc" aria-busy="true" aria-label="Opening workspace" />;
+  return <>{children}</>;
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -78,6 +156,8 @@ export function App() {
             <Route path="/s/:token" element={<SharedNotePage />} />
             {/* Where the shared page's CTA lands. */}
             <Route path="/join" element={<JoinPage />} />
+            {/* A workspace invitation: readable signed out, joined only as the invited address. */}
+            <Route path="/invite/:token" element={<InvitePage />} />
             <Route
               element={
                 <RequireAuth>
@@ -93,7 +173,16 @@ export function App() {
               <Route path="/spaces/:spaceId" element={<NotesPage />} />
               <Route path="/meeting/new" element={<MeetingPage />} />
               <Route path="/new" element={<NewNotePage />} />
-              <Route path="/notes/:noteId" element={<NoteEditorPage />} />
+              {/* Where `workspace.invited` notifications point. */}
+              <Route path="/invitations" element={<InvitationsPage />} />
+              <Route
+                path="/notes/:noteId"
+                element={
+                  <WorkspaceFromLink>
+                    <NoteEditorPage />
+                  </WorkspaceFromLink>
+                }
+              />
               {/* Workspace admins only; the API enforces it. */}
               <Route path="/admin/sharing" element={<SharingStatsPage />} />
               <Route path="/capture" element={<Navigate to="/meeting/new" replace />} />

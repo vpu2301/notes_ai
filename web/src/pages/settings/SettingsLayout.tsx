@@ -51,19 +51,23 @@ export function SettingsLayout() {
           <SettingsLink to="/settings/account" label="Profile" icon={<UserIcon />} />
           <SettingsLink to="/settings/security" label="Security" icon={<LockIcon />} />
         </div>
-        <div className="settings-nav-group">
-          <span className="settings-nav-label">Workspace</span>
-          {/* Every member, not only a manager. */}
-          <SettingsLink to="/settings/data" label="Data & AI" icon={<ShieldIcon />} />
-          {manages && <SettingsLink to="/settings/members" label="Members" icon={<UsersIcon />} />}
-          {manages && (
-            <SettingsLink to="/settings/devices" label="Room devices" icon={<MonitorIcon size={16} />} />
-          )}
-          {manages && (
-            <SettingsLink to="/settings/workspace" label="Branding & sharing" icon={<BuildingIcon />} />
-          )}
-          {manages && <SettingsLink to="/settings/billing" label="Billing" icon={<CreditCardIcon />} />}
-        </div>
+        {/* A guest has no workspace settings, roster included. */}
+        {activeRole !== "guest" && (
+          <div className="settings-nav-group">
+            <span className="settings-nav-label">Workspace</span>
+            {/* Every member, not only a manager. */}
+            <SettingsLink to="/settings/data" label="Data & AI" icon={<ShieldIcon />} />
+            {/* Every member: the roster, and Leave. Managing people stays with owners and admins. */}
+            <SettingsLink to="/settings/members" label="Members" icon={<UsersIcon />} />
+            {manages && (
+              <SettingsLink to="/settings/devices" label="Room devices" icon={<MonitorIcon size={16} />} />
+            )}
+            {manages && (
+              <SettingsLink to="/settings/workspace" label="Branding & sharing" icon={<BuildingIcon />} />
+            )}
+            {manages && <SettingsLink to="/settings/billing" label="Billing" icon={<CreditCardIcon />} />}
+          </div>
+        )}
       </nav>
 
       <div className="settings-main">

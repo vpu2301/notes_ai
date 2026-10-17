@@ -405,14 +405,61 @@ actor APIClient {
     @discardableResult
     func activateWorkspace(_ tenantId: String) async throws -> WorkspaceToken {
         let minted = try await mintToken(for: tenantId, activate: true)
+        await adoptActivated(minted)
+        return minted
+    }
+
+    /// A token for the workspace the session now lives in (a switch, an accepted invitation, a leave).
+    private func adoptActivated(_ minted: WorkspaceToken) async {
         // Persist before publishing, like a rotated refresh token: a crash should leave the Mac where the person put it.
-        try? await store.setTenant(tenantId)
-        borrowedTokens[tenantId] = nil
+        try? await store.setTenant(minted.tenantId)
+        borrowedTokens[minted.tenantId] = nil
         publish(accessToken: minted.accessToken,
                 expiresIn: minted.expiresIn,
                 tenantId: minted.tenantId,
                 roles: minted.roles)
-        return minted
+    }
+
+    /// `POST /tenants` (short form) — a new team workspace, the caller its owner. The session stays where it is.
+    func createWorkspace(name: String) async throws -> Tenant {
+        let body = try JSONSerialization.data(withJSONObject: ["name": name])
+        let data = try await send(base: \.authBaseURL, path: "/tenants", method: "POST",
+                                  jsonBody: body, authorized: true)
+        return try decode(Tenant.self, from: data)
+    }
+
+    /// Leave a workspace; the server moves the session to Personal and answers with its token.
+    func leaveWorkspace(tenantId: String) async throws {
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/members/me",
+                                  method: "DELETE", authorized: true)
+        borrowedTokens[tenantId] = nil
+        await adoptActivated(try decode(LeftWorkspace.self, from: data).token)
+    }
+
+    /// Owner only, nobody else left in it, the name typed back; asks for recent proof (`reauth_required`).
+    @discardableResult
+    func dissolveWorkspace(tenantId: String, confirmName: String) async throws -> DissolveResult {
+        let body = try JSONSerialization.data(withJSONObject: ["confirm_name": confirmName])
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/dissolve",
+                                  method: "POST", jsonBody: body, authorized: true)
+        return try decode(DissolveResult.self, from: data)
+    }
+
+    /// Owner only: closed for everyone, nothing deleted. When this session was in it, the server already moved it to Personal.
+    func archiveWorkspace(tenantId: String) async throws {
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/archive",
+                                  method: "POST", authorized: true)
+        borrowedTokens[tenantId] = nil
+        if let token = try decode(ArchivedWorkspace.self, from: data).token {
+            await adoptActivated(token)
+        }
+    }
+
+    /// Owner only: the archived workspace opens again, members and notes as they were.
+    func unarchiveWorkspace(tenantId: String) async throws -> Tenant {
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/unarchive",
+                                  method: "POST", authorized: true)
+        return try decode(Tenant.self, from: data)
     }
 
     /// A token for `tenantId`, minted or reused, without moving the session.
@@ -455,18 +502,96 @@ actor APIClient {
     }
 
     func tenantMembers(tenantId: String) async throws -> [TenantMember] {
-        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/members", method: "GET",
-                                  authorized: true)
-        return try decode(TenantMembersResponse.self, from: data).items
+        try await roster(tenantId: tenantId).items
     }
 
-    /// Add someone to the workspace. 404 when nobody signed up with that address; 403 when the caller is not owner/admin.
+    /// The members with the seat meter (display only).
+    func roster(tenantId: String) async throws -> TenantMembersResponse {
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/members", method: "GET",
+                                  authorized: true)
+        return try decode(TenantMembersResponse.self, from: data)
+    }
+
+    /// Change a member's role (owner/admin, recent proof).
+    func setMemberRole(tenantId: String, userSub: String, role: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["role": role])
+        _ = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/members/\(userSub)",
+                           method: "PATCH", jsonBody: body, authorized: true)
+    }
+
+    func removeMember(tenantId: String, userSub: String) async throws {
+        _ = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/members/\(userSub)",
+                           method: "DELETE", authorized: true)
+    }
+
+    // MARK: - Invitations (W2: one entity, accepted only by the invited address)
+
+    /// The workspace's open invitations (owner/admin).
+    func invitations(tenantId: String) async throws -> [Invitation] {
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/invitations",
+                                  method: "GET", authorized: true)
+        return try decode(InvitationList.self, from: data).items
+    }
+
+    /// Invite an address; re-inviting a pending one resends it (200, same row).
+    func invite(tenantId: String, email: String, role: String, message: String) async throws -> Invitation {
+        var body: [String: Any] = ["email": email, "role": role]
+        if !message.isEmpty { body["message"] = message }
+        if let lang = Locale.preferredLanguageCode, ["en", "de", "uk"].contains(lang) { body["lang"] = lang }
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/invitations",
+                                  method: "POST", jsonBody: try JSONSerialization.data(withJSONObject: body),
+                                  authorized: true)
+        return try decode(Invitation.self, from: data)
+    }
+
+    func resendInvitation(tenantId: String, id: String) async throws -> Invitation {
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/invitations/\(id)/resend",
+                                  method: "POST", authorized: true)
+        return try decode(Invitation.self, from: data)
+    }
+
+    func revokeInvitation(tenantId: String, id: String) async throws {
+        _ = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/invitations/\(id)",
+                           method: "DELETE", authorized: true)
+    }
+
+    /// What an invitation link shows; anonymous, so it works before sign-in.
+    func lookupInvitation(token: String) async throws -> InvitationLookup {
+        let data = try await send(base: \.authBaseURL, path: "/auth/invitations/\(token)",
+                                  method: "GET", authorized: false)
+        return try decode(InvitationLookup.self, from: data)
+    }
+
+    /// Accept from the link. The server switched the session; its token is adopted like a switch.
     @discardableResult
-    func addTenantMember(tenantId: String, email: String, role: String) async throws -> TenantMember {
-        let body = try JSONSerialization.data(withJSONObject: ["email": email, "role": role])
-        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/members", method: "POST",
-                                  jsonBody: body, authorized: true)
-        return try decode(TenantMember.self, from: data)
+    func acceptInvitation(token: String) async throws -> AcceptedInvitation {
+        let data = try await send(base: \.authBaseURL, path: "/auth/invitations/\(token)/accept",
+                                  method: "POST", authorized: true)
+        let accepted = try decode(AcceptedInvitation.self, from: data)
+        await adoptActivated(accepted.token)
+        return accepted
+    }
+
+    /// The signed-in person's own open invitations.
+    func myInvitations() async throws -> [MyInvitation] {
+        let data = try await send(base: \.authBaseURL, path: "/auth/invitations", method: "GET",
+                                  authorized: true)
+        return try decode(MyInvitationList.self, from: data).items
+    }
+
+    /// Accept from the in-app list (the caller's address is the proof).
+    @discardableResult
+    func acceptInvitation(id: String) async throws -> AcceptedInvitation {
+        let data = try await send(base: \.authBaseURL, path: "/auth/invitations/\(id)/accept",
+                                  method: "POST", authorized: true)
+        let accepted = try decode(AcceptedInvitation.self, from: data)
+        await adoptActivated(accepted.token)
+        return accepted
+    }
+
+    func declineInvitation(id: String) async throws {
+        _ = try await send(base: \.authBaseURL, path: "/auth/invitations/\(id)/decline",
+                           method: "POST", authorized: true)
     }
 
     // MARK: - Calendar connections (note-service, 0019)
@@ -577,9 +702,11 @@ actor APIClient {
 
     /// Open the note as Record is pressed. Idempotent on `clientCaptureId`.
     /// Must never block or stop a recording: a lost note is recoverable, a lost meeting is not.
+    /// `tenant`: the workspace the note was typed in, when that is not the active one.
     func startMeeting(clientCaptureId: String, title: String, startedAt: Date,
                       language: String?, meetingType: MeetingType,
-                      calendar: MeetingCalendarContext?) async throws -> StartMeetingResponse {
+                      calendar: MeetingCalendarContext?,
+                      tenant: String? = nil) async throws -> StartMeetingResponse {
         let request = StartMeetingRequest(
             clientCaptureId: clientCaptureId,
             title: title.isEmpty ? nil : title,
@@ -588,16 +715,17 @@ actor APIClient {
             meetingType: meetingType.rawValue,
             calendar: calendar)
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/meeting", method: "POST",
-                                  jsonBody: try JSONEncoder().encode(request), authorized: true)
+                                  jsonBody: try JSONEncoder().encode(request), authorized: true,
+                                  tenant: tenant)
         return try decode(StartMeetingResponse.self, from: data)
     }
 
     /// When each typed line was first touched. First report per key wins, so re-sending is safe.
-    func putLineTimes(noteId: String, lines: [UserLineTime]) async throws {
+    func putLineTimes(noteId: String, lines: [UserLineTime], tenant: String? = nil) async throws {
         guard !lines.isEmpty else { return }
         let body = try JSONEncoder().encode(["lines": lines])
         _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/my-notes/timing",
-                           method: "PUT", jsonBody: body, authorized: true)
+                           method: "PUT", jsonBody: body, authorized: true, tenant: tenant)
     }
 
     /// The recording reached asr-service: bind the job to the note.
@@ -829,11 +957,11 @@ actor APIClient {
     }
 
     /// `purpose` is required for a note that is not ours and not shared with us (`APIError.needsReadPurpose`).
-    func fetchNote(id: String, purpose: ReadPurpose? = nil) async throws -> NoteEnvelope {
+    func fetchNote(id: String, purpose: ReadPurpose? = nil, tenant: String? = nil) async throws -> NoteEnvelope {
         var query = [("include_content", "true")]
         if let purpose { query.append(("purpose", purpose.rawValue)) }
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)", method: "GET",
-                                  query: query, authorized: true)
+                                  query: query, authorized: true, tenant: tenant)
         return try decode(NoteEnvelope.self, from: data)
     }
 
@@ -843,17 +971,20 @@ actor APIClient {
         return try decode(TemplateDetail.self, from: data)
     }
 
-    func updateDraft(id: String, content: NoteContent, expectedVersion: Int) async throws -> UpdateDraftResponse {
+    func updateDraft(id: String, content: NoteContent, expectedVersion: Int,
+                     tenant: String? = nil) async throws -> UpdateDraftResponse {
         let request = UpdateDraftRequest(content: content, expectedVersion: expectedVersion)
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/draft", method: "PUT",
-                                  jsonBody: try JSONEncoder().encode(request), authorized: true)
+                                  jsonBody: try JSONEncoder().encode(request), authorized: true,
+                                  tenant: tenant)
         return try decode(UpdateDraftResponse.self, from: data)
     }
 
     /// The tenant's notes, newest first; `q` runs the server's full-text search.
-    func searchNotes(query: String?, limit: Int = 100) async throws -> SearchResponse {
+    func searchNotes(query: String?, scope: NoteScope = .all, limit: Int = 100) async throws -> SearchResponse {
         var params: [(String, String)] = [("limit", String(limit))]
         if let query, !query.isEmpty { params.append(("q", query)) }
+        if scope != .all { params.append(("scope", scope.rawValue)) }
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/search", method: "GET",
                                   query: params, authorized: true)
         return try decode(SearchResponse.self, from: data)
@@ -885,9 +1016,11 @@ actor APIClient {
     }
 
     /// Idempotent: returns the note's live link, minting one if needed.
-    func createPublicLink(id: String) async throws -> SharingView {
+    /// `expiresInDays` nil = a permanent link.
+    func createPublicLink(id: String, expiresInDays: Int? = nil) async throws -> SharingView {
+        let body = try JSONSerialization.data(withJSONObject: expiresInDays.map { ["expires_in_days": $0] } ?? [:])
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/public-link", method: "POST",
-                                  authorized: true)
+                                  jsonBody: body, authorized: true)
         return try decode(SharingView.self, from: data)
     }
 
@@ -973,14 +1106,6 @@ actor APIClient {
                            authorized: true)
     }
 
-    /// 404 `not_a_member` when nobody in the workspace has that address.
-    func shareWithMember(id: String, email: String) async throws -> SharingView {
-        let body = try JSONSerialization.data(withJSONObject: ["email": email])
-        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/share", method: "POST",
-                                  jsonBody: body, authorized: true)
-        return try decode(SharingView.self, from: data)
-    }
-
     /// Mail the note to people, from the server. Members are granted access and
     /// pointed at the note; everyone else gets the public link, minted if needed.
     func shareByEmail(
@@ -994,6 +1119,96 @@ actor APIClient {
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/share/email",
                                   method: "POST", jsonBody: body, authorized: true)
         return try decode(ShareEmailResponse.self, from: data)
+    }
+
+    // MARK: - People, roles, comments, presence (W3)
+
+    /// Give a member a role on the note. 404 `not_a_member` (with `can_invite`) for anyone else.
+    func shareNote(id: String, email: String, role: NoteLevel, message: String) async throws -> ShareGrant {
+        var payload: [String: Any] = ["email": email, "role": role.rawValue]
+        if !message.isEmpty { payload["message"] = message }
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/share", method: "POST",
+                                  jsonBody: try JSONSerialization.data(withJSONObject: payload), authorized: true)
+        return try decode(ShareGrant.self, from: data)
+    }
+
+    /// A guest invitation to one note (W2 entity with `note_id`); accepting it grants `noteRole`.
+    func inviteToNote(tenantId: String, email: String, noteId: String, noteRole: NoteLevel,
+                      message: String) async throws -> Invitation {
+        var body: [String: Any] = ["email": email, "role": "guest", "note_id": noteId, "note_role": noteRole.rawValue]
+        if !message.isEmpty { body["message"] = message }
+        if let lang = Locale.preferredLanguageCode, ["en", "de", "uk"].contains(lang) { body["lang"] = lang }
+        let data = try await send(base: \.authBaseURL, path: "/tenants/\(tenantId)/invitations",
+                                  method: "POST", jsonBody: try JSONSerialization.data(withJSONObject: body),
+                                  authorized: true)
+        return try decode(Invitation.self, from: data)
+    }
+
+    /// 404 `not_a_member`, 409 `is_author`.
+    func setCollaborator(id: String, sub: String, role: NoteLevel) async throws -> SharingView {
+        let body = try JSONSerialization.data(withJSONObject: ["role": role.rawValue])
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/collaborators/\(sub)", method: "PUT",
+                                  jsonBody: body, authorized: true)
+        return try decode(SharingView.self, from: data)
+    }
+
+    func removeCollaborator(id: String, sub: String) async throws {
+        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/collaborators/\(sub)", method: "DELETE",
+                           authorized: true)
+    }
+
+    /// "Include transcript for viewers and commenters".
+    func setTranscriptSharing(id: String, shared: Bool) async throws -> SharingView {
+        let body = try JSONSerialization.data(withJSONObject: ["shared": shared])
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(id)/transcript-sharing", method: "PUT",
+                                  jsonBody: body, authorized: true)
+        return try decode(SharingView.self, from: data)
+    }
+
+    func comments(noteId: String) async throws -> [NoteComment] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/comments", method: "GET",
+                                  authorized: true)
+        return try decode(CommentList.self, from: data).items
+    }
+
+    func postComment(noteId: String, anchor: CommentAnchor, body: String) async throws -> NoteComment {
+        var payload: [String: Any] = ["anchor_kind": anchor.kind, "body": body]
+        if let key = anchor.key { payload["anchor_key"] = key }
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/comments", method: "POST",
+                                  jsonBody: try JSONSerialization.data(withJSONObject: payload), authorized: true)
+        return try decode(NoteComment.self, from: data)
+    }
+
+    func editComment(noteId: String, commentId: String, body: String) async throws -> NoteComment {
+        let payload = try JSONSerialization.data(withJSONObject: ["body": body])
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/comments/\(commentId)",
+                                  method: "PATCH", jsonBody: payload, authorized: true)
+        return try decode(NoteComment.self, from: data)
+    }
+
+    func setCommentResolved(noteId: String, commentId: String, resolved: Bool) async throws -> NoteComment {
+        let data = try await send(base: \.noteBaseURL,
+                                  path: "/v1/notes/\(noteId)/comments/\(commentId)/\(resolved ? "resolve" : "unresolve")",
+                                  method: "POST", authorized: true)
+        return try decode(NoteComment.self, from: data)
+    }
+
+    func deleteComment(noteId: String, commentId: String) async throws {
+        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/comments/\(commentId)",
+                           method: "DELETE", authorized: true)
+    }
+
+    /// "I have this note open" — every 20 s while it is.
+    func heartbeat(noteId: String) async throws {
+        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/presence", method: "POST",
+                           authorized: true)
+    }
+
+    /// Everyone else who has the note open.
+    func presence(noteId: String) async throws -> [PresenceViewer] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/presence", method: "GET",
+                                  authorized: true)
+        return try decode(PresenceList.self, from: data).viewers
     }
 
     // MARK: - Transcription jobs (asr-service)

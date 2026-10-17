@@ -26,6 +26,10 @@ const COPY: Record<string, string> = {
   membership_suspended: "Your access to that workspace is suspended.",
   // Distinct from not_a_member: the caller WAS one.
   tenant_dissolved: "That workspace has been closed.",
+  // Adding by address is gone; invitations replaced it.
+  use_invitations: "Invite people by email instead.",
+  // Client-side only (`WorkspaceMovedError`): another tab moved the session.
+  workspace_moved: "This session switched to another workspace in another tab. Continue there to keep working.",
   origin_not_allowed: "This page is not allowed to sign in. Open the app from its usual address.",
 
   // ── emailed codes ─────────────────────────────────────────────────
@@ -71,8 +75,25 @@ const COPY: Record<string, string> = {
   // ── room devices ──────────────────────────────────────────────────
   rotation_in_progress:
     "This device already has two live secrets. Deploy or expire one before rotating again.",
+  // Also refused here: invitations, leaving, dissolving.
   personal_workspace:
-    "A personal workspace has no meeting room. Create a team workspace to add devices.",
+    "Your personal workspace is just for you. Create a team workspace from the workspace menu for that.",
+
+  // ── workspaces & invitations ──────────────────────────────────────
+  already_member: "That person is already in this workspace.",
+  invalid_role: "Pick member, admin or viewer.",
+  // Fails closed: the send limiter or the mail relay is down.
+  invite_unavailable: "Invitations can't be sent just now. Try again in a few minutes.",
+  not_pending: "That invitation was already accepted, revoked or has expired.",
+  // One shape for unknown, revoked, expired and accepted.
+  invitation_not_found:
+    "This invitation is no longer valid. Ask the person who invited you for a new one.",
+  invitation_email_mismatch:
+    "This invitation is for a different email address. Sign in with the address it was sent to.",
+  has_other_members: "Remove everyone else from the workspace first, then dissolve it.",
+  confirm_name_mismatch: "Type the workspace name exactly as it is shown.",
+  owner_only: "Only an owner can do that.",
+  last_owner: "You are the only owner. Make someone else an owner before you leave.",
 
   // ── account ───────────────────────────────────────────────────────
   email_in_use: "Another account already signs in with that address.",
@@ -118,6 +139,11 @@ const COPY: Record<string, string> = {
   no_transcript: "This note was not made from a recording, so there is nothing to write it from.",
   note_cancelled: "This note was cancelled and cannot be written again.",
   not_available_for_type: "A one-to-one and an interview debrief have no client version.",
+
+  // ── note roles & comments (W3) ────────────────────────────────────
+  // The `required` level is in the problem; the sentence does not need it.
+  insufficient_role: "Your access to this note does not include that. Ask its author for more.",
+  is_author: "That person wrote this note, so their access cannot be changed.",
 };
 
 /** The one sentence for a connection that never reached the server. */
@@ -147,6 +173,7 @@ export function messageFor(err: unknown): string {
   if (!(err instanceof ApiError)) {
     if (err instanceof TypeError) return OFFLINE_COPY;
     if (err instanceof DOMException && err.name === "AbortError") return "That was cancelled.";
+    if (err instanceof Error && err.name === "WorkspaceMovedError") return COPY.workspace_moved as string;
     // A plain Error is one of ours, written to be read.
     return err instanceof Error && err.message ? err.message : "Something went wrong. Try again in a moment.";
   }

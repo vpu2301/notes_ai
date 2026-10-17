@@ -172,7 +172,7 @@ async def set_item_status(
 ) -> ItemView:
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        note = access.require_manage(await repo.fetch_note(conn, note_id=note_id), claims)
+        note = access.require_edit(await repo.fetch_note(conn, note_id=note_id), claims)
         item = await items_repo.fetch_item(conn, note_id=note_id, item_id=item_id)
         if item is None or item.note_version_id != note.current_version_id:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="item not found")
@@ -220,7 +220,7 @@ async def clear_response(
     comment). The row stays, stamped with who cleared it and when."""
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        access.require_manage(await repo.fetch_note(conn, note_id=note_id), claims)
+        access.require_edit(await repo.fetch_note(conn, note_id=note_id), claims)
         cleared = await items_repo.clear_response(
             conn, note_id=note_id, response_id=response_id, actor_sub=claims.sub
         )

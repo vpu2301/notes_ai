@@ -61,7 +61,8 @@ def cta_shown(policy: SharingPolicy, plan: str) -> bool:
     return policy.cta_enabled or plan not in PAID_PLANS
 
 
-_cache: dict[UUID, tuple[float, SharingPolicy, str]] = {}
+# (expires, policy, plan, kind) — one cached read of the tenant row.
+_cache: dict[UUID, tuple[float, SharingPolicy, str, str]] = {}
 
 
 def invalidate(tenant_id: UUID) -> None:
@@ -79,14 +80,28 @@ def _parse(raw: Any) -> SharingPolicy:
 
 async def load_policy(conn: asyncpg.Connection, *, tenant_id: UUID) -> tuple[SharingPolicy, str]:
     """(policy, plan) for the connection's tenant, cached for a minute."""
+    hit = await _load(conn, tenant_id)
+    return hit[1], hit[2]
+
+
+async def tenant_kind(conn: asyncpg.Connection, *, tenant_id: UUID) -> str:
+    """'personal' | 'team' (W3: default visibility, no `workspace` visibility in Personal)."""
+    return (await _load(conn, tenant_id))[3]
+
+
+async def _load(conn: asyncpg.Connection, tenant_id: UUID) -> tuple[float, SharingPolicy, str, str]:
     hit = _cache.get(tenant_id)
     if hit and hit[0] > time.monotonic():
-        return hit[1], hit[2]
-    row = await conn.fetchrow("SELECT sharing_policy, plan FROM tenants WHERE id = $1", tenant_id)
+        return hit
+    row = await conn.fetchrow(
+        "SELECT sharing_policy, plan, kind FROM tenants WHERE id = $1", tenant_id
+    )
     policy = _parse(row["sharing_policy"]) if row else SharingPolicy()
     plan = str(row["plan"]) if row else "legacy"
-    _cache[tenant_id] = (time.monotonic() + _TTL_SECONDS, policy, plan)
-    return policy, plan
+    kind = str(row["kind"]) if row else "team"
+    entry = (time.monotonic() + _TTL_SECONDS, policy, plan, kind)
+    _cache[tenant_id] = entry
+    return entry
 
 
 async def save_policy(conn: asyncpg.Connection, *, tenant_id: UUID, policy: SharingPolicy) -> None:

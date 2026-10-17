@@ -566,42 +566,86 @@ final class CaptureViewModel: ObservableObject {
 
     /// Replay everything typed offline. Safe to repeat: note creation is idempotent, line times first-wins.
     func syncPendingMeetingNotes() async {
-        for pending in PendingMeetingNotes.all(identityId: app.identityId) {
-            // The capture in front of the user right now is not "pending".
-            guard pending.clientCaptureId != clientCaptureId || !isRecording else { continue }
-            guard await syncOne(pending) else { continue }
-            PendingMeetingNotes.remove(pending.clientCaptureId)
-        }
+        // The capture in front of the user right now is not "pending".
+        let refused = await Self.syncPendingMeetingNotes(
+            api: app.api, identityId: app.identityId,
+            skipping: isRecording ? clientCaptureId : nil)
+        app.setOrphanedMeetingNotes(refused)
     }
 
-    private func syncOne(_ pending: PendingMeetingNote) async -> Bool {
+    /// Each note goes to the workspace it was typed in: the session's token for the
+    /// open one, a borrowed token (`activate:false`) for any other. Returns the notes
+    /// a workspace refused (`not_a_member`, `tenant_dissolved`), marked `blockedReason`
+    /// in their files; the files stay for the person to move or delete.
+    static func syncPendingMeetingNotes(api: APIClient, identityId: String, skipping: String?,
+                                        in directory: URL = PendingMeetingNotes.directory) async -> [PendingMeetingNote] {
+        let active = await api.tenantId
+        let pending = PendingMeetingNotes.all(identityId: identityId, in: directory)
+            .filter { $0.clientCaptureId != skipping }
+        let byTenant = Dictionary(grouping: pending) { $0.tenantId ?? "" }
+        var refused: [PendingMeetingNote] = []
+        func block(_ note: PendingMeetingNote, _ reason: String) {
+            var blocked = note
+            blocked.blockedReason = reason
+            if note.blockedReason != reason { PendingMeetingNotes.save(blocked, in: directory) }
+            refused.append(blocked)
+        }
+        for tenantId in byTenant.keys.sorted() {
+            let notes = byTenant[tenantId] ?? []
+            var bearer: String?
+            // No workspace recorded (older file): the open one, as before.
+            if !tenantId.isEmpty, tenantId != active {
+                do {
+                    bearer = try await api.borrowToken(for: tenantId)
+                } catch {
+                    if let reason = blockedReason(error) { notes.forEach { block($0, reason) } }
+                    continue
+                }
+            }
+            for note in notes {
+                do {
+                    try await syncOne(note, api: api, bearer: bearer)
+                    PendingMeetingNotes.remove(note.clientCaptureId, in: directory)
+                } catch {
+                    if bearer != nil, let reason = blockedReason(error) { block(note, reason) }
+                }
+            }
+        }
+        return refused.sorted { $0.startedAt < $1.startedAt }
+    }
+
+    /// The refusals that mean "this workspace is not yours any more"; anything else is retried later.
+    private static func blockedReason(_ error: Error) -> String? {
+        let code = (error as? APIError)?.code
+        return code == "not_a_member" || code == "tenant_dissolved" ? code : nil
+    }
+
+    /// Throws on anything short of done; the file is then kept for the next pass.
+    private static func syncOne(_ pending: PendingMeetingNote, api: APIClient, bearer: String?) async throws {
         var id = pending.noteId
         if id == nil {
-            guard let created = try? await app.api.startMeeting(
+            let created = try await api.startMeeting(
                 clientCaptureId: pending.clientCaptureId,
                 title: pending.title,
                 startedAt: pending.startedAt,
                 language: pending.language == Self.autoLanguage ? nil : pending.language,
                 meetingType: MeetingType(rawValue: pending.meetingType) ?? .auto,
-                calendar: pending.calendar)
-            else { return false }
+                calendar: pending.calendar,
+                bearer: bearer)
             id = created.id
         }
-        guard let id,
-              let env = try? await app.api.fetchNote(id: id),
-              var content = env.content
-        else { return false }
+        guard let id else { return }
+        let env = try await api.fetchNote(id: id, bearer: bearer)
+        guard var content = env.content else { throw APIError.http(status: 0, problem: nil) }
         var section = content.section(Self.userNotesSection)
         let merged = PendingMeetingNotes.merge(remote: section.text ?? "", local: pending.text)
         if merged != (section.text ?? "") {
             section.text = merged
             content.upsert(section)
-            guard (try? await app.api.updateDraft(id: id, content: content,
-                                                  expectedVersion: env.currentVersionNumber)) != nil
-            else { return false }
+            _ = try await api.updateDraft(id: id, content: content,
+                                          expectedVersion: env.currentVersionNumber, bearer: bearer)
         }
-        try? await app.api.putLineTimes(noteId: id, lines: pending.pendingLineTimes)
-        return true
+        try? await api.putLineTimes(noteId: id, lines: pending.pendingLineTimes, bearer: bearer)
     }
 
     private static func defaultTitle() -> String {

@@ -91,6 +91,8 @@ def _note_row(**over: object) -> SimpleNamespace:
         primary_author_id=AUTHOR,
         co_author_ids=[],
         shared_with_ids=[],
+        collaborators={},
+        transcript_shared=False,
         visibility="workspace",
         title="Untitled meeting",
         source_asr_job_id=None,

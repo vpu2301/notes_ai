@@ -157,7 +157,7 @@ service,template.deprecate,template,false,
 device,template.deprecate,template,false,read-only template access; curation is human administration
 tenant_admin,note.write,note,false,admin/content separation (S14): admins do not author or edit notes
 member,note.write,note,true,sprint 08 — authors own notes; sprint 10 — also gates /autocomplete phrase+snippet writes (scope reuse; RLS enforces per-scope authority)
-viewer,note.write,note,true,sprint 08 — authors notes; sprint 10 — also gates /autocomplete phrase+snippet writes
+viewer,note.write,note,false,W3 — a viewer reads; on a workspace note the resource rule lets them comment (note.read)
 auditor,note.write,note,false,read-only role — no content writes
 service,note.write,note,false,user-only authoring
 device,note.write,note,false,a compromised room device must not read or write any note content
@@ -232,3 +232,43 @@ viewer,billing.write,tenant,false,what the workspace pays is an admin's business
 member,ai_settings.read,tenant,true,every member may see who processes their meetings
 viewer,ai_settings.read,tenant,true,every member may see who processes their meetings
 auditor,ai_settings.read,tenant,true,oversight read of the processor list
+guest,tenant.read,tenant,true,W3 — only notes the guest was given (access.py decides the level)
+guest,tenant.update,tenant,false,W1: a guest token authenticates and reaches nothing until W3
+guest,tenant.create,tenant,false,W1: a guest token authenticates and reaches nothing until W3
+guest,tenant.manage_members,tenant,false,W1: a guest token authenticates and reaches nothing until W3
+guest,user.read,user,false,W1: a guest token authenticates and reaches nothing until W3
+guest,user.invite,user,false,W1: a guest token authenticates and reaches nothing until W3
+guest,user.manage_roles,user,false,W1: a guest token authenticates and reaches nothing until W3
+guest,user.deactivate,user,false,W1: a guest token authenticates and reaches nothing until W3
+guest,user.reactivate,user,false,W1: a guest token authenticates and reaches nothing until W3
+guest,user.reset_mfa,user,false,W1: a guest token authenticates and reaches nothing until W3
+guest,user.remind_mfa,user,false,W1: a guest token authenticates and reaches nothing until W3
+guest,audit.read,audit,false,W1: a guest token authenticates and reaches nothing until W3
+guest,audit.verify,audit,false,W1: a guest token authenticates and reaches nothing until W3
+guest,asr.write,asr_job,false,W1: a guest token authenticates and reaches nothing until W3
+guest,asr.read,asr_job,false,W1: a guest token authenticates and reaches nothing until W3
+guest,asr.cancel,asr_job,false,W1: a guest token authenticates and reaches nothing until W3
+guest,dictation.start,dictation_session,false,W1: a guest token authenticates and reaches nothing until W3
+guest,dictation.read,dictation_session,false,W1: a guest token authenticates and reaches nothing until W3
+guest,dictation.finalize,dictation_session,false,W1: a guest token authenticates and reaches nothing until W3
+guest,nlp.process,nlp_text,false,W1: a guest token authenticates and reaches nothing until W3
+guest,nlp.read.abbreviations,abbreviation,false,W1: a guest token authenticates and reaches nothing until W3
+guest,nlp.write.abbreviations,abbreviation,false,W1: a guest token authenticates and reaches nothing until W3
+guest,template.read,template,false,W1: a guest token authenticates and reaches nothing until W3
+guest,template.clone,template,false,W1: a guest token authenticates and reaches nothing until W3
+guest,template.update,template,false,W1: a guest token authenticates and reaches nothing until W3
+guest,template.deprecate,template,false,W1: a guest token authenticates and reaches nothing until W3
+guest,note.write,note,true,W3 — only notes the guest was given (access.py decides the level)
+guest,note.read,note,true,W3 — only notes the guest was given (access.py decides the level)
+guest,notification.read,notification,true,W3 — only notes the guest was given (access.py decides the level)
+guest,notification.write,notification,true,W3 — only notes the guest was given (access.py decides the level)
+guest,stats.read,tenant,false,W1: a guest token authenticates and reaches nothing until W3
+guest,autocomplete.read,phrase,false,W1: a guest token authenticates and reaches nothing until W3
+guest,autocomplete.write,phrase,false,W1: a guest token authenticates and reaches nothing until W3
+guest,synonym.read,synonym,false,W1: a guest token authenticates and reaches nothing until W3
+guest,synonym.write,synonym,false,W1: a guest token authenticates and reaches nothing until W3
+guest,device.manage,credential,false,W1: a guest token authenticates and reaches nothing until W3
+guest,ai_settings.read,tenant,false,W1: a guest token authenticates and reaches nothing until W3
+guest,ai_settings.write,tenant,false,W1: a guest token authenticates and reaches nothing until W3
+guest,billing.read,tenant,false,W1: a guest token authenticates and reaches nothing until W3
+guest,billing.write,tenant,false,W1: a guest token authenticates and reaches nothing until W3

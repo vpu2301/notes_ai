@@ -173,6 +173,8 @@ struct AuthSession: Equatable, Sendable {
     let identity: IdentitySummary?
     let memberships: [MembershipSummary]
     let isNewIdentity: Bool
+    /// Workspaces an open invitation put a brand-new identity into at sign-up (W2).
+    var joinedTenantIds: [String] = []
 }
 
 /// What a sign-in attempt answers: a session, or a second factor owed.
@@ -199,6 +201,7 @@ struct AuthResultDTO: Decodable, Sendable {
     var challengeId: String?
     var methods: [String]?
     var recoveryCodesLeft: Int?
+    var joinedTenantIds: [String] = []
 
     enum CodingKeys: String, CodingKey {
         case status, roles, identity, memberships, methods
@@ -211,6 +214,7 @@ struct AuthResultDTO: Decodable, Sendable {
         case defaultTenantId = "default_tenant_id"
         case challengeId = "challenge_id"
         case recoveryCodesLeft = "recovery_codes_left"
+        case joinedTenantIds = "joined_tenant_ids"
     }
 
     init(from decoder: Decoder) throws {
@@ -229,6 +233,7 @@ struct AuthResultDTO: Decodable, Sendable {
         challengeId = try c.decodeIfPresent(String.self, forKey: .challengeId)
         methods = try c.decodeIfPresent([String].self, forKey: .methods)
         recoveryCodesLeft = try c.decodeIfPresent(Int.self, forKey: .recoveryCodesLeft)
+        joinedTenantIds = try c.decodeIfPresent([String].self, forKey: .joinedTenantIds) ?? []
     }
 
     /// The DTO as the two cases the app actually branches on.
@@ -249,7 +254,8 @@ struct AuthResultDTO: Decodable, Sendable {
             refreshExpiresIn: refreshExpiresIn,
             identity: identity,
             memberships: memberships,
-            isNewIdentity: isNewIdentity))
+            isNewIdentity: isNewIdentity,
+            joinedTenantIds: joinedTenantIds))
     }
 }
 
@@ -289,15 +295,29 @@ struct Workspace: Codable, Equatable, Identifiable, Sendable {
     var status: String = "active"
     var isActive: Bool = true
     var myRole: String = "member"
+    /// "personal" or "team"; older servers omit it.
+    var kind: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, slug, status
+        case id, name, slug, status, kind
         case displayName = "display_name"
         case isActive = "is_active"
         case myRole = "my_role"
     }
 
-    var title: String { displayName.isEmpty ? name : displayName }
+    var isPersonal: Bool { kind == "personal" }
+
+    /// Personal is a kind, not a name: whatever the row is called, it reads "Personal".
+    var title: String {
+        if isPersonal { return "Personal" }
+        return displayName.isEmpty ? name : displayName
+    }
+
+    /// Invited to some of its notes only (W3).
+    var isGuest: Bool { myRole == "guest" }
+
+    /// The switcher's line: "Guest in Acme" for a guest, else the name.
+    var switcherTitle: String { isGuest ? "Guest in \(title)" : title }
 
     /// What the row says under the name.
     var roleLabel: String {
@@ -306,6 +326,7 @@ struct Workspace: Codable, Equatable, Identifiable, Sendable {
         case "admin": return "Admin"
         case "assistant": return "Assistant"
         case "viewer": return "Viewer"
+        case "guest": return "Guest"
         default: return "Member"
         }
     }
@@ -329,6 +350,30 @@ struct SwitchedToken: Decodable, Sendable {
         case expiresIn = "expires_in"
         case tenantId = "tenant_id"
     }
+}
+
+/// `POST /auth/invitations/{token|id}/accept` — the server already moved the session into the workspace.
+/// `token` is null only for a Keycloak-era session, which cannot switch.
+struct AcceptedInvitation: Decodable, Sendable {
+    let tenantId: String
+    let role: String
+    let token: SwitchedToken?
+
+    enum CodingKeys: String, CodingKey {
+        case role, token
+        case tenantId = "tenant_id"
+    }
+}
+
+/// `DELETE /tenants/{id}/members/me` — a token for the personal workspace the session was moved to;
+/// null when the workspace left was not the open one.
+struct LeftWorkspace: Decodable, Sendable {
+    let token: SwitchedToken?
+}
+
+/// The token half of `POST /tenants/{id}/dissolve` (`DissolveResult` is shared with macOS, whose token type differs).
+struct DissolvedSession: Decodable, Sendable {
+    let token: SwitchedToken?
 }
 
 /// One place this account is signed in (`GET /auth/sessions`).
@@ -989,12 +1034,21 @@ struct NoteEnvelope: Decodable, Sendable {
     let primaryAuthorName: String?
     let content: NoteContent?
     let sectionLabels: [SectionLabel]?
-    /// The transcription job the note was made from, if any.
+    /// The transcription job the note was made from, if any. Nil when the caller may not read it.
     let sourceJobId: String?
+    /// W3: what the caller may do with the note. Nil from an older server.
+    let myLevelRaw: String?
+    /// W3: false hides the transcript and its audio. Nil from an older server.
+    let canReadTranscriptRaw: Bool?
+
+    var myLevel: NoteLevel? { NoteLevel.decode(myLevelRaw) }
+    var canReadTranscript: Bool { canReadTranscriptRaw ?? true }
 
     enum CodingKeys: String, CodingKey {
         case id, code, status, title, content, visibility
         case sourceJobId = "source_job_id"
+        case myLevelRaw = "my_level"
+        case canReadTranscriptRaw = "can_read_transcript"
         case currentVersionNumber = "current_version_number"
         case primaryAuthorId = "primary_author_id"
         case primaryAuthorName = "primary_author_name"
@@ -1046,14 +1100,27 @@ struct SharingView: Decodable, Sendable {
     let links: [LinkView]
     /// The workspace's effective sharing rules. Absent on an older server.
     let constraints: SharingConstraints?
+    /// W3 (v2): absent on an older server.
+    let myLevel: NoteLevel?
+    /// Everyone who can open the note, and why.
+    let people: [NotePerson]
+    /// Invitations to this note not yet accepted (manage only).
+    let pending: [PendingNoteInvite]
+    /// Viewers and commenters may read the transcript too.
+    let transcriptShared: Bool
+    /// "personal" or "team".
+    let workspaceKind: String?
 
     enum CodingKeys: String, CodingKey {
-        case visibility, links, constraints
+        case visibility, links, constraints, people, pending
         case noteId = "note_id"
         case canManage = "can_manage"
         case canDelete = "can_delete"
         case sharedWith = "shared_with"
         case publicLink = "public_link"
+        case myLevel = "my_level"
+        case transcriptShared = "transcript_shared"
+        case workspaceKind = "workspace_kind"
     }
 
     init(from decoder: Decoder) throws {
@@ -1066,10 +1133,21 @@ struct SharingView: Decodable, Sendable {
         publicLink = try c.decodeIfPresent(PublicLink.self, forKey: .publicLink)
         links = try c.decodeIfPresent([LinkView].self, forKey: .links) ?? []
         constraints = try? c.decodeIfPresent(SharingConstraints.self, forKey: .constraints)
+        myLevel = NoteLevel.decode(try? c.decodeIfPresent(String.self, forKey: .myLevel))
+        people = (try? c.decodeIfPresent([NotePerson].self, forKey: .people)) ?? []
+        pending = (try? c.decodeIfPresent([PendingNoteInvite].self, forKey: .pending)) ?? []
+        transcriptShared = (try? c.decodeIfPresent(Bool.self, forKey: .transcriptShared)) ?? false
+        workspaceKind = try? c.decodeIfPresent(String.self, forKey: .workspaceKind)
     }
 
     /// The client-facing links only.
     var recipientLinks: [LinkView] { links.filter { $0.kind == .recipient } }
+
+    /// "Everyone in the workspace" is not offered in a personal workspace.
+    var isPersonalWorkspace: Bool { workspaceKind == "personal" }
+
+    /// The people listed by name: the author team and everyone given a role. Workspace roles fold into one row.
+    var namedPeople: [NotePerson] { people.filter { $0.source != "workspace_role" } }
 }
 
 // MARK: - Per-recipient links (Sprint 19, 0035)
@@ -1694,6 +1772,8 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
     var access: NoteAccess?
     /// Live recipient disputes, for the "1 disputed" marker.
     var openDisputes: Int = 0
+    /// W3: what the caller may do with it. Nil from an older server.
+    var myLevel: NoteLevel?
 
     var id: String { noteId }
 
@@ -1704,6 +1784,8 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
         case sharedWithCount = "shared_with_count"
         case hasPublicLink = "has_public_link"
         case openDisputes = "open_disputes"
+        case myLevel = "my_level"
+        case collaboratorCount = "collaborator_count"
     }
 
     init(from decoder: Decoder) throws {
@@ -1715,9 +1797,12 @@ struct NoteSummary: Decodable, Identifiable, Equatable, Sendable {
         snippet = (try? c.decode(String.self, forKey: .snippet)) ?? ""
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
         openDisputes = (try? c.decodeIfPresent(Int.self, forKey: .openDisputes)) ?? 0
+        myLevel = NoteLevel.decode(try? c.decodeIfPresent(String.self, forKey: .myLevel))
         if let visibility = try? c.decodeIfPresent(String.self, forKey: .visibility) {
             let link = (try? c.decodeIfPresent(Bool.self, forKey: .hasPublicLink)) ?? false
-            let shared = (try? c.decodeIfPresent(Int.self, forKey: .sharedWithCount)) ?? 0
+            // `collaborator_count` (W3) replaces `shared_with_count`.
+            let shared = (try? c.decodeIfPresent(Int.self, forKey: .collaboratorCount))
+                ?? (try? c.decodeIfPresent(Int.self, forKey: .sharedWithCount)) ?? 0
             access = NoteAccess(visibility: visibility, sharedWithCount: shared, hasPublicLink: link)
         } else {
             access = nil
@@ -1739,7 +1824,9 @@ struct NoteAccess: Equatable, Sendable {
     }
 
     init(_ sharing: SharingView) {
-        self.init(visibility: sharing.visibility, sharedWithCount: sharing.sharedWith.count,
+        let collaborators = sharing.people.isEmpty
+            ? sharing.sharedWith.count : sharing.people.filter(\.isCollaborator).count
+        self.init(visibility: sharing.visibility, sharedWithCount: collaborators,
                   hasPublicLink: sharing.publicLink != nil)
     }
 
@@ -2432,14 +2519,21 @@ struct Tenant: Decodable, Sendable {
     let displayName: String
     /// The caller's membership role: owner, admin, member, assistant, viewer.
     let myRole: String?
+    /// "personal" or "team"; older servers omit it.
+    var kind: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name
+        case id, name, kind
         case displayName = "display_name"
         case myRole = "my_role"
     }
 
-    var title: String { displayName.isEmpty ? name : displayName }
+    var isPersonal: Bool { kind == "personal" }
+
+    var title: String {
+        if isPersonal { return "Personal" }
+        return displayName.isEmpty ? name : displayName
+    }
 
     /// Only owners and admins may add members; the rest can send the link.
     var canManageMembers: Bool { myRole == "owner" || myRole == "admin" }
@@ -2451,6 +2545,8 @@ struct TenantMember: Decodable, Sendable, Identifiable {
     let status: String
     let email: String?
     let displayName: String?
+    /// Set when the person left (W2); the roster keeps the row for 30 days.
+    let leftAt: Date?
 
     var id: String { userSub }
     var title: String {
@@ -2463,11 +2559,18 @@ struct TenantMember: Decodable, Sendable, Identifiable {
         case role, status, email
         case userSub = "user_sub"
         case displayName = "display_name"
+        case leftAt = "left_at"
     }
 }
 
 struct TenantMembersResponse: Decodable, Sendable {
     let items: [TenantMember]
+    let seatMeter: SeatMeter?
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case seatMeter = "seat_meter"
+    }
 }
 
 // MARK: - The client version (Sprint 36)
@@ -2706,6 +2809,8 @@ struct NoteVersionSummary: Decodable, Sendable, Identifiable {
     let id: String
     let versionNumber: Int
     let createdBy: String
+    /// The saver's display name (W3); nil from an older server or for a person no longer visible.
+    let createdByDisplay: String?
     let createdAt: Date
     let isAmendment: Bool
     let amendmentType: String?
@@ -2715,6 +2820,7 @@ struct NoteVersionSummary: Decodable, Sendable, Identifiable {
         case id
         case versionNumber = "version_number"
         case createdBy = "created_by"
+        case createdByDisplay = "created_by_display"
         case createdAt = "created_at"
         case isAmendment = "is_amendment"
         case amendmentType = "amendment_type"
@@ -2726,6 +2832,7 @@ struct NoteVersionSummary: Decodable, Sendable, Identifiable {
         id = try c.decode(String.self, forKey: .id)
         versionNumber = try c.decode(Int.self, forKey: .versionNumber)
         createdBy = try c.decodeIfPresent(String.self, forKey: .createdBy) ?? ""
+        createdByDisplay = try? c.decodeIfPresent(String.self, forKey: .createdByDisplay)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         isAmendment = try c.decodeIfPresent(Bool.self, forKey: .isAmendment) ?? false
         amendmentType = try c.decodeIfPresent(String.self, forKey: .amendmentType)
@@ -2784,6 +2891,12 @@ struct NotificationItem: Decodable, Sendable, Identifiable, Equatable {
         severity = try c.decodeIfPresent(String.self, forKey: .severity) ?? "info"
         readAt = try? c.decodeIfPresent(Date.self, forKey: .readAt)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
+    }
+
+    /// `workspace.invited`: the invitation to accept from the feed.
+    var invitationId: String? {
+        guard category == "workspace.invited" || resourceType == "workspace_invitation" else { return nil }
+        return resourceId
     }
 
     /// The note this is about, when it is about one.

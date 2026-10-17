@@ -27,6 +27,7 @@ from .routers import (
     notes,
     notes_ask,
     notes_audio,
+    notes_comments,
     notes_corrections,
     notes_dates,
     notes_diff,
@@ -37,6 +38,7 @@ from .routers import (
     notes_lifecycle,
     notes_meeting,
     notes_pdf,
+    notes_presence,
     notes_search,
     notes_series,
     notes_sharing,
@@ -192,6 +194,8 @@ def create_app() -> FastAPI:
     app.include_router(notes_sharing.router)
     app.include_router(notes_items.router)
     app.include_router(notes_ask.router)
+    app.include_router(notes_comments.router)
+    app.include_router(notes_presence.router)
     # Anonymous, token-addressed reads: no auth dependency at all.
     app.include_router(shared_public.router)
     app.include_router(sharing_stats.router)

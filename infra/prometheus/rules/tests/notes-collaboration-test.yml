@@ -1,0 +1,34 @@
+# promtool unit tests for the W3 collaboration alert (make check-alert-rules).
+
+rule_files:
+  - ../notes.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: edit refusals spike
+    input_series:
+      # 5 refusals a minute = 75 per 15 minutes, over 30.
+      - series: 'mdx_note_access_refused_total{level_required="edit"}'
+        values: "0+5x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: NoteEditRefusalsSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: backend
+            exp_annotations:
+              summary: "More than 30 note edits refused for too low a level in 15 minutes"
+              runbook: "docs/runbooks/notes.md#collaboration-w3"
+
+  - interval: 1m
+    name: a few refusals stay quiet
+    input_series:
+      - series: 'mdx_note_access_refused_total{level_required="edit"}'
+        values: "0+1x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: NoteEditRefusalsSpike
+        exp_alerts: []

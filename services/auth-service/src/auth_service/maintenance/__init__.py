@@ -50,6 +50,18 @@ JOBS: tuple[Job, ...] = (
         "crypto-shred identities whose 30-day deletion grace has run out",
     ),
     Job(
+        "sweep-invitations",
+        24 * 60 * 60,
+        jobs.sweep_invitations,
+        'delete invitations revoked/expired over 90 days ago and "Left" members over 30',
+    ),
+    Job(
+        "sweep-guests",
+        24 * 60 * 60,
+        jobs.sweep_guests,
+        "guests with no note grant left for a day leave the workspace (reason no_grants)",
+    ),
+    Job(
         "sample-gauges",
         5 * 60,
         jobs.sample_gauges,

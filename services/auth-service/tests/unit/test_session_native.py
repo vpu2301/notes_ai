@@ -471,13 +471,17 @@ def test_a_disabled_account_cannot_refresh(env: Any) -> None:
     assert env.sessions.rows[env.sid].revoked_at is not None
 
 
-def test_losing_the_membership_ends_the_session(env: Any) -> None:
-    """Removed from this workspace, still a member of another one."""
+def test_losing_the_membership_moves_the_session_to_personal(env: Any) -> None:
+    """W2: removed from (or left, or dissolved) this workspace — still signed in, now in Personal."""
+    personal = uuid4()
     env.identities.memberships[env.identity.id] = [
-        Membership(tenant_id=uuid4(), name="other", kind="team", role="member", status="active")
+        Membership(tenant_id=personal, name="me", kind="personal", role="owner", status="active")
     ]
-    assert _refresh(env, env.token).json()["code"] == "session_expired"
-    assert env.sessions.revoked_reasons[env.sid] == "membership_lost"
+    resp = _refresh(env, env.token)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["tenant_id"] == str(personal)
+    assert env.sessions.rows[env.sid].tenant_id == personal
+    assert env.sid not in env.sessions.revoked_reasons
 
 
 def test_no_membership_anywhere_is_no_workspace(env: Any) -> None:

@@ -1,0 +1,141 @@
+{
+  "title": "Workspaces & invitations",
+  "uid": "workspaces",
+  "schemaVersion": 39,
+  "tags": [
+    "auth",
+    "growth"
+  ],
+  "time": {
+    "from": "now-14d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Workspaces created (by source)",
+      "targets": [
+        {
+          "expr": "sum by (source) (increase(mdx_auth_workspace_created_total[1d]))",
+          "legendFormat": "{{source}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Invitations (by action)",
+      "targets": [
+        {
+          "expr": "sum by (action) (increase(mdx_auth_invitation_total[1d]))",
+          "legendFormat": "{{action}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Invitations accepted (by has_account)",
+      "targets": [
+        {
+          "expr": "sum by (has_account) (increase(mdx_auth_invitation_total{action=~\"accepted|auto_accepted\"}[1d]))",
+          "legendFormat": "{{has_account}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "stat",
+      "title": "No-account acceptance rate (7d) — alert below 20%",
+      "targets": [
+        {
+          "expr": "sum(increase(mdx_auth_invitation_total{action=\"auto_accepted\"}[7d])) / clamp_min(sum(increase(mdx_auth_invitation_total{action=\"created\",has_account=\"false\"}[7d])), 1)",
+          "legendFormat": "rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Leaves and dissolves",
+      "targets": [
+        {
+          "expr": "sum(increase(mdx_auth_member_left_total[1d]))",
+          "legendFormat": "left"
+        },
+        {
+          "expr": "sum(increase(mdx_auth_workspace_dissolved_total[1d]))",
+          "legendFormat": "dissolved"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Invitation mail failures",
+      "targets": [
+        {
+          "expr": "sum(increase(mdx_auth_invitation_total{action=\"mail_failed\"}[1h]))",
+          "legendFormat": "not sent"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "table",
+      "title": "Workspace funnel by week (created → inviting → sent → accepted → within 24 h → first note within 24 h)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Workspaces & invitations (W2, ADR-0070): the funnel cohort.\n--\n-- One row per ISO week of workspace creation, counts only:\n--   self-serve team workspaces created → with ≥1 invitation → invitations\n--   sent → accepted → accepted within 24 h → invitees who wrote a note in\n--   that workspace within 24 h of accepting.\n--\n-- Run as `funnel_reader` (0040, 0072: no address or message is readable).\n-- \"Has an account\" is not derivable here without reading identities; the\n-- split lives in Prometheus (`mdx_auth_invitation_total{has_account}`).\n\nWITH workspaces AS (\n    SELECT id, created_at, date_trunc('week', created_at)::date AS week\n    FROM tenants\n    WHERE kind = 'team' AND signup_source = 'self_serve'\n),\ninvites AS (\n    SELECT i.id, i.tenant_id, i.created_at, i.accepted_at, i.accepted_by, i.sent_count\n    FROM tenant_invitations i\n    JOIN workspaces w ON w.id = i.tenant_id\n    WHERE i.note_id IS NULL\n),\nfirst_note AS (\n    SELECT i.id AS invitation_id\n    FROM invites i\n    JOIN notes n ON n.tenant_id = i.tenant_id\n                AND n.primary_author_id = i.accepted_by\n                AND n.created_at BETWEEN i.accepted_at AND i.accepted_at + interval '24 hours'\n    GROUP BY i.id\n)\nSELECT\n    w.week,\n    count(DISTINCT w.id)                                              AS workspaces_created,\n    count(DISTINCT i.tenant_id)                                       AS workspaces_inviting,\n    count(DISTINCT i.id) FILTER (WHERE i.sent_count > 0)              AS invitations_sent,\n    count(DISTINCT i.id) FILTER (WHERE i.accepted_at IS NOT NULL)     AS invitations_accepted,\n    count(DISTINCT i.id) FILTER (\n        WHERE i.accepted_at <= i.created_at + interval '24 hours')    AS accepted_within_24h,\n    count(DISTINCT f.invitation_id)                                   AS first_note_within_24h\nFROM workspaces w\nLEFT JOIN invites i ON i.tenant_id = w.id\nLEFT JOIN first_note f ON f.invitation_id = i.id\nGROUP BY w.week\nORDER BY w.week DESC;\n"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 10
+      }
+    }
+  ]
+}

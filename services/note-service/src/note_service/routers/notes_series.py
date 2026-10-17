@@ -188,7 +188,7 @@ async def set_carried_state(
     """
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
-        access.require_manage(await repo.fetch_note(conn, note_id=note_id), claims)
+        access.require_edit(await repo.fetch_note(conn, note_id=note_id), claims)
         ok = await meetings.set_carried_state(
             conn, note_id=note_id, item_key=item_key, state=body.state
         )

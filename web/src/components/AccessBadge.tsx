@@ -1,9 +1,12 @@
+import { useState } from "react";
+import { createPortal } from "react-dom";
 import { messageFor } from "../lib/errorCopy";
 import { createPublicLink, revokePublicLink, setVisibility } from "../api/notes";
-import type { SearchHit, SharingView } from "../api/types";
+import type { LinkView, NoteLevel, SearchHit, SharingView } from "../api/types";
+import { levelLabel } from "../lib/noteLevel";
 import { ChevronDownIcon, CloseIcon, GlobeIcon, LockIcon, UsersIcon } from "./icons";
 import { Menu, type MenuItem } from "./Menu";
-import { publicLinkUrl } from "./ShareDialog";
+import { PublicLinkDialog, publicLinkUrl } from "./PublicLinkDialog";
 import { useToast } from "./Toaster";
 
 /** The widest audience a note reaches — what the list's badge says. */
@@ -48,6 +51,15 @@ export function accessHelp(access: NoteAccess): string {
   }
 }
 
+/** The chip on a note someone else manages: what this reader may do, and "Guest" for a guest. */
+export function levelBadgeLabel(level: NoteLevel, guest = false): string {
+  return guest ? `Guest · ${levelLabel(level).toLowerCase()}` : levelLabel(level);
+}
+
+export function LevelBadge({ level, guest = false }: { level: NoteLevel; guest?: boolean }) {
+  return <span className="chip level-chip">{levelBadgeLabel(level, guest)}</span>;
+}
+
 /** The list row's sharing fields after a change made from its menu. */
 export function withSharing(hit: SearchHit, view: SharingView): SearchHit {
   return {
@@ -69,6 +81,8 @@ export function AccessMenu({
   onChange: (view: SharingView) => void;
 }) {
   const toast = useToast();
+  // A link made from this menu opens its modal; an existing one is just copied.
+  const [made, setMade] = useState<LinkView | null>(null);
   const Icon = access.kind === "public" ? GlobeIcon : access.kind === "workspace" ? UsersIcon : LockIcon;
   const workspace = hit.visibility === "workspace";
 
@@ -104,6 +118,10 @@ export function AccessMenu({
           () => createPublicLink(hit.note_id),
           async (view) => {
             if (!view.public_link) return;
+            if (!hit.has_public_link) {
+              setMade(view.public_link);
+              return;
+            }
             await navigator.clipboard.writeText(publicLinkUrl(view.public_link.path));
             toast.success("Public link copied");
           },
@@ -133,6 +151,17 @@ export function AccessMenu({
           </>
         }
       />
+      {made &&
+        createPortal(
+          <PublicLinkDialog
+            noteId={hit.note_id}
+            noteTitle={hit.title}
+            link={made}
+            onChange={onChange}
+            onClose={() => setMade(null)}
+          />,
+          document.body,
+        )}
     </span>
   );
 }

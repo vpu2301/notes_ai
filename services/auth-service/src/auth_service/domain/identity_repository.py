@@ -18,6 +18,7 @@ from uuid import UUID
 
 import asyncpg
 
+from .. import auth_metrics
 from . import email_code as ec
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ _IDENTITY_COLUMNS = """
     id, email, email_verified_at, display_name, status, mfa_enabled,
     (password_hash IS NOT NULL) AS has_password, last_tenant_id,
     failed_login_count, lock_count, locked_until, lock_notified_at,
-    deletion_requested_at, locale, timezone, legacy_idp, created_at
+    deletion_requested_at, locale, timezone, legacy_idp, created_at, updated_at
 """
 
 # Membership role → the platform roles the JWT carries (explicit on purpose).
@@ -54,6 +55,8 @@ _PLATFORM_ROLES: dict[str, tuple[str, ...]] = {
     "member": ("member",),
     "assistant": ("member",),
     "viewer": ("viewer",),
+    # W1: decodable everywhere, offered nowhere; reaches only notes it was given (W3).
+    "guest": ("guest",),
 }
 # A membership role we do not recognise must not silently become an admin.
 _FALLBACK_ROLES: tuple[str, ...] = ("viewer",)
@@ -62,6 +65,19 @@ _FALLBACK_ROLES: tuple[str, ...] = ("viewer",)
 def platform_roles_for(membership_role: str, *, tenant_kind: str = "team") -> list[str]:
     """The `roles` claim for one membership; ``tenant_kind`` is accepted but no longer changes the answer."""
     return list(_PLATFORM_ROLES.get(membership_role, _FALLBACK_ROLES))
+
+
+# Highest-privilege-wins order for collapsing a role set into ``users.role`` (and the
+# derived ``GET /auth/me.db_user.role``).
+_ROLE_PRECEDENCE: tuple[str, ...] = ("tenant_admin", "member", "viewer", "auditor", "service")
+
+
+def primary_role(roles: set[str]) -> str:
+    """Collapse a role set to the single value the ``users.role`` column holds."""
+    for role in _ROLE_PRECEDENCE:
+        if role in roles:
+            return role
+    return sorted(roles)[0]
 
 
 # `users.role` for the founding owner of a personal workspace.
@@ -91,6 +107,8 @@ class Identity:
     legacy_idp: bool = False
     # For first-run hints.
     created_at: datetime | None = None
+    # Stands in for the MFA enrolment time on the derived `GET /auth/me.db_user` (W1).
+    updated_at: datetime | None = None
 
     @classmethod
     def from_row(cls, row: asyncpg.Record) -> Identity:
@@ -112,6 +130,7 @@ class Identity:
             timezone=row["timezone"],
             legacy_idp=row["legacy_idp"],
             created_at=row.get("created_at"),
+            updated_at=row.get("updated_at"),
         )
 
 
@@ -478,6 +497,9 @@ class IdentityRepository:
     ) -> Membership | None:
         """Give an EXISTING identity a personal workspace if it has none; None when it already has one.
 
+        "Has one" means any membership in a ``kind='personal'`` tenant, whatever its status, so
+        an identity never gets a second (W1). Team memberships do not count: a person who only
+        belongs to "Acme" still gets a Personal workspace, but keeps landing where they were.
         Check and insert are one transaction so concurrent refreshes cannot both heal.
         """
         email = ec.normalise_email(email)
@@ -494,16 +516,18 @@ class IdentityRepository:
                     if locked is None:
                         return None
 
-                    existing = await conn.fetchval(
+                    counts = await conn.fetchrow(
                         """
-                        SELECT count(*) FROM tenant_memberships m
+                        SELECT count(*) FILTER (WHERE t.kind = 'personal') AS personal,
+                               count(*) FILTER (WHERE m.status = 'active'
+                                                  AND t.status = 'active') AS active
+                          FROM tenant_memberships m
                           JOIN tenants t ON t.id = m.tenant_id
-                         WHERE m.user_sub = $1 AND m.status = 'active'
-                           AND t.status = 'active'
+                         WHERE m.user_sub = $1
                         """,
                         identity_id,
                     )
-                    if existing:
+                    if counts["personal"]:
                         return None
 
                     tenant_row = await conn.fetchrow(
@@ -548,15 +572,18 @@ class IdentityRepository:
                         names.name,
                     )
 
-                    await conn.execute(
-                        "UPDATE identities SET last_tenant_id = $2 WHERE id = $1",
-                        identity_id,
-                        tenant_id,
-                    )
+                    if not counts["active"]:
+                        # Nowhere else to land: the new workspace becomes the landing one.
+                        await conn.execute(
+                            "UPDATE identities SET last_tenant_id = $2 WHERE id = $1",
+                            identity_id,
+                            tenant_id,
+                        )
             except asyncpg.UniqueViolationError as exc:
                 last_exc = exc
                 logger.info("auth.workspace.heal_name_taken", extra={"attempt": attempt + 1})
                 continue
+            auth_metrics.personal_healed_counter.add(1)
             logger.info(
                 "auth.workspace.healed",
                 extra={"identity_id": str(identity_id), "tenant_id": str(tenant_id)},
@@ -839,6 +866,17 @@ class IdentityRepository:
                 RETURNING id
                 """,
                 identity_id,
+            )
+            # W2: open invitations the person sent stop working, and so do the ones of
+            # every workspace dissolved above (accepted rows keep `accepted_by` until purge).
+            await conn.execute(
+                """
+                UPDATE tenant_invitations SET revoked_at = now(), revoked_by = $1
+                 WHERE accepted_at IS NULL AND revoked_at IS NULL
+                   AND (invited_by = $1 OR tenant_id = ANY($2::uuid[]))
+                """,
+                identity_id,
+                [r["id"] for r in rows],
             )
         return [r["id"] for r in rows]
 

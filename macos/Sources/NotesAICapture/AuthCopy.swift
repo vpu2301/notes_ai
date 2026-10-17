@@ -108,6 +108,29 @@ enum AuthCopy {
             return "That workspace has been closed."
         case "no_workspace":
             return "This account is not a member of any workspace. Ask someone to invite you."
+        // ── invitations and membership (W2) ─────────────────────────
+        case "personal_workspace":
+            return "Personal is just for you. Create a workspace to invite people."
+        case "already_member":
+            return "That person is already in this workspace."
+        case "use_invitations":
+            return "People are added by invitation now. Send them one instead."
+        case "invite_unavailable":
+            return "Invitations cannot be sent right now. Try again in a moment."
+        case "not_pending":
+            return "That invitation is no longer pending."
+        case "invitation_not_found":
+            return "This invitation is no longer valid. Ask the person who invited you for a new one."
+        case "invitation_email_mismatch":
+            return "This invitation was sent to a different address."
+        case "last_owner":
+            return "You are the last owner. Make someone else an owner before you leave."
+        case "has_other_members":
+            return "Remove everyone else from the workspace first, then dissolve it."
+        case "confirm_name_mismatch":
+            return "The name does not match. Type the workspace name exactly."
+        case "owner_only":
+            return "Only an owner can do that."
         case "origin_not_allowed":
             // Only reachable if the app stopped identifying itself.
             return "This server refused the request. Check the server address in Settings."

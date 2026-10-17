@@ -28,6 +28,8 @@ struct SidebarView: View {
 
     private var onHome: Bool { app.selection == nil && app.selectedSpaceId == nil }
 
+    private func onScope(_ scope: NoteScope) -> Bool { onHome && app.noteScope == scope }
+
     // MARK: - Full column
 
     private var full: some View {
@@ -53,13 +55,27 @@ struct SidebarView: View {
                     .help("Notes AI")
                     .padding(.bottom, 8)
 
-                    SidebarNewRow()
-                        .padding(.bottom, 2)
+                    if app.capabilities.canRecord {
+                        SidebarNewRow()
+                            .padding(.bottom, 2)
+                    }
 
-                    SidebarRow(title: "All notes", symbol: "doc.text", on: onHome) { goHome() }
+                    if app.capabilities.isGuest {
+                        // A guest's notes are the ones shared with them; there is nothing else to filter.
+                        SidebarRow(title: NoteScope.sharedWithMe.label, symbol: NoteScope.sharedWithMe.symbol,
+                                   on: onHome) { goHome() }
+                    } else {
+                        ForEach(app.capabilities.scopes, id: \.self) { scope in
+                            SidebarRow(title: scope.label, symbol: scope.symbol, on: onScope(scope)) {
+                                goHome(scope)
+                            }
+                        }
+                    }
 
-                    spaces
-                        .padding(.top, 22)
+                    if app.capabilities.showsSpaces {
+                        spaces
+                            .padding(.top, 22)
+                    }
                 }
                 .padding(.horizontal, 8)
                 .padding(.bottom, 12)
@@ -134,9 +150,10 @@ struct SidebarView: View {
         .onHover { spacesHover = $0 }
     }
 
-    private func goHome() {
+    private func goHome(_ scope: NoteScope = .all) {
         app.selection = nil
         app.selectedSpaceId = nil
+        app.noteScope = scope
     }
 
     // MARK: - Collapsed rail
@@ -148,17 +165,26 @@ struct SidebarView: View {
 
             collapseButton
                 .padding(.bottom, 6)
-            railButton("Start recording now (⌘N)", symbol: "plus", filled: true) {
-                capture.startNew()
+            if app.capabilities.canRecord {
+                railButton("Start recording now (⌘N)", symbol: "plus", filled: true) {
+                    capture.startNew()
+                }
+                .disabled(capture.isRecording || capture.phase.isBusy)
             }
-            .disabled(capture.isRecording || capture.phase.isBusy)
-            railButton("All notes", symbol: "doc.text", on: onHome) { goHome() }
+            if app.capabilities.isGuest {
+                railButton(NoteScope.sharedWithMe.label, symbol: NoteScope.sharedWithMe.symbol, on: onHome) { goHome() }
+            } else {
+                ForEach(app.capabilities.scopes, id: \.self) { scope in
+                    railButton(scope.label, symbol: scope.symbol, on: onScope(scope)) { goHome(scope) }
+                }
+            }
 
             ScrollView {
                 VStack(spacing: 2) {
-                    ForEach(app.spaces) { space in
+                    ForEach(app.capabilities.showsSpaces ? app.spaces : []) { space in
                         railButton(space.name, symbol: "folder", on: app.selectedSpaceId == space.id) {
                             app.selectedSpaceId = space.id
+                            app.noteScope = .all
                             app.selection = nil
                         }
                     }
@@ -250,15 +276,20 @@ struct SidebarView: View {
             // The workspace, not the host: which company's notes these are is what you can be wrong about.
             .header(app.email.isEmpty ? "Not signed in" : app.email, hint: workspaceLine),
         ]
+        if !app.myInvitations.isEmpty {
+            items.append(.item("Invitations (\(app.myInvitations.count))", symbol: "envelope.open") {
+                app.invitationsPresented = true
+            })
+        }
         // The workspace switcher, inline: switching happens several times a day.
         if app.workspaces.count > 1 {
             items.append(.separator)
             items.append(.header("Workspace"))
             for workspace in app.workspaces.prefix(6) {
                 items.append(.item(
-                    workspace.title,
+                    workspace.switcherTitle,
                     symbol: workspace.id == app.tenantId ? "checkmark.circle.fill" : "building.2",
-                    hint: workspace.myRole?.capitalized,
+                    hint: workspace.isGuest ? nil : workspace.myRole?.capitalized,
                     disabled: app.switchingTo != nil,
                     checked: false
                 ) {
@@ -272,9 +303,12 @@ struct SidebarView: View {
                 })
             }
         }
+        items.append(.separator)
+        if app.capabilities.canInvite {
+            items.append(.item("Invite people…", symbol: "person.badge.plus") { app.invitePresented = true })
+        }
         items += [
-            .separator,
-            .item("Invite people…", symbol: "person.badge.plus") { app.invitePresented = true },
+            .item("New workspace…", symbol: "plus") { app.newWorkspacePresented = true },
             .item("Settings…", symbol: "gearshape", hint: "⌘,") {
                 app.settingsTab = .general
                 app.settingsPresented = true
@@ -501,6 +535,7 @@ private struct SpaceRow: View {
     var body: some View {
         Button {
             app.selectedSpaceId = space.id
+            app.noteScope = .all
             app.selection = nil
         } label: {
             HStack(spacing: 12) {

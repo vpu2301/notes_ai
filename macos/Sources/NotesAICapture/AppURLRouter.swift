@@ -4,6 +4,8 @@ import Foundation
 enum AppURL: Equatable {
     /// `notesai://invite/<token>` — an invitation to a workspace.
     case invite(token: String)
+    /// `notesai://notes/<id>?ws=<tenant_id>` — a note, and the workspace it lives in.
+    case note(id: String, workspace: String?)
     /// `notesai://calendar/connected` — the server-side Google flow came back.
     case calendarConnected
     /// `notesai://oauth/callback?...` — an MCP sign-in came back.
@@ -22,6 +24,11 @@ enum AppURL: Equatable {
                 .queryItems?.first { $0.name == "token" }?.value
             guard let token = path.first ?? query, !token.isEmpty else { return nil }
             return .invite(token: token)
+        case "notes":
+            guard let id = path.first, !id.isEmpty else { return nil }
+            let ws = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "ws" }?.value
+            return .note(id: id, workspace: ws?.isEmpty == false ? ws : nil)
         case "calendar" where path.first == "connected":
             return .calendarConnected
         case "oauth" where path.first == "callback":

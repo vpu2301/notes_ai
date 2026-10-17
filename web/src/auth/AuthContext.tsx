@@ -9,22 +9,39 @@ import {
   type ReactNode,
 } from "react";
 import * as authApi from "../api/auth";
-import { activateWorkspace } from "../api/account";
+import { activateWorkspace, forgetMyInvitations, listTenants } from "../api/account";
 import type { ProfilePatch } from "../api/auth";
 import {
   refreshSession,
   setAccessToken,
   setReauthHandler,
   setSessionListener,
+  setWorkspaceMoved,
 } from "../api/http";
 import { preventSilentSignIn } from "../lib/credentials";
-import type { AuthResult, Identity, LoginResponse, Membership, MeResponse } from "../api/types";
+import type {
+  AuthResult,
+  Identity,
+  LoginResponse,
+  Membership,
+  MeResponse,
+  WorkspaceToken,
+} from "../api/types";
 
 export type AuthStatus = "restoring" | "authenticated" | "anonymous";
 
+/** Tabs share one session; the tab that switches tells the others here. */
+const WORKSPACE_CHANNEL = "notesai.workspace";
+
 /** What a sign-in call hands back to the page that made it. */
 export type SignInOutcome =
-  | { kind: "authenticated"; isNewIdentity: boolean; recoveryCodesLeft: number | null }
+  | {
+      kind: "authenticated";
+      isNewIdentity: boolean;
+      recoveryCodesLeft: number | null;
+      /** Invitations the sign-up accepted; the session already landed in the first. */
+      joinedTenantIds: string[];
+    }
   | { kind: "mfa_required"; challengeId: string; methods: string[]; expiresIn: number };
 
 interface AuthContextValue {
@@ -42,6 +59,15 @@ interface AuthContextValue {
   canSwitchWorkspaces: boolean;
   /** Move this session to another workspace. Throws `ApiError`. */
   switchWorkspace: (tenantId: string) => Promise<void>;
+  /** Adopt a token the server minted while it already moved the session (accept, leave). `joinedName` raises the banner. */
+  enterWorkspace: (token: WorkspaceToken, joinedName?: string) => Promise<void>;
+  /** "You joined <name>": set by an accepted invitation, cleared by its banner. */
+  joinedWorkspace: string | null;
+  dismissJoined: () => void;
+  /** The session moved to this workspace in another tab; requests stay refused until `followWorkspace`. */
+  workspaceMoved: { to: string } | null;
+  /** Adopt the workspace the session moved to (the strip's one button). */
+  followWorkspace: () => Promise<void>;
   displayName: string;
   /** Password sign-in. Throws `ApiError`; `otp_required` means try again with `otp`. */
   login: (email: string, password: string, otp?: string) => Promise<void>;
@@ -106,7 +132,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [memberships, setMemberships] = useState<Membership[]>([]);
-  const [activeTenantId, setActiveTenantId] = useState<string | null>(null);
+  const [activeTenantId, setActiveTenantState] = useState<string | null>(null);
+  const [workspaceMoved, setMovedState] = useState<{ to: string } | null>(null);
+  const [joinedWorkspace, setJoinedWorkspace] = useState<string | null>(null);
+  // Read by the refresh listener and the channel, which outlive a render.
+  const activeTenantRef = useRef<string | null>(null);
+  const setActiveTenantId = useCallback((tenantId: string | null) => {
+    activeTenantRef.current = tenantId;
+    setActiveTenantState(tenantId);
+  }, []);
+  const movedRef = useRef<string | null>(null);
   const [reauthPending, setReauthPending] = useState(false);
   const refreshTimer = useRef<number | null>(null);
   // In a ref, not state: a re-render must not lose the pending request.
@@ -131,15 +166,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [clearTimer],
   );
 
+  /** Where `http.ts` and the strip read "the session moved"; null clears both. */
+  const markMoved = useCallback((tenantId: string | null) => {
+    movedRef.current = tenantId;
+    setWorkspaceMoved(tenantId);
+    setMovedState(tenantId ? { to: tenantId } : null);
+  }, []);
+
+  /** The session is in `tenantId`; a mismatch with this tab's workspace blocks requests, never re-scopes silently. */
+  const confirmWorkspace = useCallback(
+    (tenantId: string | undefined) => {
+      const active = activeTenantRef.current;
+      if (!tenantId || !active) return;
+      markMoved(tenantId === active ? null : tenantId);
+    },
+    [markMoved],
+  );
+
   const becomeAnonymous = useCallback(() => {
     clearTimer();
+    forgetMyInvitations();
+    markMoved(null);
     setAccessToken(null);
     setMe(null);
     setIdentity(null);
     setMemberships([]);
     setActiveTenantId(null);
+    setJoinedWorkspace(null);
     setStatus("anonymous");
-  }, [clearTimer]);
+  }, [clearTimer, markMoved]);
 
   /** Everything a fresh `AuthResult` tells us, applied in one place. */
   const adopt = useCallback(
@@ -158,6 +213,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIdentity(result.identity);
       setMemberships(result.memberships ?? []);
       setActiveTenantId(result.tenant_id || result.default_tenant_id || null);
+      const joined = result.joined_tenant_ids ?? [];
+      const landed = (result.memberships ?? []).find((m) => m.tenant_id === joined[0]);
+      if (landed) setJoinedWorkspace(landed.name);
       setStatus("authenticated");
       // Best-effort: a failed `/auth/me` must not undo a real sign-in.
       try {
@@ -171,6 +229,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         kind: "authenticated",
         isNewIdentity: result.is_new_identity,
         recoveryCodesLeft: result.recovery_codes_left,
+        joinedTenantIds: joined,
       };
     },
     [scheduleRefresh],
@@ -178,11 +237,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setSessionListener({
-      onRefreshed: (login: LoginResponse) => scheduleRefresh(login.expires_in),
+      onRefreshed: (login: LoginResponse) => {
+        scheduleRefresh(login.expires_in);
+        confirmWorkspace(login.tenant_id);
+      },
       onAuthLost: becomeAnonymous,
     });
     return () => setSessionListener({});
-  }, [scheduleRefresh, becomeAnonymous]);
+  }, [scheduleRefresh, becomeAnonymous, confirmWorkspace]);
+
+  // Another tab switched: stop now rather than at this tab's next refresh.
+  const channel = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const ch = new BroadcastChannel(WORKSPACE_CHANNEL);
+    ch.onmessage = (e: MessageEvent<{ tenant_id?: string }>) => confirmWorkspace(e.data?.tenant_id);
+    channel.current = ch;
+    return () => {
+      ch.close();
+      channel.current = null;
+    };
+  }, [confirmWorkspace]);
 
   // Restore the session on first load via the HttpOnly refresh cookie.
   useEffect(() => {
@@ -266,13 +341,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /** `activeTenantId` changing remounts the signed-in tree (`WorkspaceScope`), so no stale rows stay on screen. */
-  const switchWorkspace = useCallback(
-    async (tenantId: string) => {
-      if (tenantId === activeTenantId) return;
-      const token = await activateWorkspace(tenantId);
+  const enterWorkspace = useCallback(
+    async (token: WorkspaceToken, joinedName?: string) => {
       setAccessToken(token.access_token);
       scheduleRefresh(token.expires_in);
+      markMoved(null);
       setActiveTenantId(token.tenant_id);
+      channel.current?.postMessage({ tenant_id: token.tenant_id });
       try {
         const meResp = await authApi.fetchMe();
         setMe(meResp);
@@ -281,9 +356,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         /* the token is real; the profile read is a bonus */
       }
+      if (joinedName) setJoinedWorkspace(joinedName);
     },
-    [activeTenantId, identity, scheduleRefresh],
+    [identity, scheduleRefresh, markMoved],
   );
+
+  const switchWorkspace = useCallback(
+    async (tenantId: string) => {
+      if (tenantId === activeTenantId) return;
+      await enterWorkspace(await activateWorkspace(tenantId));
+    },
+    [activeTenantId, enterWorkspace],
+  );
+
+  const dismissJoined = useCallback(() => setJoinedWorkspace(null), []);
+
+  /** A switch the session already made: a refresh mints this tab a token there, then the tree remounts. */
+  const followWorkspace = useCallback(async () => {
+    const to = movedRef.current;
+    if (!to) return;
+    activeTenantRef.current = to;
+    markMoved(null);
+    // The refresh confirms the workspace again; a further move re-blocks.
+    if (!(await refreshSession()) || movedRef.current) {
+      activeTenantRef.current = activeTenantId;
+      if (!movedRef.current) markMoved(to);
+      return;
+    }
+    setActiveTenantId(to);
+    try {
+      const meResp = await authApi.fetchMe();
+      setMe(meResp);
+      setIdentity(identityFromMe(meResp) ?? identity);
+      setMemberships(meResp.memberships ?? []);
+    } catch {
+      /* the token is real; the profile read is a bonus */
+    }
+  }, [activeTenantId, identity, markMoved]);
 
   const logout = useCallback(async () => {
     try {
@@ -352,16 +461,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return !iss.includes("/realms/");
   }, [me]);
 
+  // Memberships carry the tenant's unique internal name (`tenant-a`); `GET /tenants` has the name people gave it.
+  const [titles, setTitles] = useState<Record<string, string>>({});
+  const membershipKey = memberships.map((m) => m.tenant_id).join(",");
+  useEffect(() => {
+    if (status !== "authenticated" || !canSwitchWorkspaces || !membershipKey) return;
+    let live = true;
+    listTenants()
+      .then((r) => live && setTitles(Object.fromEntries(r.items.map((t) => [t.id, t.display_name || t.name]))))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [status, canSwitchWorkspaces, membershipKey]);
+  const namedMemberships = useMemo(
+    () => memberships.map((m) => ({ ...m, name: titles[m.tenant_id] || m.name })),
+    [memberships, titles],
+  );
+
   const value = useMemo(
     () => ({
       status,
       me,
       identity,
-      memberships,
+      memberships: namedMemberships,
       activeTenantId,
       activeRole,
       canSwitchWorkspaces,
       switchWorkspace,
+      enterWorkspace,
+      joinedWorkspace,
+      dismissJoined,
+      workspaceMoved,
+      followWorkspace,
       displayName,
       login,
       signInWithEmailCode,
@@ -379,11 +511,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       status,
       me,
       identity,
-      memberships,
+      namedMemberships,
       activeTenantId,
       activeRole,
       canSwitchWorkspaces,
       switchWorkspace,
+      enterWorkspace,
+      joinedWorkspace,
+      dismissJoined,
+      workspaceMoved,
+      followWorkspace,
       displayName,
       login,
       signInWithEmailCode,

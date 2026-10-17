@@ -54,6 +54,10 @@ kubectl -n "$NS" create secret generic mdx-keycloak-clients \
   --from-literal=KEYCLOAK_LOGIN_CLIENT_SECRET=dev-secret-change-in-prod-mdx-backend \
   --from-literal=KEYCLOAK_ADMIN_CLIENT_SECRET=dev-secret-change-in-prod-mdx-admin \
   --dry-run=client -o yaml | kubectl apply -f -
+# Native issuer key for MDX_IDP_MODE=dual (staging reuses the dev key, like the master key).
+kubectl -n "$NS" create secret generic mdx-auth-signing \
+  --from-file=AUTH_SIGNING_KEYS_JSON=infra/dev/auth-signing-dev.json \
+  --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n "$NS" create secret generic mdx-master-key \
   --from-file=master.key=infra/dev/master.key \
   --dry-run=client -o yaml | kubectl apply -f -

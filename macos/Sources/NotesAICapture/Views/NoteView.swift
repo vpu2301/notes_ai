@@ -5,9 +5,12 @@ import SwiftUI
 struct NoteView: View {
     @EnvironmentObject private var app: AppState
     @StateObject private var model: NoteViewModel
+    /// Comments and who else is here (W3).
+    @StateObject private var collab: NoteCollaboration
     @State private var confirmDelete = false
-    @State private var shareByEmail = false
-    @State private var shareWithClient = false
+    /// One sheet at a time: "Share…" hands over to the link sheets.
+    @State private var shareRoute: ShareRoute?
+    @State private var commentsShown = false
     @State private var confirmMarkDone = false
     @State private var reviewingSpellings = false
     /// Which speaker label is being renamed inline, and the text so far.
@@ -25,6 +28,12 @@ struct NoteView: View {
     init(capture: RecentCapture?, noteId: String, api: APIClient) {
         self.capture = capture
         _model = StateObject(wrappedValue: NoteViewModel(noteId: noteId, jobId: capture?.jobId, api: api))
+        _collab = StateObject(wrappedValue: NoteCollaboration(noteId: noteId, api: api))
+    }
+
+    private enum ShareRoute: String, Identifiable {
+        case people, client, email
+        var id: String { rawValue }
     }
 
     var body: some View {
@@ -47,6 +56,16 @@ struct NoteView: View {
             await model.load()
         }
         .task(id: model.noteId) { await model.loadSharing() }
+        // A W3 server sends a level: then comments exist and presence is kept while the note is open.
+        .task(id: model.level) {
+            guard model.level != nil else { return }
+            await collab.load()
+            await collab.stayPresent()
+        }
+        .inspector(isPresented: $commentsShown) {
+            CommentsView(collab: collab, model: model, onClose: { commentsShown = false })
+                .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
+        }
         .onChange(of: model.note?.title) { old, title in
             // The server's name for the note replaces this device's placeholder in the lists.
             guard let title, !title.isEmpty else { return }
@@ -64,24 +83,30 @@ struct NoteView: View {
         } message: {
             Text("It disappears from everyone's list and any public link stops working. The note is kept for the workspace's records.")
         }
-        .sheet(isPresented: $shareWithClient) {
-            ShareWithClientSheet(model: model, webAppURL: app.settings.webAppURL,
-                                 onClose: { shareWithClient = false })
+        .sheet(item: $shareRoute) { route in
+            switch route {
+            case .people:
+                NoteShareSheet(model: model, webAppURL: app.settings.webAppURL,
+                               sendLink: { shareRoute = .client }, sendEmail: { shareRoute = .email },
+                               onClose: { shareRoute = nil })
+            case .client:
+                ShareWithClientSheet(model: model, webAppURL: app.settings.webAppURL,
+                                     onClose: { shareRoute = nil })
+            case .email:
+                ShareEmailSheet(
+                    noteTitle: model.content?.title ?? "",
+                    send: { recipients, message in
+                        await model.sendShareEmail(recipients: recipients, message: message)
+                    },
+                    onClose: { shareRoute = nil })
+            }
         }
         .onChange(of: app.pendingClientShare, initial: true) { _, pending in
             // The menu-bar popover's "Share with client…" lands here.
             if pending == model.noteId {
                 app.pendingClientShare = nil
-                shareWithClient = true
+                shareRoute = .client
             }
-        }
-        .sheet(isPresented: $shareByEmail) {
-            ShareEmailSheet(
-                noteTitle: model.content?.title ?? "",
-                send: { recipients, message in
-                    await model.sendShareEmail(recipients: recipients, message: message)
-                },
-                onClose: { shareByEmail = false })
         }
         .alert("Mark all confirmed items done?", isPresented: $confirmMarkDone) {
             Button("Mark done") { Task { await model.markAllConfirmedDone() } }
@@ -121,11 +146,22 @@ struct NoteView: View {
                     .help("You can see this note because you run this workspace. This view is recorded.")
             }
             Spacer()
-            if model.isDraft {
+            if model.editable {
                 saveStatus
             }
             if model.busy {
                 ProgressView().controlSize(.small)
+            }
+            PresenceAvatars(viewers: collab.viewers)
+            if model.level != nil {
+                Button {
+                    commentsShown.toggle()
+                } label: {
+                    Label(collab.openCount > 0 ? "Comments (\(collab.openCount))" : "Comments",
+                          systemImage: "text.bubble")
+                }
+                .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 26))
+                .help("Comments on this note")
             }
             DSMenu(width: 236, items: menuItems)
         }
@@ -154,8 +190,6 @@ struct NoteView: View {
     }
 
     private func menuItems() -> [DSMenuItem] {
-        let canManage = model.sharing?.canManage ?? true
-        let hasLink = model.sharing?.publicLink != nil
         var items: [DSMenuItem] = [
             .item("Open in web app", symbol: "safari", hint: "⌘⇧O") {
                 app.openNoteInBrowser(model.noteId)
@@ -163,37 +197,19 @@ struct NoteView: View {
             .item("Copy link", symbol: "link") {
                 if let url = app.noteURL(model.noteId) { copy(url.absoluteString) }
             },
-            .separator,
-            // The client-facing path: one link per recipient.
-            .item("Share with client…", symbol: "paperplane", disabled: model.busy || !canManage) {
-                shareWithClient = true
-            },
-            .item("Mark all confirmed items done", symbol: "checkmark.circle",
-                  disabled: model.busy || !canManage
-                      || !model.items.contains { $0.status == .open && $0.counts.confirms > 0 && $0.counts.disputes == 0 }) {
-                confirmMarkDone = true
-            },
-            .item("Visible to everyone in the workspace", symbol: "person.2",
-                  disabled: model.busy || !canManage, checked: model.isWorkspaceVisible) {
-                Task { await model.setWorkspaceVisible(!model.isWorkspaceVisible) }
-            },
-            .item(hasLink ? "Copy public link" : "Create public link", symbol: "globe",
-                  disabled: model.busy || !canManage) {
-                Task {
-                    if let url = await model.publicLinkURL(webAppURL: app.settings.webAppURL) {
-                        copy(url.absoluteString)
-                    }
-                }
-            },
-            // One entry: colleague or outsider is the server's problem.
-            .item("Send by email…", symbol: "envelope", disabled: model.busy || !canManage) {
-                shareByEmail = true
-            },
         ]
-        if hasLink && canManage {
-            items.append(.item("Turn off public link", symbol: "globe.badge.chevron.backward",
-                               disabled: model.busy) {
-                Task { await model.revokePublicLink() }
+        // People, general access, the transcript and the links: one sheet, for whoever manages the note.
+        if model.canManage {
+            items.append(.separator)
+            items.append(.item("Share…", symbol: "person.badge.plus", disabled: model.busy) {
+                shareRoute = .people
+            })
+        }
+        if model.editable {
+            items.append(.item("Mark all confirmed items done", symbol: "checkmark.circle",
+                               disabled: model.busy
+                                   || !model.items.contains { $0.status == .open && $0.counts.confirms > 0 && $0.counts.disputes == 0 }) {
+                confirmMarkDone = true
             })
         }
         items.append(.separator)
@@ -207,7 +223,7 @@ struct NoteView: View {
         items.append(.item("Download Markdown", symbol: "doc.plaintext", disabled: model.busy) {
             model.exportMarkdown()
         })
-        if !app.spaces.isEmpty {
+        if app.capabilities.showsSpaces, !app.spaces.isEmpty {
             items.append(.separator)
             let current = app.spaceOf[model.noteId]
             for space in app.spaces {
@@ -275,9 +291,18 @@ struct NoteView: View {
                 }
             }
             .frame(maxWidth: .infinity)
+            // The text scrolling under the composer blurs and fades: a ~20pt band over the bar, down to the edge.
             .background(
-                LinearGradient(colors: [DS.bg.opacity(0), DS.bg], startPoint: .top, endPoint: .bottom)
-                    .allowsHitTesting(false)
+                ZStack {
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+                        .mask(LinearGradient(
+                            stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.3)],
+                            startPoint: .top, endPoint: .bottom
+                        ))
+                    LinearGradient(colors: [DS.bg.opacity(0), DS.bg], startPoint: .top, endPoint: .bottom)
+                }
+                .allowsHitTesting(false)
             )
         }
         .onChange(of: model.tab) { _, _ in model.endSelection() }
@@ -317,6 +342,12 @@ struct NoteView: View {
             }
             .padding(.leading, -8)
             .padding(.bottom, 14)
+        }
+
+        // Viewers and commenters read; the body is not a field for them.
+        if model.viewing == nil, model.isDraft, let line = model.level?.readOnlyLine {
+            DSNotice(tone: .info, symbol: model.level == .comment ? "text.bubble" : "eye", text: line)
+                .padding(.bottom, 16)
         }
 
         if model.conflict {
@@ -361,7 +392,7 @@ struct NoteView: View {
 
     private var tabOptions: [DSSegmentedPill<NoteViewModel.Tab>.Option] {
         var options: [DSSegmentedPill<NoteViewModel.Tab>.Option] = [.init(.notes, label: "Notes")]
-        if capture?.status == .complete || model.hasTranscript {
+        if model.canReadTranscript, capture?.status == .complete || model.hasTranscript {
             options.append(.init(.transcript, label: "Transcript"))
         }
         options.append(.init(.clientVersion, label: "Client version",
@@ -372,7 +403,7 @@ struct NoteView: View {
     /// The "filed in" pill: names the space, or offers the list (one click to file). Nothing with no spaces yet.
     @ViewBuilder
     private var spacePill: some View {
-        if !app.spaces.isEmpty {
+        if app.capabilities.showsSpaces, !app.spaces.isEmpty {
             let current = app.spaceOf[model.noteId]
             if let space = app.spaces.first(where: { $0.id == current }) {
                 Button {
@@ -456,30 +487,27 @@ struct NoteView: View {
                 .lineLimit(1...8)
                 .focused($askFocused)
                 .onSubmit { sendQuestion() }
+            // Claude's composer: the tool row sits right, a quiet label beside an accent send square.
             HStack(spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.dsIcon(12, .medium))
-                        .foregroundStyle(DS.accentText)
-                    Text("This note")
-                        .font(.ds(13))
-                        .foregroundStyle(DS.text3)
-                }
                 Spacer(minLength: 0)
+                Text("This note")
+                    .font(.ds(14))
+                    .foregroundStyle(DS.text3)
+                    .padding(.horizontal, 8)
                 Button { sendQuestion() } label: {
                     Image(systemName: "arrow.up")
                         .font(.dsIcon(13, .semibold))
-                        .foregroundStyle(DS.inkText)
+                        .foregroundStyle(DS.accentInk)
                         .frame(width: 32, height: 32)
                         .background(
-                            RoundedRectangle(cornerRadius: DS.radiusSm + 2, style: .continuous)
-                                .fill(DS.ink)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(DS.accentFill)
                         )
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(askEmpty)
-                .opacity(askEmpty ? 0.35 : 1)
+                .opacity(askEmpty ? 0.4 : 1)
                 .keyboardShortcut(.return, modifiers: .command)
                 .help("Send (Return)")
                 .accessibilityLabel("Send")
@@ -505,7 +533,7 @@ struct NoteView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 40)
         .padding(.bottom, 14)
-        .padding(.top, 6)
+        .padding(.top, 20)
     }
 
     private var askEmpty: Bool {
@@ -523,7 +551,10 @@ struct NoteView: View {
         VStack(alignment: .leading, spacing: 20) {
             if !model.items.isEmpty {
                 // The action items as objects, with what recipients did. The section text stays the source.
-                ActionItemsSection(model: model)
+                ActionItemsSection(model: model, comment: model.canComment ? { key in
+                    collab.compose(on: .item(key))
+                    commentsShown = true
+                } : nil)
             }
             // The engine, from the Notes tab and nowhere else.
             if model.canGenerateSummary {
@@ -620,6 +651,14 @@ struct NoteView: View {
                                     .font(.dsMono(13))
                                     .foregroundStyle(DS.muted.opacity(0.45))
                                     .offset(x: -20)
+                            }
+                            .contextMenu {
+                                if model.canComment {
+                                    Button("Comment…") {
+                                        collab.compose(on: .section(block.key))
+                                        commentsShown = true
+                                    }
+                                }
                             }
                     }
                     if block.isFreeText {

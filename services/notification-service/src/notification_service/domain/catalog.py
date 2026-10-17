@@ -84,6 +84,24 @@ _SPECS: Final[tuple[CategorySpec, ...]] = (
         email_template="note_shared",
     ),
     CategorySpec(
+        category=Category.NOTE_COMMENTED,
+        # Author team + other commenters on the anchor, named and debounced by the producer.
+        recipient_rule=RecipientRule.EXPLICIT_HINTS,
+        default_in_app=True,
+        default_email_mode=EmailMode.OFF,
+        severity=Severity.INFO,
+        digest_eligible=True,
+    ),
+    CategorySpec(
+        category=Category.NOTE_ACCESS_CHANGED,
+        # Exactly the person whose role changed or was revoked.
+        recipient_rule=RecipientRule.EXPLICIT_HINTS,
+        default_in_app=True,
+        default_email_mode=EmailMode.OFF,
+        severity=Severity.INFO,
+        digest_eligible=False,
+    ),
+    CategorySpec(
         category=Category.NOTE_RECIPIENT_RESPONDED,
         # Author team by hint; the recipient has no account.
         recipient_rule=RecipientRule.EXPLICIT_HINTS,
@@ -164,6 +182,34 @@ _SPECS: Final[tuple[CategorySpec, ...]] = (
         # Actor (reviewer) and audience (subject) can never coincide.
         exclude_actor=False,
         email_template="security_mfa_reminder",
+    ),
+    # The three workspace facts are each written in a workspace the recipient is a member of
+    # (the invitee's or removed person's PERSONAL one, or the inviting one for an acceptance),
+    # so EXPLICIT_HINTS keeps its member filter and nothing reads across tenants.
+    CategorySpec(
+        category=Category.WORKSPACE_INVITED,
+        recipient_rule=RecipientRule.EXPLICIT_HINTS,
+        default_in_app=True,
+        # auth-service sends the invitation mail itself; a second mail here would duplicate it.
+        default_email_mode=EmailMode.OFF,
+        severity=Severity.INFO,
+        digest_eligible=False,
+    ),
+    CategorySpec(
+        category=Category.WORKSPACE_INVITATION_ACCEPTED,
+        recipient_rule=RecipientRule.EXPLICIT_HINTS,
+        default_in_app=True,
+        default_email_mode=EmailMode.OFF,
+        severity=Severity.INFO,
+        digest_eligible=True,
+    ),
+    CategorySpec(
+        category=Category.WORKSPACE_MEMBER_REMOVED,
+        recipient_rule=RecipientRule.EXPLICIT_HINTS,
+        default_in_app=True,
+        default_email_mode=EmailMode.OFF,
+        severity=Severity.INFO,
+        digest_eligible=False,
     ),
     CategorySpec(
         category=Category.SYSTEM_DIGEST,

@@ -56,7 +56,7 @@ async def list_section_audio_segments(
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         # A private note the caller was not given is a 404.
-        note = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
+        note = access.require_transcript(await repo.fetch_note(conn, note_id=note_id), claims)
         _enforce_read_purpose(note, claims, purpose)
 
         if note.source_session_id is None:

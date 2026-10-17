@@ -124,6 +124,8 @@ class AuthResult(TokenResponse):
     # Set only when the sign-in spent a recovery code; zero matters.
     recovery_codes_left: int | None = None
     recovery_codes_exhausted: bool | None = None
+    # W2: workspaces joined by accepting invitations at sign-up ("You joined …").
+    joined_tenant_ids: list[str] = Field(default_factory=list)
 
     @classmethod
     def authenticated(

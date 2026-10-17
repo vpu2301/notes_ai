@@ -23,7 +23,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-import re
 import secrets
 from dataclasses import dataclass
 from datetime import date
@@ -51,6 +50,7 @@ from ..domain.diff_engine import compute_diff, section_diff_summary
 from ..domain.meeting_doc import types as meeting_types
 from ..domain.pdf import render_note_pdf
 from ..domain.share_tokens import hash_token, looks_like_token
+from ..domain.text import clean_comment as _clean_comment
 from ..notifications import emit_note_event
 from ..share_metrics import (
     cta_clicks,
@@ -182,23 +182,6 @@ class SharedNoteView(BaseModel):
     changes: SharedChanges | None = None
     # True while the writer is still working and the note has no other content.
     preparing: bool = False
-
-
-_URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
-_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-
-
-def _clean_comment(value: str | None) -> str | None:
-    if value is None:
-        return None
-    cleaned = _CONTROL_RE.sub("", value).strip()
-    if not cleaned:
-        return None
-    if len(cleaned) > 280:
-        raise ValueError("comment is longer than 280 characters")
-    if _URL_RE.search(cleaned):
-        raise ValueError("no_links_in_comment")
-    return cleaned
 
 
 class ItemResponseRequest(BaseModel):

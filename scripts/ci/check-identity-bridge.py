@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CI gate against a live database: every active identity has its bridge ``users`` row,
-on a tenant it is a member of (written in the same transaction as the identity).
+on a tenant it is a member of (written in the same transaction as the identity), and
+exactly one personal workspace it owns (W1, ADR-0069).
 
     DATABASE_URL=postgres://... uv run python scripts/ci/check-identity-bridge.py
 
@@ -49,6 +50,22 @@ SELECT u.sub, u.tenant_id
 """
 
 
+# Exactly one personal membership per active identity, and it is an active ownership.
+PERSONAL_PROBLEMS = """
+SELECT i.id,
+       count(m.*) AS personal,
+       count(m.*) FILTER (WHERE m.role = 'owner' AND m.status = 'active') AS owned
+  FROM identities i
+  LEFT JOIN (tenant_memberships m JOIN tenants t ON t.id = m.tenant_id AND t.kind = 'personal')
+         ON m.user_sub = i.id
+ WHERE i.status = 'active'
+ GROUP BY i.id
+HAVING count(m.*) <> 1
+    OR count(m.*) FILTER (WHERE m.role = 'owner' AND m.status = 'active') <> 1
+ LIMIT 50
+"""
+
+
 async def main() -> int:
     dsn = os.environ.get("DATABASE_URL", DEFAULT_DSN)
     try:
@@ -62,6 +79,7 @@ async def main() -> int:
         total = await conn.fetchval(COUNT)
         rows = await conn.fetch(UNBRIDGED) if total else []
         orphans = await conn.fetch(ORPHAN_BRIDGE)
+        personal = await conn.fetch(PERSONAL_PROBLEMS)
     finally:
         await conn.close()
 
@@ -98,10 +116,29 @@ async def main() -> int:
         for row in orphans:
             print(f"  sub={row['sub']} tenant={row['tenant_id']}", file=sys.stderr)
 
+    if personal:
+        failed = True
+        print(
+            f"check-identity-bridge: FAIL — {len(personal)} active identity(ies) without "
+            "exactly one owned personal workspace",
+            file=sys.stderr,
+        )
+        for row in personal:
+            print(
+                f"  {row['id']}  personal={row['personal']} owned={row['owned']}", file=sys.stderr
+            )
+        print(
+            "\nNone: run `python -m auth_service.ops.ensure_personal` (idempotent). "
+            "Two: never created by code — investigate before touching either.",
+            file=sys.stderr,
+        )
+
     if failed:
         return 1
 
-    print("check-identity-bridge: OK — every active identity is bridged")
+    print(
+        "check-identity-bridge: OK — every active identity is bridged and has one Personal workspace"
+    )
     return 0
 
 

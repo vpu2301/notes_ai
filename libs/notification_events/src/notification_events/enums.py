@@ -20,6 +20,10 @@ class Category(StrEnum):
     NOTE_AMENDED = "note.amended"
     NOTE_CHAIN_FAILURE = "note.chain_failure"
     NOTE_SHARED_WITH_YOU = "note.shared_with_you"
+    # Someone commented on a note; the author team and the other commenters on that anchor hear.
+    NOTE_COMMENTED = "note.commented"
+    # This account's role on a note changed or was revoked; only that person hears.
+    NOTE_ACCESS_CHANGED = "note.access_changed"
     # A recipient acted on the shared page; debounced per link by the producer.
     NOTE_RECIPIENT_RESPONDED = "note.recipient_responded"
     # A recipient link was opened; in-app only.
@@ -33,6 +37,12 @@ class Category(StrEnum):
     SECURITY_MFA_REMINDER = "security.mfa_reminder"
     # Monthly AI budget spent; the admins hear.
     AI_BUDGET_REACHED = "ai.budget_reached"
+    # Someone invited this account to a workspace; written in the invitee's personal workspace.
+    WORKSPACE_INVITED = "workspace.invited"
+    # An invitee accepted; the inviter hears, in the inviting workspace.
+    WORKSPACE_INVITATION_ACCEPTED = "workspace.invitation_accepted"
+    # This account was removed from a workspace; written in their personal workspace.
+    WORKSPACE_MEMBER_REMOVED = "workspace.member_removed"
     SYSTEM_DIGEST = "system.digest"
 
 

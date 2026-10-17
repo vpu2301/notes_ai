@@ -85,4 +85,84 @@ final class AuthCopyTests: XCTestCase {
                        SessionLostReason.securityRevoked.message)
         XCTAssertTrue(AuthCopy.message(for: APIError.badURL).contains("Settings"))
     }
+
+    // MARK: - Completeness against docs/api/error-codes.md (IOS-12)
+
+    /// Codes the doc lists that this app never meets: the endpoint is the web app's, a device's,
+    /// or retired. A new code in the doc fails the test until it gets copy or a line here.
+    private let notReachableFromThisApp: [String: String] = [
+        "signup_rate_limited": "signup is a web flow (`openSignup`)",
+        "password_policy": "signup is a web flow",
+        "display_name_required": "signup is a web flow",
+        "signup_unavailable": "signup is a web flow",
+        "verify_retry": "signup is a web flow",
+        "mfa_already_enabled": "second factors are managed on the web",
+        "mfa_not_enabled": "second factors are managed on the web",
+        "owner_reset_requires_owner": "second factors are managed on the web",
+        "email_in_use": "changing the address is on the web",
+        "email_unchanged": "changing the address is on the web",
+        "sole_owner_with_members": "account deletion is on the web",
+        "confirm_required": "account deletion is on the web",
+        "invalid_client": "OAuth client credentials (devices), not people",
+        "unsupported_grant_type": "OAuth client credentials (devices)",
+        "client_rate_limited": "OAuth client credentials (devices)",
+        "client_locked": "OAuth client credentials (devices)",
+        "try_again": "OAuth client credentials (devices)",
+        "rotation_in_progress": "device credential rotation",
+        "speakers_hint_invalid": "retired in Sprint 30",
+        "name_candidates_invalid": "a field this app builds within the limits; a refusal is a client bug",
+        "channel_layout_mismatch": "sent by the macOS app only",
+        "local_speaker_name_invalid": "sent by the macOS app only",
+    ]
+
+    /// Every `code` in the table's first column.
+    private func documentedCodes() throws -> Set<String> {
+        let doc = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "docs/api/error-codes.md")
+        let text = try String(contentsOf: doc, encoding: .utf8)
+        var codes: Set<String> = []
+        for line in text.split(separator: "\n") where line.hasPrefix("| `") {
+            let rest = line.dropFirst(3)
+            guard let end = rest.firstIndex(of: "`") else { continue }
+            let code = String(rest[..<end])
+            if code.range(of: "^[a-z_]+$", options: .regularExpression) != nil { codes.insert(code) }
+        }
+        return codes
+    }
+
+    /// Copy of its own: not the generic line an unknown code gets, never the server's wording,
+    /// or a typed error the speaker screens explain.
+    private func hasCopy(_ code: String) -> Bool {
+        let failure = error(code, status: 418)
+        if SpeakerEditError.from(failure) is SpeakerEditError { return true }
+        if RediarizeError.from(failure) is RediarizeError { return true }
+        let message = AuthCopy.message(for: failure)
+        let generic = AuthCopy.message(for: error("zz_not_a_code", status: 418))
+        return message != generic && !message.contains("server wording") && !message.contains(code)
+    }
+
+    func testEveryDocumentedCodeHasCopyOrAReasonItCannotHappen() throws {
+        let codes = try documentedCodes()
+        XCTAssertGreaterThan(codes.count, 60, "the doc was not parsed")
+        let missing = codes.filter { !hasCopy($0) && notReachableFromThisApp[$0] == nil }.sorted()
+        XCTAssertEqual(missing, [], "codes in docs/api/error-codes.md without copy")
+        // An exemption for a code that has copy (or left the doc) is stale.
+        let stale = notReachableFromThisApp.keys.filter { hasCopy($0) || !codes.contains($0) }.sorted()
+        XCTAssertEqual(stale, [], "exemptions that no longer apply")
+    }
+
+    /// The workspace and collaboration codes (W1–W3) by name, so a doc edit cannot drop one silently.
+    func testWorkspaceAndCollaborationCodesHaveCopy() {
+        for code in ["already_member", "invite_unavailable", "not_pending", "invitation_not_found",
+                     "invitation_email_mismatch", "last_owner", "owner_only", "has_other_members",
+                     "confirm_name_mismatch", "insufficient_role", "is_author", "use_invitations",
+                     "personal_workspace", "invalid_role", "not_a_member", "membership_suspended",
+                     "tenant_dissolved"] {
+            XCTAssertTrue(hasCopy(code), code)
+        }
+        XCTAssertEqual(AuthCopy.message(for: error("insufficient_role", status: 403)), AuthCopy.insufficientRole)
+        XCTAssertEqual(AuthCopy.message(for: error("use_invitations", status: 410)), AuthCopy.useInvitations)
+    }
 }

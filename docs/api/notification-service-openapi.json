@@ -16,6 +16,9 @@
           "transcription.failed",
           "security.mfa_reminder",
           "ai.budget_reached",
+          "workspace.invited",
+          "workspace.invitation_accepted",
+          "workspace.member_removed",
           "system.digest"
         ],
         "title": "Category",

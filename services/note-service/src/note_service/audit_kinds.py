@@ -25,6 +25,8 @@ NOTE_DELETED: Final = "note.deleted"  # soft delete (bin); links revoked
 NOTE_VISIBILITY_CHANGED: Final = "note.visibility_changed"  # private ↔ workspace
 NOTE_SHARED: Final = "note.shared"  # a member was given read access
 NOTE_UNSHARED: Final = "note.unshared"
+# W3: "Include transcript" turned on/off for view/comment collaborators and guests.
+NOTE_TRANSCRIPT_SHARING_CHANGED: Final[str] = "note.transcript_sharing_changed"
 NOTE_LINK_CREATED: Final = "note.link_created"  # public "anyone with the link"
 NOTE_LINK_REVOKED: Final = "note.link_revoked"
 # Counts only; addresses stay out of the audit log on purpose.
@@ -38,6 +40,8 @@ NOTE_ITEM_STATUS_CHANGED: Final = "note.item_status_changed"  # item_key, from, 
 NOTE_RESPONSE_CLEARED: Final = "note.response_cleared"  # kind
 # Payload: link_id, resend, outcome (sent|failed). Never the address.
 NOTE_LINK_SENT: Final = "note.link_sent"
+# W3: payload anchor_kind only; never the body, never the anchor key.
+NOTE_COMMENTED: Final = "note.commented"
 # The recipient opted out of mail from every workspace. Payload: link_id.
 NOTE_RECIPIENT_UNSUBSCRIBED: Final = "note.recipient_unsubscribed"
 # Policy, verification, abuse.

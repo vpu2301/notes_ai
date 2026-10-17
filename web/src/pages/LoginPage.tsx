@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useDocumentTitle } from "../lib/useDocumentTitle";
-import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import * as authApi from "../api/auth";
 import { ApiError } from "../api/http";
 import { useAuth, type SignInOutcome } from "../auth/AuthContext";
@@ -9,16 +9,27 @@ import { useToast } from "../components/Toaster";
 import { attemptsLeft, messageFor, retryAfterSeconds } from "../lib/errorCopy";
 import { Banner, LoginShell, useCountdown } from "./auth/LoginShell";
 
-/** `/login` — sign up and sign in. The server's 202 is uniform; copy must never imply the address is known. */
+/** `?next=` is honoured only as a path on this site — never `//host` or a full URL. */
+function safeNext(next: string | null): string | null {
+  return next && next.startsWith("/") && !next.startsWith("//") ? next : null;
+}
+
+/**
+ * `/login` — sign up and sign in. The server's 202 is uniform; copy must never imply the address is known.
+ * `?email=` pre-fills the address (read-only when `?next=` is an invitation); `?next=` is where to go after.
+ */
 export function LoginPage() {
   useDocumentTitle("Sign in");
   const { status, signInWithEmailCode } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
+  const [params] = useSearchParams();
+  const next = safeNext(params.get("next"));
+  const fromInvitation = Boolean(next?.startsWith("/invite/") && params.get("email"));
 
   const [step, setStep] = useState<"email" | "code">("email");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => params.get("email") ?? "");
   const [challengeId, setChallengeId] = useState("");
   const [code, setCode] = useState("");
   const [invalid, setInvalid] = useState(false);
@@ -26,7 +37,7 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [resendIn, setResendIn] = useState(0);
 
-  const from = (location.state as { from?: string } | null)?.from ?? "/";
+  const from = (location.state as { from?: string } | null)?.from ?? next ?? "/";
 
   useCountdown(resendIn, setResendIn);
 
@@ -85,7 +96,9 @@ export function LoginPage() {
       if (outcome.recoveryCodesLeft !== null && outcome.recoveryCodesLeft <= 2) {
         toast.info(`${outcome.recoveryCodesLeft} recovery codes left — make a new set in Settings.`);
       }
-      navigate(outcome.isNewIdentity ? "/welcome" : from, { replace: true, state: { from } });
+      // Sign-up already accepted the invitation and landed there; its link would now say "no longer valid".
+      const after = outcome.joinedTenantIds.length > 0 && from.startsWith("/invite/") ? "/" : from;
+      navigate(outcome.isNewIdentity ? "/welcome" : after, { replace: true, state: { from: after } });
     } catch (err) {
       const codeName = err instanceof ApiError ? err.code : undefined;
       if (codeName === "use_password") {
@@ -152,17 +165,20 @@ export function LoginPage() {
           >
             {resendIn > 0 ? `Send a new code in ${resendIn}s` : "Send a new code"}
           </button>
-          <button
-            type="button"
-            className="link-btn"
-            onClick={() => {
-              setStep("email");
-              setCode("");
-              setError(null);
-            }}
-          >
-            Use a different address
-          </button>
+          {/* An invitation is for one address; the field would come back read-only. */}
+          {!fromInvitation && (
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() => {
+                setStep("email");
+                setCode("");
+                setError(null);
+              }}
+            >
+              Use a different address
+            </button>
+          )}
         </div>
       </LoginShell>
     );
@@ -182,7 +198,8 @@ export function LoginPage() {
           type="email"
           autoComplete="username"
           required
-          autoFocus
+          autoFocus={!fromInvitation}
+          readOnly={fromInvitation}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />

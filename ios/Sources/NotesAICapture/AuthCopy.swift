@@ -4,6 +4,20 @@ import Foundation
 /// server's `code` (docs/api/error-codes.md); `detail` may change. Unknown
 /// codes get a generic line with the request id.
 enum AuthCopy {
+    // ── sentences the app says without a failed request ──────────────
+
+    /// A link to a note in a workspace this identity is not in.
+    static let notAMember = "This note is in a workspace you are not a member of."
+    /// A note the open workspace does not have (404 on a link without `?ws=`).
+    static let notInThisWorkspace = "Not in this workspace. It may be in another of your workspaces."
+    /// A note-level refusal (`insufficient_role`); the action is hidden, so this is rare.
+    static let insufficientRole = "Your access to this note does not allow that. Ask its author for more."
+    /// The old add-by-e-mail path (`use_invitations`).
+    static let useInvitations = "People are added by invitation now. Send them one instead."
+
+    /// The session was moved by the server (left, removed, dissolved) and the app followed it.
+    static func workspaceMoved(_ name: String) -> String { "Switched to \(name)." }
+
     static func message(for error: Error) -> String {
         guard let apiError = error as? APIError else { return error.localizedDescription }
         switch apiError {
@@ -98,6 +112,43 @@ enum AuthCopy {
             return "This account has been disabled."
         case "no_workspace":
             return "This account is not a member of any workspace. Ask someone to invite you."
+        // ── invitations and membership (W2) ─────────────────────────
+        case "personal_workspace":
+            return "Personal is just for you. Create a workspace to invite people."
+        case "already_member":
+            return "That person is already in this workspace."
+        case "use_invitations":
+            return useInvitations
+        case "invalid_role":
+            return "Invitations can make someone a member, an admin or a viewer."
+        case "invite_unavailable":
+            return "Invitations cannot be sent right now. Try again in a moment."
+        case "not_pending":
+            return "That invitation is no longer pending."
+        case "invitation_not_found":
+            return "This invitation is no longer valid. Ask the person who invited you for a new one."
+        case "invitation_email_mismatch":
+            return "This invitation was sent to a different address."
+        case "last_owner":
+            return "You are the last owner. Make someone else an owner before you leave."
+        case "has_other_members":
+            return "Remove everyone else from the workspace first, then dissolve it."
+        case "confirm_name_mismatch":
+            return "The name does not match. Type the workspace name exactly."
+        case "owner_only":
+            return "Only an owner can do that."
+        // ── switching and borrowed tokens (W1) ──────────────────────
+        case "not_a_member":
+            return "You are not a member of that workspace any more."
+        case "membership_suspended":
+            return "Your membership in that workspace is suspended. Ask whoever runs it."
+        case "tenant_dissolved":
+            return "That workspace has been dissolved."
+        // ── the note by level (W3) ──────────────────────────────────
+        case "insufficient_role":
+            return insufficientRole
+        case "is_author":
+            return "The note's author always has full access."
         case "origin_not_allowed":
             // Only reachable if the app stopped identifying itself.
             return "This server refused the request. Check the server address in Settings."
@@ -126,6 +177,8 @@ enum AuthCopy {
             return GenerationCopy.recordingUnreadable
         case "model_unavailable":
             return GenerationCopy.modelUnavailable
+        case "model_not_configured":
+            return "Asking about a note is not set up on this server."
         case "object_store_not_configured":
             return "Recordings cannot be read on this server right now. Try again later."
         default:

@@ -57,3 +57,27 @@ scripts/eval/local/
 eval/asr/*/*/
 eval/notes/**/*.json
 !eval/notes/**/manifest.json
+
+# Real data never enters git — only the app. DB dumps/backups, local
+# databases, recordings and exports stay on the machine (or in MinIO/S3).
+*.dump
+*.pgdump
+*.sql.gz
+*.backup
+*.bak
+backups/
+*.sqlite
+*.sqlite3
+*.db
+*.jsonl
+*.wav
+*.m4a
+*.mp3
+*.caf
+*.flac
+*.ogg
+*.opus
+*.aac
+*.webm
+# Bundled ~2 s probe clip used by the ASR health probe (not user data).
+!libs/models/src/models/probe_clip.wav

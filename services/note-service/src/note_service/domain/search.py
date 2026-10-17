@@ -34,17 +34,38 @@ class SearchFilters:
     # notes are never returned either way.
     viewer_sub: UUID | None = None
     viewer_sees_all: bool = False
+    # W3: a guest sees only notes it holds a grant on — no workspace visibility, no authorship.
+    viewer_guest: bool = False
+    # W3: all | mine (author team) | shared_with_me (visible to me, not mine).
+    scope: str = "all"
 
 
 def _access_clauses(filters: SearchFilters, args: list[Any]) -> list[str]:
+    """Visibility (who may see) plus the scope and author filters — shared by the page and the count."""
     out = ["n.deleted_at IS NULL"]
-    if filters.viewer_sub is not None and not filters.viewer_sees_all:
-        args.append(filters.viewer_sub)
-        i = len(args)
-        out.append(
-            f"(n.visibility = 'workspace' OR n.primary_author_id = ${i} "
-            f"OR ${i} = ANY(n.co_author_ids) OR ${i} = ANY(n.shared_with_ids))"
-        )
+    if filters.author_id is not None:
+        args.append(filters.author_id)
+        out.append(f"(n.primary_author_id = ${len(args)} OR ${len(args)} = ANY(n.co_author_ids))")
+    if filters.viewer_sub is None:
+        return out
+    # An unreferenced bind arg has no inferable type (IndeterminateDatatypeError),
+    # so bind the viewer only when a clause below will use it.
+    if filters.viewer_sees_all and not filters.viewer_guest and filters.scope == "all":
+        return out
+    args.append(filters.viewer_sub)
+    i = len(args)
+    mine = f"(n.primary_author_id = ${i} OR ${i} = ANY(n.co_author_ids))"
+    granted = (
+        f"EXISTS (SELECT 1 FROM note_collaborators c WHERE c.note_id = n.id AND c.user_sub = ${i})"
+    )
+    if filters.viewer_guest:
+        out.append(granted)
+    elif not filters.viewer_sees_all:
+        out.append(f"(n.visibility = 'workspace' OR {mine} OR {granted})")
+    if filters.scope == "mine":
+        out.append(mine)
+    elif filters.scope == "shared_with_me":
+        out.append(f"NOT {mine}")
     return out
 
 
@@ -79,7 +100,10 @@ class SearchHit:
     updated_at: datetime
     # 0016 — who can open it, for the list's private / shared / public badge.
     visibility: str = "private"
+    # W3: people with a per-note grant (was `cardinality(shared_with_ids)`).
     shared_with_count: int = 0
+    # W3: the caller's own per-note role, for `my_level`.
+    my_collab_role: str | None = None
     has_public_link: bool = False
     # Live recipient disputes, for the "1 disputed" dot.
     open_disputes: int = 0
@@ -120,10 +144,6 @@ async def search_notes(
         where.append(predicate)
     where.extend(_access_clauses(filters, args))
 
-    if filters.author_id is not None:
-        args.append(filters.author_id)
-        where.append(f"(n.primary_author_id = ${len(args)} OR ${len(args)} = ANY(n.co_author_ids))")
-
     if filters.statuses:
         args.append(filters.statuses)
         where.append(f"n.status = ANY(${len(args)}::note_status[])")
@@ -147,8 +167,17 @@ async def search_notes(
         )
 
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    viewer_arg = None
+    if filters.viewer_sub is not None:
+        args.append(filters.viewer_sub)
+        viewer_arg = len(args)
+    my_role_expr = (
+        "(SELECT c.role::text FROM note_collaborators c "
+        f"WHERE c.note_id = n.id AND c.user_sub = ${viewer_arg})"
+        if viewer_arg is not None
+        else "NULL::text"
+    )
     args.append(limit + 1)
-
     snippet_expr = (
         f"ts_headline('simple', v.rendered_text, {tsquery_expr}, "
         f"'MaxFragments=2, MaxWords=15, MinWords=5, StartSel=<mark>, StopSel=</mark>')"
@@ -162,7 +191,9 @@ async def search_notes(
             n.primary_author_id, n.co_author_ids,
             n.created_at, n.updated_at,
             n.visibility::text AS visibility,
-            cardinality(n.shared_with_ids) AS shared_with_count,
+            (SELECT count(*) FROM note_collaborators c WHERE c.note_id = n.id)
+                AS shared_with_count,
+            {my_role_expr} AS my_collab_role,
             EXISTS (
                 SELECT 1 FROM note_share_links l
                 WHERE l.note_id = n.id AND l.revoked_at IS NULL
@@ -199,6 +230,7 @@ async def search_notes(
                 updated_at=r["updated_at"],
                 visibility=r["visibility"],
                 shared_with_count=r["shared_with_count"] or 0,
+                my_collab_role=r["my_collab_role"],
                 has_public_link=r["has_public_link"],
                 open_disputes=int(r["open_disputes"] or 0),
             )

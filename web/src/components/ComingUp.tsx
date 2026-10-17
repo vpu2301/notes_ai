@@ -67,7 +67,7 @@ function EventRow({ event, onStart }: { event: UpcomingEvent; onStart: () => voi
       </div>
       <div className="row-side cu-actions">
         {event.meeting_url && (
-          <a className="btn ghost sm" href={event.meeting_url} target="_blank" rel="noreferrer noopener" title="Open the video call">
+          <a className="btn sm" href={event.meeting_url} target="_blank" rel="noreferrer noopener" title="Open the video call">
             <VideoIcon size={14} /> Join
           </a>
         )}

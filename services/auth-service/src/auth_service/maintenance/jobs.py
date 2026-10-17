@@ -131,6 +131,53 @@ async def purge_deleted_identities(pool: Any) -> JobResult:
     return JobResult("purge-deleted-identities", purged)
 
 
+async def sweep_invitations(pool: Any) -> JobResult:
+    """W2: revoked/expired invitations 90 days on (the address is PII), and "Left" rows after 30."""
+    from ..domain.invitation_repository import InvitationRepository
+    from ..tenants_repository import sweep_left_members
+
+    invitations = await InvitationRepository(pool).sweep(older_than_days=SESSION_RETENTION_DAYS)
+    async with pool.acquire() as conn:
+        left = await sweep_left_members(conn, older_than_days=DELETION_GRACE_DAYS)
+    return JobResult(
+        "sweep-invitations", invitations + left, {"invitations": invitations, "left": left}
+    )
+
+
+async def sweep_guests(pool: Any) -> JobResult:
+    """W3: a guest whose last note grant is gone (and who has no open note invitation) leaves.
+
+    Not immediately: the membership must be older than a day, so an author who re-shares
+    the same day does not have to re-invite. The row becomes "Left" (suspended + left_at);
+    the person's session moves to Personal on its next refresh; `sweep-invitations` deletes
+    the row 30 days later.
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            UPDATE tenant_memberships m
+               SET status = 'suspended', left_at = now()
+             WHERE m.role = 'guest' AND m.status = 'active'
+               AND m.created_at < now() - interval '24 hours'
+               AND NOT EXISTS (SELECT 1 FROM note_collaborators c
+                                WHERE c.tenant_id = m.tenant_id AND c.user_sub = m.user_sub)
+               AND NOT EXISTS (SELECT 1 FROM tenant_invitations i
+                                 JOIN identities p ON p.email = i.email
+                                WHERE i.tenant_id = m.tenant_id AND p.id = m.user_sub
+                                  AND i.note_id IS NOT NULL
+                                  AND i.accepted_at IS NULL AND i.revoked_at IS NULL
+                                  AND i.expires_at > now())
+            RETURNING m.tenant_id, m.user_sub
+            """
+        )
+    for row in rows:
+        logger.info(
+            "auth.maint.guest_removed",
+            extra={"tenant_id": str(row["tenant_id"]), "identity_id": str(row["user_sub"])},
+        )
+    return JobResult("sweep-guests", len(rows), {"reason": "no_grants"})
+
+
 async def sample_gauges(pool: Any) -> JobResult:
     """Publish the two size gauges (sampled, not maintained incrementally: counters drift across restarts)."""
     async with pool.acquire() as conn:

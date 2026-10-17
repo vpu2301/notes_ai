@@ -7,9 +7,11 @@ role = per-tenant gate on top.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
-from datetime import datetime
+import secrets
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -28,11 +30,18 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from audit import Severity
 from auth import Claims
+from auth.perms import can
 from db import tenant_connection
 
-from .. import audit_kinds
+from .. import audit_kinds, auth_metrics
 from .. import tenants_repository as repo
+from ..config import settings
 from ..deps import current_user, get_state, requires, requires_mfa
+from ..domain.errors import ApiError
+from ..domain.identity_repository import platform_roles_for, primary_role
+from ..domain.transport import TokenResponse
+from ..notifications import emit_member_removed
+from .native_common import as_problem, recent_auth
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tenants", tags=["tenants"])
@@ -89,6 +98,8 @@ class TenantSummary(_Strict):
     is_active: bool
     logo_url: str
     my_role: str
+    # personal | team — clients label a personal workspace "Personal" whatever its name (W1).
+    kind: str = "team"
 
 
 class TenantListOut(_Strict):
@@ -145,10 +156,46 @@ class MemberOut(_Strict):
     platform_role: str | None = None
     created_at: datetime
     updated_at: datetime
+    # W2: set when the person left; the roster shows "Left" until the sweeper (30 days).
+    left_at: datetime | None = None
 
 
 class MemberListOut(_Strict):
     items: list[MemberOut]
+    seat_meter: SeatMeter | None = None
+
+
+class TenantCreateShort(_Strict):
+    """Self-serve (W2): a name is all it takes; the long form stays for admin onboarding."""
+
+    name: str = Field(min_length=1, max_length=80)
+
+
+class DissolveRequest(_Strict):
+    confirm_name: str = Field(min_length=1, max_length=200)
+
+
+class DissolveOut(_Strict):
+    status: str
+    restore_until: datetime
+    # The session moved to Personal (null when this session was elsewhere or cannot switch).
+    token: TokenResponse | None = None
+
+
+class ArchiveOut(_Strict):
+    status: str
+    # The session moved to Personal (null when this session was elsewhere or cannot switch).
+    token: TokenResponse | None = None
+
+
+class LeaveOut(_Strict):
+    # The session already moved to Personal; null only for a session that cannot switch.
+    token: TokenResponse | None
+
+
+class SeatMeter(_Strict):
+    active: int
+    limit: int | None
 
 
 class MemberAdd(_Strict):
@@ -209,6 +256,7 @@ def _summary(row: asyncpg.Record, my_role: str) -> TenantSummary:
         is_active=row["is_active"],
         logo_url=row["logo_url"],
         my_role=my_role,
+        kind=row["kind"],
     )
 
 
@@ -219,9 +267,10 @@ def _member_out(row: asyncpg.Record) -> MemberOut:
         status=row["status"],
         email=row["email"],
         display_name=row["display_name"],
-        platform_role=row["platform_role"],
+        platform_role=primary_role(set(platform_roles_for(row["role"]))),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        left_at=row.get("left_at"),
     )
 
 
@@ -242,6 +291,16 @@ async def _require_member(tenant_id: UUID, claims: Claims) -> str:
         # Never leak the existence of a tenant the caller cannot see.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tenant not found")
     return role
+
+
+async def manage_step_up(claims: Annotated[Claims, Depends(current_user)]) -> Claims:
+    """Step-up for managing people (W2): MFA under Keycloak, a recent sign-in (300 s) in dual/native.
+
+    MFA is optional for individuals, so requiring it would leave a free team unable to invite.
+    """
+    if settings.idp_mode == "keycloak":
+        return await requires_mfa()(claims)
+    return await recent_auth(claims)
 
 
 def _require_active_tenant(tenant_id: UUID, claims: Claims) -> None:
@@ -313,13 +372,18 @@ async def get_tenant(
     "",
     response_model=TenantOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Onboard a new company/tenant; the caller becomes its owner",
-    dependencies=[Depends(requires_mfa())],
+    summary="Create a workspace: `{name}` for anyone signed in (self-serve), or the long admin form",
 )
 async def create_tenant(
-    body: TenantCreate,
-    claims: Annotated[Claims, Depends(requires("tenant.create", "tenant"))],
+    body: TenantCreateShort | TenantCreate,
+    claims: Annotated[Claims, Depends(current_user)],
 ) -> TenantOut:
+    if isinstance(body, TenantCreateShort):
+        return await _create_self_serve(body, claims)
+    # The long form is admin onboarding: the permission and MFA gates it always had.
+    if not any(can(role, "tenant.create", "tenant") for role in claims.roles or ()):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+    await requires_mfa()(claims)
     _validate_slug(body.slug)
     slug = body.slug or _slugify(body.name)
     state = get_state()
@@ -370,6 +434,81 @@ async def create_tenant(
     return _tenant_out(row, my_role="owner")
 
 
+async def _create_self_serve(body: TenantCreateShort, claims: Claims) -> TenantOut:
+    """W2: kind=team, plan=free, self_serve; `tenants.name` is UNIQUE, so it carries a short suffix."""
+    display_name = body.name.strip()
+    if not display_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="name is empty"
+        )
+    state = get_state()
+    limiter = getattr(state, "limiter", None)
+    if limiter is not None:
+        decision = await limiter.allow(
+            "tenant-create:identity", str(claims.sub), limit=10, window_seconds=86400
+        )
+        if not decision.allowed:
+            raise as_problem(
+                ApiError(
+                    "rate_limited",
+                    429,
+                    detail="too many new workspaces today",
+                    retry_after=decision.retry_after,
+                )
+            )
+    identity = None
+    services = getattr(state, "account_services", None)
+    if services is not None:
+        identity = await services.identities.get(claims.sub)
+    base = _slugify(display_name)[:60] or "workspace"
+    for _attempt in range(3):
+        slug = f"{base}-{secrets.token_hex(3)}"
+        try:
+            async with tenant_connection(state.tenant_writer_pool, claims.tid) as conn:
+                row = await repo.create_tenant(
+                    conn,
+                    name=slug,
+                    display_name=display_name,
+                    slug=slug,
+                    locale=(identity.locale if identity else "en"),
+                    timezone=(identity.timezone if identity else "UTC"),
+                    plan="free",
+                    signup_source="self_serve",
+                    plan_limits=json.dumps(_free_limits()),
+                )
+                await repo.add_member(
+                    conn,
+                    tenant_id=row["id"],
+                    user_sub=claims.sub,
+                    role="owner",
+                    invited_by=claims.sub,
+                    status="active",
+                )
+            break
+        except asyncpg.UniqueViolationError:
+            continue
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="could not name the workspace; try again"
+        )
+    auth_metrics.workspace_created_counter.add(1, {"source": "self_serve"})
+    await _audit(
+        claims,
+        tenant_id=row["id"],
+        kind=audit_kinds.TENANT_CREATED,
+        target_id=row["id"],
+        payload={"source": "self_serve", "kind": "team"},
+        severity=Severity.SEC,
+    )
+    return _tenant_out(row, my_role="owner")
+
+
+def _free_limits() -> dict[str, int]:
+    from ..main_deps import _free_limits as free_limits
+
+    return free_limits()
+
+
 # ── Update ───────────────────────────────────────────────────────────────
 
 
@@ -393,6 +532,8 @@ async def update_tenant(
     # Keep ``status`` in sync with ``is_active`` (active ⇄ suspended).
     if "is_active" in fields:
         fields["status"] = "active" if fields["is_active"] else "suspended"
+    if "status" in fields:
+        await _refuse_personal_status_change(tenant_id)
     for key in (
         "display_name",
         "legal_name",
@@ -433,6 +574,21 @@ async def update_tenant(
         severity=Severity.INFO,
     )
     return _tenant_out(row, my_role=my_role)
+
+
+async def _refuse_personal_status_change(tenant_id: UUID) -> None:
+    """A personal workspace is never suspended or dissolved (W1); renaming it stays allowed."""
+    state = get_state()
+    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+        row = await repo.get_tenant(conn, tenant_id=tenant_id)
+    if row is not None and row["kind"] == "personal":
+        raise as_problem(
+            ApiError(
+                "personal_workspace",
+                409,
+                detail="a personal workspace cannot be suspended or dissolved",
+            )
+        )
 
 
 # ── Logo ─────────────────────────────────────────────────────────────────
@@ -537,7 +693,11 @@ async def list_members(
     # Writer pool so cross-tenant members resolve.
     async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
         rows = await repo.list_members(conn, tenant_id=tenant_id)
-    return MemberListOut(items=[_member_out(r) for r in rows])
+        active, seat_limit = await repo.seat_meter(conn, tenant_id=tenant_id)
+    return MemberListOut(
+        items=[_member_out(r) for r in rows],
+        seat_meter=SeatMeter(active=active, limit=seat_limit),
+    )
 
 
 @router.post(
@@ -545,7 +705,7 @@ async def list_members(
     response_model=MemberOut,
     status_code=status.HTTP_201_CREATED,
     summary="Link a principal to the tenant with a management role",
-    dependencies=[Depends(requires_mfa())],
+    dependencies=[Depends(manage_step_up)],
 )
 async def add_member(
     tenant_id: UUID,
@@ -559,13 +719,20 @@ async def add_member(
     state = get_state()
     async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
         user_sub = body.user_sub
+        if user_sub is None and body.email and settings.idp_mode != "keycloak":
+            # W2: people are brought in by invitation; nobody is added silently by address.
+            raise as_problem(
+                ApiError("use_invitations", 409, detail="invite people by e-mail instead")
+            )
         if user_sub is None:
             if not body.email:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="provide a `user_sub` or an `email`",
                 )
-            user_sub = await repo.resolve_sub_by_email(conn, email=body.email.strip())
+            user_sub = await repo.resolve_sub_by_email(
+                conn, tenant_id=tenant_id, email=body.email.strip()
+            )
             if user_sub is None:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -607,7 +774,7 @@ async def add_member(
     "/{tenant_id}/members/{sub}",
     response_model=MemberOut,
     summary="Change a member's management role",
-    dependencies=[Depends(requires_mfa())],
+    dependencies=[Depends(manage_step_up)],
 )
 async def update_member(
     tenant_id: UUID,
@@ -616,7 +783,8 @@ async def update_member(
     claims: Annotated[Claims, Depends(requires("tenant.manage_members", "tenant"))],
 ) -> MemberOut:
     _require_active_tenant(tenant_id, claims)
-    _require_manager(await _require_member(tenant_id, claims))
+    my_role = await _require_member(tenant_id, claims)
+    _require_manager(my_role)
     _validate_management_role(body.role)
 
     state = get_state()
@@ -624,13 +792,13 @@ async def update_member(
         existing = await repo.get_membership(conn, tenant_id=tenant_id, user_sub=sub)
         if existing is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
+        _require_owner_for_owners(my_role, existing["role"], body.role)
         # Never leave a tenant ownerless.
         if existing["role"] == "owner" and body.role != "owner":
             remaining = await repo.count_active_owners(conn, tenant_id=tenant_id, exclude_sub=sub)
             if remaining == 0:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="cannot demote the last owner of the tenant",
+                raise as_problem(
+                    ApiError("last_owner", 409, detail="cannot demote the last owner of the tenant")
                 )
         member = await repo.update_member_role(
             conn, tenant_id=tenant_id, user_sub=sub, role=body.role
@@ -655,10 +823,217 @@ async def update_member(
 
 
 @router.delete(
+    "/{tenant_id}/members/me",
+    response_model=LeaveOut,
+    summary='Leave this workspace (your row is kept as "Left" for 30 days); you land in Personal',
+)
+async def leave_workspace(
+    tenant_id: UUID,
+    claims: Annotated[Claims, Depends(current_user)],
+) -> LeaveOut:
+    my_role = await _require_member(tenant_id, claims)
+    state = get_state()
+    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+        tenant = await repo.get_tenant(conn, tenant_id=tenant_id)
+        if tenant is not None and tenant["kind"] == "personal":
+            raise as_problem(
+                ApiError("personal_workspace", 409, detail="nobody leaves their personal workspace")
+            )
+        if my_role == "owner":
+            others = await repo.count_active_owners(
+                conn, tenant_id=tenant_id, exclude_sub=claims.sub
+            )
+            if others == 0:
+                raise as_problem(
+                    ApiError(
+                        "last_owner", 409, detail="make someone else an owner before you leave"
+                    )
+                )
+        await repo.leave(conn, tenant_id=tenant_id, user_sub=claims.sub)
+    auth_metrics.member_left_counter.add(1)
+    await _audit(
+        claims,
+        tenant_id=tenant_id,
+        kind=audit_kinds.TENANT_MEMBER_LEFT,
+        target_id=claims.sub,
+        payload={"role": my_role},
+        severity=Severity.SEC,
+    )
+    # Only the workspace this session is in moves it; leaving another one changes nothing here.
+    token = await _move_to_personal(claims) if claims.tid == tenant_id else None
+    return LeaveOut(token=token)
+
+
+@router.post(
+    "/{tenant_id}/dissolve",
+    response_model=DissolveOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Dissolve an empty team workspace (owner; type its name). Restorable for 30 days",
+    dependencies=[Depends(manage_step_up)],
+)
+async def dissolve_workspace(
+    tenant_id: UUID,
+    body: DissolveRequest,
+    claims: Annotated[Claims, Depends(current_user)],
+) -> DissolveOut:
+    my_role = await _require_member(tenant_id, claims)
+    if my_role != "owner":
+        raise as_problem(ApiError("owner_only", 403, detail="only an owner can dissolve"))
+    state = get_state()
+    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+        tenant = await repo.get_tenant(conn, tenant_id=tenant_id)
+        if tenant is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tenant not found")
+        if tenant["kind"] == "personal":
+            raise as_problem(
+                ApiError(
+                    "personal_workspace", 409, detail="a personal workspace is never dissolved"
+                )
+            )
+        typed = body.confirm_name.strip().casefold()
+        if typed not in {tenant["display_name"].strip().casefold(), tenant["name"].casefold()}:
+            raise as_problem(
+                ApiError("confirm_name_mismatch", 422, detail="type the workspace name to confirm")
+            )
+        if await repo.count_other_active_members(conn, tenant_id=tenant_id, user_sub=claims.sub):
+            raise as_problem(
+                ApiError("has_other_members", 409, detail="remove the other members first")
+            )
+        await repo.dissolve(conn, tenant_id=tenant_id)
+    revoked = 0
+    service = getattr(state, "invitation_service", None)
+    if service is not None:
+        revoked = await service.revoke_all_for_tenant(tenant_id, actor=claims.sub)
+    auth_metrics.workspace_dissolved_counter.add(1)
+    await _audit(
+        claims,
+        tenant_id=tenant_id,
+        kind=audit_kinds.TENANT_DISSOLVED,
+        target_id=tenant_id,
+        payload={"revoked_invitations": revoked},
+        severity=Severity.SEC,
+    )
+    # Other sessions heal to Personal on their next refresh; do it now for this one.
+    token = await _move_to_personal(claims) if claims.tid == tenant_id else None
+    return DissolveOut(
+        status="dissolved", restore_until=datetime.now(UTC) + timedelta(days=30), token=token
+    )
+
+
+async def _owned_team_workspace(tenant_id: UUID, claims: Claims, action: str) -> asyncpg.Record:
+    """Archive and restore are the owner's, on a team workspace only."""
+    my_role = await _require_member(tenant_id, claims)
+    if my_role != "owner":
+        raise as_problem(ApiError("owner_only", 403, detail=f"only an owner can {action}"))
+    state = get_state()
+    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+        tenant = await repo.get_tenant(conn, tenant_id=tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tenant not found")
+    if tenant["kind"] == "personal":
+        raise as_problem(
+            ApiError("personal_workspace", 409, detail=f"a personal workspace cannot {action}")
+        )
+    return tenant
+
+
+@router.post(
+    "/{tenant_id}/archive",
+    response_model=ArchiveOut,
+    summary="Archive a team workspace (owner): closed for everyone, nothing deleted, restorable any time",
+    dependencies=[Depends(manage_step_up)],
+)
+async def archive_workspace(
+    tenant_id: UUID,
+    claims: Annotated[Claims, Depends(current_user)],
+) -> ArchiveOut:
+    tenant = await _owned_team_workspace(tenant_id, claims, "archive")
+    if tenant["status"] != "active":
+        raise as_problem(
+            ApiError("not_active", 409, detail="only an active workspace can be archived")
+        )
+    state = get_state()
+    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+        await repo.archive(conn, tenant_id=tenant_id)
+    # Nobody can join a closed workspace: open invitations go.
+    revoked = 0
+    service = getattr(state, "invitation_service", None)
+    if service is not None:
+        revoked = await service.revoke_all_for_tenant(tenant_id, actor=claims.sub)
+    await _audit(
+        claims,
+        tenant_id=tenant_id,
+        kind=audit_kinds.TENANT_ARCHIVED,
+        target_id=tenant_id,
+        payload={"revoked_invitations": revoked},
+        severity=Severity.SEC,
+    )
+    # Other sessions heal to Personal on their next refresh; do it now for this one.
+    token = await _move_to_personal(claims) if claims.tid == tenant_id else None
+    return ArchiveOut(status="archived", token=token)
+
+
+@router.post(
+    "/{tenant_id}/unarchive",
+    response_model=TenantSummary,
+    summary="Restore an archived workspace (owner); its members get it back as it was",
+)
+async def unarchive_workspace(
+    tenant_id: UUID,
+    claims: Annotated[Claims, Depends(current_user)],
+) -> TenantSummary:
+    tenant = await _owned_team_workspace(tenant_id, claims, "restore")
+    if tenant["status"] != "archived":
+        raise as_problem(ApiError("not_archived", 409, detail="this workspace is not archived"))
+    state = get_state()
+    async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
+        await repo.unarchive(conn, tenant_id=tenant_id)
+        row = await repo.get_tenant(conn, tenant_id=tenant_id)
+    await _audit(
+        claims,
+        tenant_id=tenant_id,
+        kind=audit_kinds.TENANT_UNARCHIVED,
+        target_id=tenant_id,
+        payload={},
+        severity=Severity.SEC,
+    )
+    return _summary(row, "owner")
+
+
+async def _move_to_personal(claims: Claims) -> TokenResponse | None:
+    """Switch this session to the caller's Personal workspace; None if it cannot (Keycloak-era)."""
+    state = get_state()
+    sessions = getattr(state, "session_service", None)
+    services = getattr(state, "account_services", None)
+    if sessions is None or services is None:
+        return None
+    memberships = await services.identities.list_memberships(claims.sub)
+    personal = next((m for m in memberships if m.kind == "personal"), None)
+    if personal is None:
+        return None
+    try:
+        switched = await sessions.switch_tenant(
+            session_id=UUID(claims.sid),
+            identity_id=claims.sub,
+            tenant_id=personal.tenant_id,
+            activate=True,
+        )
+    except (ApiError, ValueError, TypeError) as exc:
+        logger.info("tenant.move_to_personal_skipped", extra={"error_class": type(exc).__name__})
+        return None
+    return TokenResponse(
+        access_token=switched.access_token,
+        expires_in=switched.expires_in,
+        tenant_id=str(switched.tenant_id),
+        roles=switched.roles,
+    )
+
+
+@router.delete(
     "/{tenant_id}/members/{sub}",
     status_code=status.HTTP_200_OK,
     summary="Remove a member from the tenant",
-    dependencies=[Depends(requires_mfa())],
+    dependencies=[Depends(manage_step_up)],
 )
 async def remove_member(
     tenant_id: UUID,
@@ -666,22 +1041,24 @@ async def remove_member(
     claims: Annotated[Claims, Depends(requires("tenant.manage_members", "tenant"))],
 ) -> dict[str, Any]:
     _require_active_tenant(tenant_id, claims)
-    _require_manager(await _require_member(tenant_id, claims))
+    my_role = await _require_member(tenant_id, claims)
+    _require_manager(my_role)
 
     state = get_state()
     async with tenant_connection(state.tenant_writer_pool, tenant_id) as conn:
         existing = await repo.get_membership(conn, tenant_id=tenant_id, user_sub=sub)
         if existing is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
+        _require_owner_for_owners(my_role, existing["role"], None)
         if existing["role"] == "owner":
             remaining = await repo.count_active_owners(conn, tenant_id=tenant_id, exclude_sub=sub)
             if remaining == 0:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="cannot remove the last owner of the tenant",
+                raise as_problem(
+                    ApiError("last_owner", 409, detail="cannot remove the last owner of the tenant")
                 )
         await repo.remove_member(conn, tenant_id=tenant_id, user_sub=sub)
 
+    await _notify_removed(tenant_id=tenant_id, removed=sub, actor=claims.sub)
     await _audit(
         claims,
         tenant_id=tenant_id,
@@ -738,6 +1115,37 @@ async def switch_tenant(
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
+
+
+async def _notify_removed(*, tenant_id: UUID, removed: UUID, actor: UUID) -> None:
+    """W2: the removed person hears about it in their Personal workspace (best-effort)."""
+    state = get_state()
+    services = getattr(state, "account_services", None)
+    if services is None:
+        return
+    try:
+        memberships = await services.identities.list_memberships(removed)
+        personal = next((m for m in memberships if m.kind == "personal"), None)
+        if personal is not None:
+            await emit_member_removed(
+                state.notification_bus,
+                personal_tenant_id=personal.tenant_id,
+                workspace_id=tenant_id,
+                removed=removed,
+                actor=actor,
+            )
+    except Exception as exc:  # noqa: BLE001 — the removal is committed
+        logger.warning(
+            "tenant.member_removed_notify_failed", extra={"error_class": type(exc).__name__}
+        )
+
+
+def _require_owner_for_owners(my_role: str, target_role: str, new_role: str | None) -> None:
+    """Only an owner changes, removes or creates an owner (W2/WEB): an admin manages everyone else."""
+    if my_role != "owner" and "owner" in (target_role, new_role):
+        raise as_problem(
+            ApiError("owner_only", 403, detail="only an owner can change an owner's membership")
+        )
 
 
 def _require_manager(role: str) -> None:

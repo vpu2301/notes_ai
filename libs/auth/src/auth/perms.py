@@ -11,12 +11,13 @@ from .claims import Claims
 
 # Plain str (not Literal) so the CSV reads straight in; the exhaustive test guards typos.
 
-Role = str  # tenant_admin | member | viewer | auditor | service | device
+Role = str  # tenant_admin | member | viewer | auditor | service | device | guest
 Action = str  # e.g. 'user.invite', 'audit.read'
 TargetKind = str  # e.g. 'user', 'audit', 'tenant'
 
 KNOWN_ROLES: Final[frozenset[str]] = frozenset(
-    {"tenant_admin", "member", "viewer", "auditor", "service", "device"}
+    # `guest` (W1, ADR-0069): reaches only notes it was given; W3 adds its rows (note, notification, tenant read).
+    {"tenant_admin", "member", "viewer", "auditor", "service", "device", "guest"}
 )
 
 KNOWN_TARGET_KINDS: Final[frozenset[str]] = frozenset(
@@ -116,7 +117,7 @@ ALLOW: Final[dict[tuple[Role, Action, TargetKind], bool]] = {
     # ── Notes; auditors denied content, service read-only, tenant_admin deliberately absent ──
     ("member", "note.write", "note"): True,
     ("member", "note.read", "note"): True,
-    ("viewer", "note.write", "note"): True,
+    # W3: a viewer no longer writes notes; on a workspace note the resource rule lets them comment.
     ("viewer", "note.read", "note"): True,
     ("service", "note.read", "note"): True,
     # ── Notifications: every session-holding role, auditor included; rows are the caller's own ──
@@ -155,6 +156,13 @@ ALLOW: Final[dict[tuple[Role, Action, TargetKind], bool]] = {
     ("device", "dictation.read", "dictation_session"): True,
     ("device", "dictation.finalize", "dictation_session"): True,
     ("device", "template.read", "template"): True,
+    # guest (W3, ADR-0071): only notes it was given (note_service.domain.access decides the
+    # level; `note.write` is needed for an `edit` grant). No asr/dictation/template/nlp/autocomplete.
+    ("guest", "tenant.read", "tenant"): True,
+    ("guest", "note.read", "note"): True,
+    ("guest", "note.write", "note"): True,
+    ("guest", "notification.read", "notification"): True,
+    ("guest", "notification.write", "notification"): True,
 }
 
 

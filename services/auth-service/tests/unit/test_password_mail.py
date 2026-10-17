@@ -75,6 +75,19 @@ def _fields(kind: str, lang: str) -> tuple[dict, dict]:
             ),
             {},
         )
+    if kind == copy_mod.KIND_INVITATION:
+        return (
+            compose.invitation_fields(
+                lang=lang,
+                workspace_name="Sunrise Studio",
+                inviter_display="Anna",
+                role="member",
+                message="Welcome aboard",
+                invite_url=compose.invite_url(app_base_url=APP, token=TOKEN),
+                expires_at=WHEN,
+            ),
+            {},
+        )
     if kind == copy_mod.KIND_SIGNUP_EXISTS:
         return (
             compose.signup_exists_fields(
@@ -116,7 +129,7 @@ def _render(kind: str, lang: str) -> templates.RenderedEmail:
     return templates.render(
         kind,
         lang,
-        subject=copy_mod.subject_for(kind, lang),
+        subject=copy_mod.subject_for(kind, lang, fields),
         text_body=copy_mod.text_body(kind, lang, compose.text_values(kind, lang, fields, secrets)),
         context={**fields, **secrets},
     )
@@ -384,3 +397,32 @@ def test_every_mail_carries_the_legal_sender_line(kind: str, lang: str) -> None:
     assert "3Days Labs Inc &middot; 2166 Market Street, San Francisco, CA 94114" in html
     text = copy_mod.text_body(kind, lang, compose.text_values(kind, lang, fields, secrets))
     assert text.endswith(copy_mod.LEGAL_LINE)
+
+
+@pytest.mark.parametrize("lang", copy_mod.SUPPORTED_LANGS)
+def test_invitation_subject_names_the_workspace_and_the_message_is_text(lang: str) -> None:
+    """W2: the subject carries the workspace name only; the inviter's message is escaped, never HTML."""
+    fields = compose.invitation_fields(
+        lang=lang,
+        workspace_name="Sunrise {Studio}",
+        inviter_display="Anna",
+        role="admin",
+        message="<b>hi</b>",
+        invite_url=compose.invite_url(app_base_url=APP, token=TOKEN),
+        expires_at=WHEN,
+    )
+    rendered = templates.render(
+        copy_mod.KIND_INVITATION,
+        lang,
+        subject=copy_mod.subject_for(copy_mod.KIND_INVITATION, lang, fields),
+        text_body=copy_mod.text_body(
+            copy_mod.KIND_INVITATION,
+            lang,
+            compose.text_values(copy_mod.KIND_INVITATION, lang, fields, {}),
+        ),
+        context=fields,
+    )
+    assert "Sunrise {Studio}" in rendered.subject
+    assert "<b>hi</b>" not in rendered.html_body
+    assert "&lt;b&gt;hi&lt;/b&gt;" in rendered.html_body
+    assert f"{APP}/invite/{TOKEN}" in rendered.text_body

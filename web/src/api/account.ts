@@ -9,6 +9,9 @@ import type {
   Credential,
   EmailChangeChallenge,
   Identity,
+  InvitationAccepted,
+  InvitationLookup,
+  MyInvitation,
   RecoveryCodes,
   RevokedCount,
   RotatedCredential,
@@ -88,8 +91,18 @@ export function deleteAccount(): Promise<AccountDeletion> {
 
 // ── workspaces (read-only here) ───────────────────────────────────────
 
+/** The last `GET /tenants` answer: names a workspace while requests are held back (workspace moved). */
+let lastTenants: TenantSummary[] = [];
+
 export function listTenants(): Promise<{ items: TenantSummary[] }> {
-  return api<{ items: TenantSummary[] }>("auth", "/tenants");
+  return api<{ items: TenantSummary[] }>("auth", "/tenants").then((r) => {
+    lastTenants = r.items;
+    return r;
+  });
+}
+
+export function cachedTenants(): TenantSummary[] {
+  return lastTenants;
 }
 
 /** Re-scope this session to `tenantId`; nothing rotates. Native sessions only (`409 legacy_session`). */
@@ -99,6 +112,59 @@ export function activateWorkspace(tenantId: string): Promise<WorkspaceToken> {
     json: { tenant_id: tenantId, activate: true },
     credentials: true,
   });
+}
+
+// ── invitations, the invitee's side ───────────────────────────────────
+
+/** Anonymous: the token only shows who invited whom to what. Every non-live state is one 404. */
+export function lookupInvitation(token: string): Promise<InvitationLookup> {
+  return api<InvitationLookup>("auth", `/auth/invitations/${encodeURIComponent(token)}`, { auth: false });
+}
+
+/** The signed-in address must be the invited one (`403 invitation_email_mismatch`). Moves the session there. */
+export function acceptInvitation(token: string): Promise<InvitationAccepted> {
+  forgetMyInvitations();
+  return api<InvitationAccepted>("auth", `/auth/invitations/${encodeURIComponent(token)}/accept`, {
+    method: "POST",
+    credentials: true,
+  });
+}
+
+export function myInvitations(): Promise<MyInvitation[]> {
+  return api<{ items: MyInvitation[] }>("auth", "/auth/invitations").then((r) => {
+    openInvitations = { at: Date.now(), items: r.items };
+    return r.items;
+  });
+}
+
+/** How long the shell's "Invitations (n)" trusts its last read. */
+export const OPEN_INVITATIONS_TTL_MS = 5 * 60_000;
+let openInvitations: { at: number; items: MyInvitation[] } | null = null;
+
+/** The shell's count: read at most once per five minutes, however often the window is focused. */
+export function myInvitationsCached(): Promise<MyInvitation[]> {
+  if (openInvitations && Date.now() - openInvitations.at < OPEN_INVITATIONS_TTL_MS) {
+    return Promise.resolve(openInvitations.items);
+  }
+  return myInvitations();
+}
+
+/** After an accept or decline, or a sign-out: the next read goes to the server. */
+export function forgetMyInvitations(): void {
+  openInvitations = null;
+}
+
+export function acceptMyInvitation(id: string): Promise<InvitationAccepted> {
+  forgetMyInvitations();
+  return api<InvitationAccepted>("auth", `/auth/invitations/${id}/accept`, {
+    method: "POST",
+    credentials: true,
+  });
+}
+
+export function declineMyInvitation(id: string): Promise<void> {
+  forgetMyInvitations();
+  return api<void>("auth", `/auth/invitations/${id}/decline`, { method: "POST" });
 }
 
 // ── room devices ──────────────────────────────────────────────────────
