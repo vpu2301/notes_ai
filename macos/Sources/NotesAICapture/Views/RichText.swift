@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // MARK: - Markdown-lite → blocks
@@ -283,6 +284,7 @@ enum RichText {
 // MARK: - Rendering
 
 /// A note section, typeset: headings, nested bullets, checklists, quotes and small tables as real structure.
+/// Runs of text blocks are one text view each, so a drag selects across lines like a document.
 struct RichTextView: View {
     let text: String
     var size: CGFloat = 13.5
@@ -293,6 +295,41 @@ struct RichTextView: View {
 
     private var blocks: [RichBlock] { RichText.parse(text) }
 
+    /// Consecutive text blocks share one selectable flow; a rule or table stands alone.
+    private enum Segment: Identifiable {
+        case flow([RichBlock])
+        case single(RichBlock)
+
+        var id: Int {
+            switch self {
+            case .flow(let blocks): return blocks[0].id
+            case .single(let block): return block.id
+            }
+        }
+        var first: RichBlock {
+            switch self {
+            case .flow(let blocks): return blocks[0]
+            case .single(let block): return block
+            }
+        }
+    }
+
+    private var segments: [Segment] {
+        var out: [Segment] = []
+        var run: [RichBlock] = []
+        for block in blocks {
+            switch block.kind {
+            case .rule, .table:
+                if !run.isEmpty { out.append(.flow(run)); run = [] }
+                out.append(.single(block))
+            default:
+                run.append(block)
+            }
+        }
+        if !run.isEmpty { out.append(.flow(run)) }
+        return out
+    }
+
     var body: some View {
         if blocks.isEmpty {
             Text(placeholder)
@@ -300,26 +337,22 @@ struct RichTextView: View {
                 .foregroundStyle(DS.muted)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
+            let all = blocks
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
-                    row(block, after: index == 0 ? nil : blocks[index - 1].kind)
+                ForEach(segments) { segment in
+                    let index = segment.first.id
+                    Group {
+                        switch segment {
+                        case .flow(let run):
+                            SelectableFlow(blocks: run, size: size, lineExtra: lineExtra, gap: gap)
+                        case .single(let block):
+                            single(block.kind)
+                        }
+                    }
+                    .padding(.top, gap(before: segment.first.kind, after: index == 0 ? nil : all[index - 1].kind))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    @ViewBuilder
-    private func row(_ block: RichBlock, after previous: RichBlockKind?) -> some View {
-        if let raw = block.raw, let extra = lineExtra?(raw) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                content(block.kind)
-                extra
-            }
-            .padding(.top, gap(before: block.kind, after: previous))
-        } else {
-            content(block.kind)
-                .padding(.top, gap(before: block.kind, after: previous))
         }
     }
 
@@ -338,37 +371,8 @@ struct RichTextView: View {
     }
 
     @ViewBuilder
-    private func content(_ kind: RichBlockKind) -> some View {
+    private func single(_ kind: RichBlockKind) -> some View {
         switch kind {
-        case .heading(let level, let spans):
-            Text(attributed(spans, size: level == 3 ? size + 1 : size, weight: .semibold))
-                .font(.dsDisplay(level == 3 ? size + 1 : size, .semibold))
-                .foregroundStyle(level == 3 ? DS.text1 : DS.text2)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-        case .paragraph(let spans):
-            body(spans)
-
-        case .item(let item):
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                marker(item)
-                body(item.spans)
-            }
-            .padding(.leading, CGFloat(item.depth) * 16)
-
-        case .quote(let spans):
-            HStack(spacing: 10) {
-                Rectangle()
-                    .fill(DS.line)
-                    .frame(width: 2)
-                body(spans, color: DS.text2)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-
-        case .rule:
-            DSDivider()
-
         case .table(let head, let rows):
             VStack(alignment: .leading, spacing: 0) {
                 tableRow(head, header: true)
@@ -380,6 +384,8 @@ struct RichTextView: View {
             .overlay(
                 RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
                     .strokeBorder(DS.line, lineWidth: DS.hairline))
+        default:
+            DSDivider()
         }
     }
 
@@ -389,52 +395,11 @@ struct RichTextView: View {
                 Text(attributed(cell, size: size - 1, weight: header ? .semibold : .regular))
                     .font(.ds(size - 1, header ? .semibold : .regular))
                     .foregroundStyle(header ? DS.text2 : DS.text1)
+                    .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
             }
-        }
-    }
-
-    private func body(_ spans: [RichSpan], color: Color = DS.text1) -> some View {
-        Text(attributed(spans, size: size, weight: .regular))
-            .font(.ds(size))
-            .foregroundStyle(color)
-            .lineSpacing(3)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// Three bullet glyphs, one per level (filled, hollow, dash), and a real box for a checklist.
-    @ViewBuilder
-    private func marker(_ item: RichListItem) -> some View {
-        if let done = item.done {
-            Image(systemName: done ? "checkmark.square.fill" : "square")
-                .font(.system(size: size - 1.5, weight: .regular))
-                .foregroundStyle(done ? DS.accent : DS.text3)
-                .frame(width: 14, alignment: .leading)
-        } else if item.ordered {
-            Text("\(item.number ?? 1).")
-                .font(.ds(size - 1.5))
-                .monospacedDigit()
-                .foregroundStyle(DS.muted)
-                .frame(width: 16, alignment: .trailing)
-        } else {
-            bulletGlyph(depth: item.depth)
-                .frame(width: 14, alignment: .leading)
-        }
-    }
-
-    @ViewBuilder
-    private func bulletGlyph(depth: Int) -> some View {
-        switch depth {
-        case 0:
-            Circle().fill(DS.muted).frame(width: 4, height: 4).offset(y: -1)
-        case 1:
-            Circle().strokeBorder(DS.muted, lineWidth: 1).frame(width: 5, height: 5).offset(y: -1)
-        default:
-            Rectangle().fill(DS.muted).frame(width: 6, height: 1.5).offset(y: -3)
         }
     }
 
@@ -453,5 +418,186 @@ struct RichTextView: View {
             out.append(run)
         }
         return out
+    }
+}
+
+// MARK: - One selectable flow
+
+/// Headings, paragraphs, list items and quotes as one read-only text view. The
+/// evidence chip of a line rides at its end as a live view, never as text, so
+/// copying a line never carries it along.
+private struct SelectableFlow: NSViewRepresentable {
+    let blocks: [RichBlock]
+    let size: CGFloat
+    let lineExtra: ((String) -> AnyView?)?
+    let gap: (RichBlockKind, RichBlockKind?) -> CGFloat
+
+    /// What the text view was last built from; the chips update themselves, so
+    /// only a change here rebuilds (and an open evidence popover stays open).
+    struct Key: Equatable {
+        var blocks: [RichBlock]
+        var size: CGFloat
+        var extras: [Bool]
+    }
+
+    final class Coordinator {
+        var key: Key?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSTextView {
+        let view = FlowTextView(usingTextLayoutManager: true)
+        view.isEditable = false
+        view.isSelectable = true
+        view.drawsBackground = false
+        view.isRichText = true
+        view.textContainerInset = .zero
+        view.textContainer?.lineFragmentPadding = 0
+        view.textContainer?.widthTracksTextView = true
+        view.isVerticallyResizable = false
+        view.isHorizontallyResizable = false
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return view
+    }
+
+    func updateNSView(_ view: NSTextView, context: Context) {
+        let extras = blocks.map { block in block.raw.flatMap { lineExtra?($0) } }
+        let key = Key(blocks: blocks, size: size, extras: extras.map { $0 != nil })
+        guard key != context.coordinator.key else { return }
+        context.coordinator.key = key
+        view.textStorage?.setAttributedString(build(extras))
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView view: NSTextView, context: Context) -> CGSize? {
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? 480
+        view.textContainer?.size = NSSize(width: width, height: .greatestFiniteMagnitude)
+        guard let layout = view.textLayoutManager else { return nil }
+        layout.ensureLayout(for: layout.documentRange)
+        return CGSize(width: width, height: ceil(layout.usageBoundsForTextContainer.height))
+    }
+
+    // MARK: Typesetting
+
+    private static let marker: CGFloat = 21
+
+    private func build(_ extras: [AnyView?]) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        for (index, block) in blocks.enumerated() {
+            let style = NSMutableParagraphStyle()
+            style.paragraphSpacingBefore = index == 0 ? 0 : gap(block.kind, blocks[index - 1].kind)
+            let line = NSMutableAttributedString()
+            switch block.kind {
+            case .heading(let level, let spans):
+                let size = level == 3 ? self.size + 1 : self.size
+                line.append(runs(spans, size: size, weight: .semibold, color: level == 3 ? DS.text1 : DS.text2))
+            case .paragraph(let spans):
+                style.lineSpacing = 3
+                line.append(runs(spans, size: size, weight: .regular, color: DS.text1))
+            case .item(let item):
+                let lead = CGFloat(item.depth) * 16
+                style.lineSpacing = 3
+                style.firstLineHeadIndent = lead
+                style.headIndent = lead + Self.marker
+                style.tabStops = [NSTextTab(textAlignment: .left, location: lead + Self.marker)]
+                line.append(marker(item))
+                line.append(runs(item.spans, size: size, weight: .regular, color: DS.text1))
+            case .quote(let spans):
+                style.lineSpacing = 3
+                style.firstLineHeadIndent = 12
+                style.headIndent = 12
+                line.append(runs(spans, size: size, weight: .regular, color: DS.text2))
+            case .rule, .table:
+                continue
+            }
+            if let extra = extras[index] {
+                line.append(NSAttributedString(string: " ", attributes: [.font: Self.font(size, .regular)]))
+                line.append(NSAttributedString(attachment: HostedAttachment(extra, font: Self.font(size, .regular))))
+            }
+            if index < blocks.count - 1 { line.append(NSAttributedString(string: "\n")) }
+            line.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: line.length))
+            out.append(line)
+        }
+        return out
+    }
+
+    /// Three bullet glyphs, one per level (filled, hollow, dash), a box for a checklist, the number for an ordered item.
+    private func marker(_ item: RichListItem) -> NSAttributedString {
+        let glyph: String
+        var color = DS.muted
+        if let done = item.done {
+            glyph = done ? "☑" : "☐"
+            color = done ? DS.accent : DS.text3
+        } else if item.ordered {
+            glyph = "\(item.number ?? 1)."
+        } else {
+            glyph = ["•", "◦", "–"][min(item.depth, 2)]
+        }
+        return NSAttributedString(string: glyph + "\t", attributes: [
+            .font: Self.font(size - 1.5, .regular),
+            .foregroundColor: NSColor(color),
+        ])
+    }
+
+    private func runs(_ spans: [RichSpan], size: CGFloat, weight: Font.Weight, color: Color) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        for span in spans {
+            var font = Self.font(size, span.bold ? .semibold : weight)
+            if span.code {
+                font = .monospacedSystemFont(ofSize: size - 1.5, weight: .regular)
+            } else if span.italic {
+                font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+            }
+            out.append(NSAttributedString(string: span.text, attributes: [
+                .font: font,
+                .foregroundColor: NSColor(color),
+            ]))
+        }
+        return out
+    }
+
+    private static func font(_ size: CGFloat, _ weight: Font.Weight) -> NSFont {
+        NSFont(name: DSType.face(weight), size: size) ?? .systemFont(ofSize: size)
+    }
+}
+
+/// Copies plain words only: the chips are attachments and stay behind.
+private final class FlowTextView: NSTextView {
+    override func copy(_ sender: Any?) {
+        guard let storage = textStorage else { return }
+        let words = selectedRanges.map { storage.attributedSubstring(from: $0.rangeValue).string }
+            .joined(separator: "\n")
+            .replacingOccurrences(of: " \u{FFFC}", with: "")
+            .replacingOccurrences(of: "\u{FFFC}", with: "")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(words, forType: .string)
+    }
+}
+
+/// A SwiftUI view laid out inline in the text, sized to fit and centred on the line.
+private final class HostedAttachment: NSTextAttachment {
+    let host: NSHostingView<AnyView>
+
+    init(_ content: AnyView, font: NSFont) {
+        host = NSHostingView(rootView: content)
+        super.init(data: nil, ofType: nil)
+        let fit = host.fittingSize
+        host.frame.size = fit
+        bounds = CGRect(x: 0, y: (font.capHeight - fit.height) / 2, width: fit.width, height: fit.height)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func viewProvider(
+        for parentView: NSView?, location: NSTextLocation, textContainer: NSTextContainer?
+    ) -> NSTextAttachmentViewProvider? {
+        HostedProvider(textAttachment: self, parentView: parentView,
+                       textLayoutManager: textContainer?.textLayoutManager, location: location)
+    }
+}
+
+private final class HostedProvider: NSTextAttachmentViewProvider {
+    override func loadView() {
+        view = (textAttachment as? HostedAttachment)?.host
     }
 }

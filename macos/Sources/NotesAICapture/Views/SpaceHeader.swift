@@ -53,7 +53,7 @@ struct SpaceHeaderBar: View {
     private var people: some View {
         HStack(spacing: -6) {
             ForEach(members.prefix(Self.shown)) { member in
-                DSAvatar(name: member.title, size: 22)
+                DSAvatar(name: member.title, size: 22, collaborator: true)
                     .overlay(Circle().strokeBorder(DS.bg, lineWidth: 1.5))
             }
             if members.count > Self.shown {
@@ -78,7 +78,7 @@ struct SpaceHeaderBar: View {
                 .padding(.bottom, 4)
             ForEach(members) { member in
                 HStack(spacing: 10) {
-                    DSAvatar(name: member.title, size: 24)
+                    DSAvatar(name: member.title, size: 24, collaborator: true)
                     Text(member.title)
                         .font(.ds(13))
                         .foregroundStyle(DS.text1)

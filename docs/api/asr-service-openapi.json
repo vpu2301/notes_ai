@@ -2530,7 +2530,7 @@
   "paths": {
     "/asr/jobs": {
       "get": {
-        "description": "One view for every caller. Reachable by a member with `asr.read`\nand by a tenant_admin with only `stats.read` (job counts and\nthroughput for the business dashboard). The row carries no\ntranscript content; the transcript itself stays behind `asr.read`\non the result endpoint.",
+        "description": "One view for every caller. Reachable by a member with `asr.read`\nand by a tenant_admin with only `stats.read` (job counts and\nthroughput for the business dashboard). The row carries no\ntranscript content; the transcript itself stays behind `asr.read`\non the result endpoint.\n\nW3: a job whose linked note hides the transcript from the caller is\nleft out unless the caller requested it. If that check is unavailable\nthe list fails closed to the caller's own jobs.",
         "operationId": "list_jobs_asr_jobs_get",
         "parameters": [
           {

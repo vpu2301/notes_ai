@@ -1,5 +1,5 @@
 // The document engine's status for one note. The client polls only while the run is live.
-import { api, apiBlob, BASES } from "./http";
+import { api, apiBlob } from "./http";
 import type { GeneratedItem, GenerationView } from "./types";
 
 export function getGeneration(noteId: string): Promise<GenerationView> {
@@ -28,13 +28,13 @@ export interface AudioClip {
   expires_at_unix: number;
 }
 
-/** A playable clip; the URL carries its own short-lived token for `<audio>`. */
+/** A playable clip as an object URL. The stream needs the bearer header, which `<audio>` cannot send. */
 export async function createClip(noteId: string, startMs: number, endMs: number): Promise<string> {
   const clip = await api<AudioClip>("note", "/v1/audio-clips", {
     method: "POST",
     json: { note_id: noteId, start_ms: Math.max(0, Math.round(startMs)), end_ms: Math.round(endMs) },
   });
-  return clip.clip_url.startsWith("http") ? clip.clip_url : `${BASES.note}${clip.clip_url}`;
+  return URL.createObjectURL(await apiBlob("note", clip.clip_url));
 }
 
 /** A key date as a calendar file. */

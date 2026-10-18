@@ -2,7 +2,7 @@ import type React from "react";
 import { useEffect, useState } from "react";
 import { getPresence, heartbeatPresence } from "../api/notes";
 import type { PresenceViewer } from "../api/types";
-import { speakerInitials, speakerTint } from "../lib/speakers";
+import { collabTint, speakerInitials } from "../lib/speakers";
 
 /** Heartbeat and re-read on one timer while the tab is visible; the server forgets a viewer 45 s after their last beat. */
 export const PRESENCE_MS = 20_000;
@@ -53,8 +53,8 @@ export function PresenceAvatars({ noteId }: { noteId: string }) {
       {viewers.slice(0, SHOWN).map((v) => (
         <span
           key={v.sub}
-          className="speaker-avatar presence-avatar"
-          style={{ "--tint": speakerTint(v.display_name) } as React.CSSProperties}
+          className="speaker-avatar presence-avatar collab-avatar"
+          style={{ "--tint": collabTint(v.display_name) } as React.CSSProperties}
           aria-hidden="true"
         >
           {speakerInitials(v.display_name)}

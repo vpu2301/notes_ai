@@ -271,6 +271,7 @@ _ENTITY_TABLES: tuple[str, ...] = (
     "tenant_invitations",  # workspace invitation (0072; app_role SELECT, tenant_writer writes)
     "note_comments",  # comment on a note (0074; cascades with the note)
     "note_collaborators",  # per-note role (0073; cascades with the note)
+    "note_relocations",  # where a moved note went (0077; app_role SELECT, written by 0078's function)
 )
 
 
@@ -405,6 +406,21 @@ async def test_every_entity_table_isolates_tenants(
                 author_a,
             )
 
+        # Relocation stubs are written only inside move_note_to_workspace (0078).
+        su = await asyncpg.connect(su_dsn)
+        try:
+            await su.execute(
+                "INSERT INTO note_relocations (note_id, tenant_id, to_tenant_id, moved_by, old_code,"
+                " new_code, was_workspace_visible, author_team) VALUES ($1,$2,$3,$4,'N-1','N-2',"
+                " false, ARRAY[$4]::uuid[])",
+                uuid4(),
+                a,
+                b,
+                author_a,
+            )
+        finally:
+            await su.close()
+
         # Invitations are written by tenant_writer only (auth-service), like memberships.
         inviter = uuid4()
         async with writer_pool.acquire() as w:
@@ -463,6 +479,9 @@ async def test_every_entity_table_isolates_tenants(
             await su.execute("DELETE FROM users WHERE tenant_id = ANY($1::uuid[])", [a, b])
             await su.execute(
                 "DELETE FROM tenant_invitations WHERE tenant_id = ANY($1::uuid[])", [a, b]
+            )
+            await su.execute(
+                "DELETE FROM note_relocations WHERE tenant_id = ANY($1::uuid[])", [a, b]
             )
             await su.execute("DELETE FROM identities WHERE email LIKE 'rls-%@example.test'")
             await su.execute("DELETE FROM tenants WHERE id = ANY($1::uuid[])", [a, b])

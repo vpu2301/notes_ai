@@ -57,6 +57,12 @@ class NoteRow:
     collaborators: dict[UUID, str] = field(default_factory=dict)
     # W3: "Include transcript" for view/comment collaborators and guests.
     transcript_shared: bool = False
+    # W5: default | author | backfill — `author` is a choice nothing else overrides.
+    visibility_source: str = "default"
+    # W5: ready | rehoming (moved, media still on its way) | failed.
+    media_state: str = "ready"
+    copied_from_note_id: UUID | None = None
+    copied_from_tenant_id: UUID | None = None
 
 
 @dataclass(slots=True)
@@ -91,6 +97,8 @@ async def fetch_note(
                n.title, n.created_at, n.updated_at, n.finalized_at,
                n.cancelled_at, n.source_session_id, n.source_asr_job_id,
                n.visibility, n.shared_with_ids, n.deleted_at, n.transcript_shared,
+               n.visibility_source, n.media_state,
+               n.copied_from_note_id, n.copied_from_tenant_id,
                ARRAY(
                    SELECT c.user_sub::text || ':' || c.role::text
                      FROM note_collaborators c
@@ -131,6 +139,10 @@ async def fetch_note(
         deleted_at=row["deleted_at"],
         collaborators=_collaborators(row["collaborators"]),
         transcript_shared=bool(row["transcript_shared"]),
+        visibility_source=str(row["visibility_source"]),
+        media_state=str(row["media_state"]),
+        copied_from_note_id=row["copied_from_note_id"],
+        copied_from_tenant_id=row["copied_from_tenant_id"],
     )
 
 
@@ -145,12 +157,22 @@ def _collaborators(packed: list[str] | None) -> dict[UUID, str]:
 # ── Visibility, sharing, delete ──────────────────────────────────────
 
 
-async def set_visibility(conn: asyncpg.Connection, *, note_id: UUID, visibility: str) -> None:
+async def set_visibility(
+    conn: asyncpg.Connection, *, note_id: UUID, visibility: str, source: str = "author"
+) -> None:
+    """``source``: who decided (W5) — ``author`` for a person, ``backfill`` for the ops script."""
     await conn.execute(
-        "UPDATE notes SET visibility = $2::note_visibility, updated_at = now() WHERE id = $1",
+        "UPDATE notes SET visibility = $2::note_visibility, visibility_source = $3,"
+        " updated_at = now() WHERE id = $1",
         note_id,
         visibility,
+        source,
     )
+
+
+async def set_visibility_source(conn: asyncpg.Connection, *, note_id: UUID, source: str) -> None:
+    """Record who chose the current visibility without changing it (W5 backfill)."""
+    await conn.execute("UPDATE notes SET visibility_source = $2 WHERE id = $1", note_id, source)
 
 
 async def upsert_collaborator(
@@ -835,6 +857,12 @@ async def create_note_with_v1(
     title_source: str | None = None,
     # W3: `domain.visibility.default_for_new_note`; None keeps the column default (private).
     visibility: str | None = None,
+    # W5: "author" when the client sent an explicit choice.
+    visibility_source: str = "default",
+    # W5: a copy's provenance.
+    copied_from_note_id: UUID | None = None,
+    copied_from_tenant_id: UUID | None = None,
+    version_metadata: dict[str, Any] | None = None,
 ) -> tuple[UUID, UUID]:
     """Two-step insert (ADR-0020):
 
@@ -854,10 +882,11 @@ async def create_note_with_v1(
         INSERT INTO notes (
             tenant_id, code, status, primary_author_id, co_author_ids,
             template_id, template_schema_version,
-            title, source_session_id, source_asr_job_id, title_source, visibility
+            title, source_session_id, source_asr_job_id, title_source, visibility,
+            visibility_source, copied_from_note_id, copied_from_tenant_id
         )
         VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10,
-                coalesce($11, 'private')::note_visibility)
+                coalesce($11, 'private')::note_visibility, $12, $13, $14)
         RETURNING id
         """,
         tenant_id,
@@ -871,6 +900,9 @@ async def create_note_with_v1(
         source_asr_job_id,
         title_source,
         visibility,
+        visibility_source,
+        copied_from_note_id,
+        copied_from_tenant_id,
     )
 
     version_id: UUID = await conn.fetchval(
@@ -886,7 +918,7 @@ async def create_note_with_v1(
         primary_author_id,
         json.dumps(content.model_dump(mode="json")),
         rendered,
-        json.dumps({"body_hash": body_hash}),
+        json.dumps({"body_hash": body_hash, **(version_metadata or {})}),
     )
 
     await conn.execute(

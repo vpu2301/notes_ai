@@ -104,6 +104,29 @@ async def emit_budget_reached(
     return True
 
 
+async def emit_workspace_notes_shared(
+    redis: Any, *, tenant_id: UUID, author_sub: UUID, count: int
+) -> None:
+    """W5 backfill: tell one author how many of their notes it opened to the workspace.
+    A count only; the client links to `?scope=mine&changed_by=backfill`."""
+    if not settings.notifications_enabled:
+        return
+    await publish_event(
+        redis,
+        build_event(
+            event_id=uuid4(),
+            tenant_id=tenant_id,
+            category=Category.WORKSPACE_NOTES_SHARED,
+            actor_user_id=None,
+            resource_type="tenant",
+            resource_id=tenant_id,
+            occurred_at=datetime.now(UTC),
+            recipient_hints=(author_sub,),
+            payload={"count": count},
+        ),
+    )
+
+
 async def emit_note_commented(
     redis: Any,
     *,

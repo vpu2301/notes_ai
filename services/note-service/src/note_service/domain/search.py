@@ -38,6 +38,8 @@ class SearchFilters:
     viewer_guest: bool = False
     # W3: all | mine (author team) | shared_with_me (visible to me, not mine).
     scope: str = "all"
+    # W5: "backfill" — the caller's notes the W5 script opened to the workspace (review list).
+    changed_by: str | None = None
 
 
 def _access_clauses(filters: SearchFilters, args: list[Any]) -> list[str]:
@@ -62,10 +64,12 @@ def _access_clauses(filters: SearchFilters, args: list[Any]) -> list[str]:
         out.append(granted)
     elif not filters.viewer_sees_all:
         out.append(f"(n.visibility = 'workspace' OR {mine} OR {granted})")
-    if filters.scope == "mine":
+    if filters.scope == "mine" or filters.changed_by == "backfill":
         out.append(mine)
     elif filters.scope == "shared_with_me":
         out.append(f"NOT {mine}")
+    if filters.changed_by == "backfill":
+        out.append("n.visibility_source = 'backfill'")
     return out
 
 
@@ -107,6 +111,8 @@ class SearchHit:
     has_public_link: bool = False
     # Live recipient disputes, for the "1 disputed" dot.
     open_disputes: int = 0
+    # W5: default | author | backfill.
+    visibility_source: str = "default"
 
 
 def encode_cursor(*, created_at: datetime, note_id: UUID) -> str:
@@ -190,7 +196,7 @@ async def search_notes(
             n.id, n.code, n.title, n.status, n.template_id,
             n.primary_author_id, n.co_author_ids,
             n.created_at, n.updated_at,
-            n.visibility::text AS visibility,
+            n.visibility::text AS visibility, n.visibility_source,
             (SELECT count(*) FROM note_collaborators c WHERE c.note_id = n.id)
                 AS shared_with_count,
             {my_role_expr} AS my_collab_role,
@@ -233,6 +239,7 @@ async def search_notes(
                 my_collab_role=r["my_collab_role"],
                 has_public_link=r["has_public_link"],
                 open_disputes=int(r["open_disputes"] or 0),
+                visibility_source=r["visibility_source"],
             )
         )
     next_cursor: str | None = None

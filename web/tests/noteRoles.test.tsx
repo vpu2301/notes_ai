@@ -509,7 +509,7 @@ describe("note editor — levels", () => {
     expect(screen.queryByRole("tab", { name: /transcript/i })).toBeNull();
     expect(screen.queryByRole("tab", { name: /client version/i })).toBeNull();
     await openMenu();
-    expect(screen.queryByRole("menuitem", { name: /share…/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^share$/i })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: /delete note/i })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: /copy job id/i })).toBeNull();
     // The transcript the server refused is never probed for.
@@ -529,14 +529,13 @@ describe("note editor — levels", () => {
     expect(screen.queryByText(/you can (comment on|view) this note/i)).toBeNull();
     expect(screen.getByRole("tab", { name: /transcript/i })).toBeInTheDocument();
     await openMenu();
-    expect(screen.queryByRole("menuitem", { name: /share…/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^share$/i })).toBeNull();
   });
 
   it("manage: Share is offered", async () => {
     editor(envelope({ my_level: "manage", primary_author_id: ME, can_read_transcript: true }));
     await screen.findByRole("button", { name: /^edit decisions$/i });
-    await openMenu();
-    expect(screen.getByRole("menuitem", { name: /share…/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^share$/i })).toBeInTheDocument();
   });
 
   it("a 404 on the transcript hides the tab", async () => {

@@ -377,7 +377,19 @@ struct NoteView: View {
         }
 
         // Notes, the transcript, and what a client would see — the web's tabs, in order.
-        DSSegmentedPill(options: tabOptions, selection: $model.tab, height: 36)
+        DSUnderlineTabs(options: tabOptions, selection: $model.tab)
+            .overlay(alignment: .trailing) {
+                // The whole note as Markdown — title and sections, never the transcript.
+                if model.tab == .notes, model.content != nil {
+                    Button {
+                        copy(model.markdown())
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(DSButtonStyle(kind: .ghost, size: 12, height: 26))
+                    .help("Copy the note")
+                }
+            }
             .padding(.bottom, 20)
             .onChange(of: model.hasTranscript) { _, has in
                 if !has, model.tab == .transcript { model.tab = .notes }
@@ -609,10 +621,9 @@ struct NoteView: View {
             }
             // How much of a generated note to show, names the engine respelled, and what the last meeting left open.
             if model.generated {
-                DSSegmentedPill(
+                DSPillChoice(
                     options: NoteViewModel.DetailLevel.allCases.map { .init($0, label: $0.label) },
-                    selection: Binding(get: { model.detail }, set: { model.setDetail($0) }),
-                    height: 26)
+                    selection: Binding(get: { model.detail }, set: { model.setDetail($0) }))
                 .accessibilityLabel("How much to show")
             }
             if model.generated, model.editableNow {

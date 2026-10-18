@@ -140,7 +140,7 @@ struct NoteShareSheet: View {
 
     private func personRow(_ person: NotePerson) -> some View {
         HStack(spacing: 10) {
-            DSAvatar(name: person.title, size: 28)
+            DSAvatar(name: person.title, size: 28, collaborator: true)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(person.title)

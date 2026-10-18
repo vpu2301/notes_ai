@@ -557,6 +557,8 @@ button.stat-card:hover .stat-i { color: var(--accent); }
 .save-status[data-state="saving"] .dot { background: var(--warn); animation: pulse 1s ease-in-out infinite; }
 .save-status[data-state="dirty"] .dot { background: var(--warn); }
 .save-status[data-state="error"] .dot { background: var(--rec); }
+/* The note bar only speaks up while saving or when something is wrong. */
+.doc-bar .save-status[data-state="saved"] { display: none; }
 
 /* ─── Skeletons ─────────────────────────────────────────────────────────── */
 .skeleton {

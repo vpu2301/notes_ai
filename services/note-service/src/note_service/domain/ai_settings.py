@@ -61,6 +61,8 @@ class SettingsRow:
     acknowledged: list[dict[str, Any]] | None = None
     monthly_budget_cents: int | None = None
     updated_at: datetime | None = None
+    # A Personal workspace has one member, its owner: nobody else to agree for them.
+    personal: bool = False
 
     @property
     def acknowledged_keys(self) -> set[tuple[str, str]]:
@@ -86,6 +88,7 @@ def _row(record: asyncpg.Record) -> SettingsRow:
         acknowledged=json.loads(raw) if isinstance(raw, str) else (raw or []),
         monthly_budget_cents=record["monthly_budget_cents"],
         updated_at=record["updated_at"],
+        personal=record.get("kind") == "personal",
     )
 
 
@@ -98,9 +101,14 @@ _COLUMNS: Final = (
 async def fetch(conn: asyncpg.Connection, *, tenant_id: UUID) -> SettingsRow:
     """This workspace's settings, or the platform default (no row is normal)."""
     record = await conn.fetchrow(
-        f"SELECT {_COLUMNS} FROM workspace_model_settings WHERE tenant_id = $1", tenant_id
+        f"SELECT {_COLUMNS}, (SELECT kind FROM tenants WHERE id = $1) AS kind"
+        " FROM workspace_model_settings WHERE tenant_id = $1",
+        tenant_id,
     )
-    return _row(record) if record is not None else SettingsRow(tenant_id=tenant_id)
+    if record is not None:
+        return _row(record)
+    kind = await conn.fetchval("SELECT kind FROM tenants WHERE id = $1", tenant_id)
+    return SettingsRow(tenant_id=tenant_id, personal=kind == "personal")
 
 
 async def upsert(
@@ -206,7 +214,10 @@ def may_choose_premium(plan: str | None) -> bool:
 def missing_acknowledgement(
     row: SettingsRow, required: list[Processor], offered: list[dict[str, Any]] | None
 ) -> list[Processor]:
-    """Processors this change would introduce that nobody has agreed to; empty means allowed."""
+    """Processors this change would introduce that nobody has agreed to; empty means allowed.
+    Never any in a Personal workspace: the owner decides alone."""
+    if row.personal:
+        return []
     agreed = row.acknowledged_keys | {
         (str(p.get("name", "")).strip().casefold(), str(p.get("region", "")).strip().casefold())
         for p in (offered or [])

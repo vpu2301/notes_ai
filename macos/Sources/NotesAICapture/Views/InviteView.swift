@@ -151,7 +151,7 @@ struct InviteView: View {
 
     private func pendingRow(_ invite: Invitation) -> some View {
         HStack(spacing: 9) {
-            DSAvatar(name: invite.email, size: 26)
+            DSAvatar(name: invite.email, size: 26, collaborator: true)
             VStack(alignment: .leading, spacing: 0) {
                 Text(invite.email)
                     .font(.ds(12.5, .medium))
@@ -396,7 +396,7 @@ private struct MemberRow: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            DSAvatar(name: member.email ?? member.title, size: 26)
+            DSAvatar(name: member.email ?? member.title, size: 26, collaborator: true)
             VStack(alignment: .leading, spacing: 0) {
                 Text(member.title)
                     .font(.ds(12.5, .medium))

@@ -22,7 +22,8 @@ from db import tenant_connection
 
 from .. import audit_kinds
 from ..deps import get_state, requires_any
-from ..domain import access, query_expansion
+from ..domain import access, query_expansion, relocation
+from ..domain import notes_repository as repo
 from ..domain import search as searchmod
 from ..domain.pii_redactor import is_author_team, redact_snippet
 
@@ -71,6 +72,9 @@ class SearchHitDTO(BaseModel):
     # W3: what the caller may do with it, and how many people hold a per-note grant.
     my_level: str | None = None
     collaborator_count: int | None = None
+    # W5: who recorded it ("" when they are no longer a member) and who chose its visibility.
+    author_display: str = ""
+    visibility_source: str | None = None
 
 
 class SearchResponse(BaseModel):
@@ -109,6 +113,13 @@ async def search_notes(
             description="W3: all | mine (you are an author) | shared_with_me (visible to you, not yours)",
         ),
     ] = "all",
+    changed_by: Annotated[
+        str | None,
+        Query(
+            pattern="^backfill$",
+            description="W5: `backfill` — your notes the W5 backfill made visible to the workspace",
+        ),
+    ] = None,
 ) -> SearchResponse:
     state = get_state()
     started = time.perf_counter()
@@ -132,6 +143,7 @@ async def search_notes(
         viewer_sees_all=access.sees_whole_tenant(claims),
         viewer_guest=access.is_guest(claims),
         scope=scope,
+        changed_by=changed_by,
     )
     _scope_metric.add(1, {"scope": scope, "role": "guest" if filters.viewer_guest else "member"})
 
@@ -155,6 +167,14 @@ async def search_notes(
 
         # `stats.read` alone gets counts and timings; `note.read` gets the full list.
         content_read = can_claims(claims, "note.read", "note")
+        # W5: one profile lookup per page for the distinct authors (≤ limit subs).
+        authors: dict[UUID, str] = {}
+        if content_read and hits:
+            subs = list(dict.fromkeys(h.primary_author_id for h in hits))
+            authors = {m.sub: m.display_name for m in await repo.fetch_members(conn, subs=subs)}
+        if not hits and q and content_read:
+            # W5: a code that moved away answers where it went, to people who could see it here.
+            await relocation.raise_if_code_moved(conn, code=q.strip(), claims=claims)
 
     out: list[SearchHitDTO] = []
     for h in hits:
@@ -206,6 +226,8 @@ async def search_notes(
                     claims=claims,
                 ),
                 collaborator_count=h.shared_with_count,
+                author_display=authors.get(h.primary_author_id, ""),
+                visibility_source=h.visibility_source,
             )
         )
 

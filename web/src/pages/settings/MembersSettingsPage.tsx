@@ -1,3 +1,4 @@
+import type React from "react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError } from "../../api/http";
@@ -28,6 +29,7 @@ import { Select } from "../../components/Select";
 import { Skeleton } from "../../components/Skeleton";
 import { useToast } from "../../components/Toaster";
 import { messageFor } from "../../lib/errorCopy";
+import { collabTint } from "../../lib/speakers";
 import { timeUntil } from "../../lib/time";
 import { Problem } from "./AccountSettingsPage";
 
@@ -284,7 +286,11 @@ export function MembersSettingsPage() {
               const roleOptions = isOwner ? OWNER_ROLES : [...ROLES];
               return (
                 <div className="row" key={m.user_sub} title={ownerBlocked[m.user_sub]}>
-                  <span className="avatar member-avatar" aria-hidden="true">
+                  <span
+                    className="avatar member-avatar collab-avatar"
+                    style={{ "--tint": collabTint(nameOf(m)) } as React.CSSProperties}
+                    aria-hidden="true"
+                  >
                     {nameOf(m).trim().charAt(0).toUpperCase()}
                   </span>
                   <div className="grow">

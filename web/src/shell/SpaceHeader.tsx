@@ -5,7 +5,7 @@ import { listMembers } from "../api/tenants";
 import { roleLabel, workspaceLabel, type TenantMember } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { HomeIcon, UserPlusIcon } from "../components/icons";
-import { speakerInitials, speakerTint } from "../lib/speakers";
+import { collabTint, speakerInitials } from "../lib/speakers";
 
 /** Personal workspaces get a house, team ones their first letter in a circle. */
 export function WorkspaceMark({ kind, name }: { kind?: string; name: string }) {
@@ -80,8 +80,8 @@ export function SpacePeople() {
             {members.slice(0, SHOWN).map((m) => (
               <span
                 key={m.user_sub}
-                className="speaker-avatar presence-avatar"
-                style={{ "--tint": speakerTint(nameOf(m)) } as React.CSSProperties}
+                className="speaker-avatar presence-avatar collab-avatar"
+                style={{ "--tint": collabTint(nameOf(m)) } as React.CSSProperties}
                 aria-hidden="true"
               >
                 {speakerInitials(nameOf(m))}
@@ -102,8 +102,8 @@ export function SpacePeople() {
                 {members.map((m) => (
                   <li key={m.user_sub}>
                     <span
-                      className="speaker-avatar"
-                      style={{ "--tint": speakerTint(nameOf(m)) } as React.CSSProperties}
+                      className="speaker-avatar collab-avatar"
+                      style={{ "--tint": collabTint(nameOf(m)) } as React.CSSProperties}
                       aria-hidden="true"
                     >
                       {speakerInitials(nameOf(m))}

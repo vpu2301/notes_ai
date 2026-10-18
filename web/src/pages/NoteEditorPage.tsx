@@ -12,7 +12,6 @@ import {
 } from "../api/asr";
 import { ApiError } from "../api/http";
 import {
-  createPublicLink,
   deleteNote,
   downloadPdf,
   getItems,
@@ -24,14 +23,11 @@ import {
   listVersions,
   needsReadPurpose,
   notesBySourceJob,
-  revokePublicLink,
   setItemStatus,
-  setVisibility,
   updateDraft,
 } from "../api/notes";
 import type {
   FieldMetadata,
-  LinkView,
   ItemView,
   NameSource,
   NameSuggestion,
@@ -66,7 +62,6 @@ import { ResponsesPanel } from "../components/ResponsesPanel";
 import {
   AlertIcon,
   ArrowLeftIcon,
-  CalendarIcon,
   CheckIcon,
   CommentIcon,
   CopyIcon,
@@ -74,15 +69,10 @@ import {
   FileDownIcon,
   FolderIcon,
   FolderPlusIcon,
-  GlobeIcon,
   HistoryIcon,
-  LinkOffIcon,
-  MailIcon,
-  ShareIcon,
   SparkleIcon,
   TrashIcon,
   UserIcon,
-  UsersIcon,
 } from "../components/icons";
 import { Menu, type MenuItem } from "../components/Menu";
 import { RichText, type LineExtra } from "../components/RichText";
@@ -108,8 +98,7 @@ import { pickableNames, segmentIndicesOf, speakerInitials, speakerTint } from ".
 import { SpeakerRoster, useOnline } from "../components/SpeakerRoster";
 import { NameSuggestionChip } from "../components/NameSuggestionChip";
 import { copyText, movedAnnouncement } from "../i18n/speakers";
-import { PublicLinkDialog } from "../components/PublicLinkDialog";
-import { ShareDialog, publicLinkUrl } from "../components/ShareDialog";
+import { ShareDialog } from "../components/ShareDialog";
 import { CommentsPanel, NOTE_ANCHOR, useComments, type CommentAnchor } from "../components/CommentsPanel";
 import { PresenceAvatars } from "../components/PresenceAvatars";
 import { canCommentNote, canEditNote, canManageNote, readOnlyStrip } from "../lib/noteLevel";
@@ -1504,13 +1493,12 @@ export function NoteEditorPage() {
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmMarkDone, setConfirmMarkDone] = useState(false);
-  const [showShare, setShowShare] = useState<false | "people" | "client" | "any">(false);
+  const [showShare, setShowShare] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** Who may manage/delete and whether a public link exists; null until read (then everything is offered). */
   const [sharing, setSharing] = useState<SharingView | null>(null);
   // A link made from the ⋯ menu opens its modal; an existing one is just copied.
-  const [madeLink, setMadeLink] = useState<LinkView | null>(null);
   const [askReset, setAskReset] = useState(0);
   const [chatCount, setChatCount] = useState(0);
   const [showComments, setShowComments] = useState(false);
@@ -1794,17 +1782,23 @@ export function NoteEditorPage() {
     }
   };
 
+  /** The note as Markdown — title and sections, never the transcript. */
+  const shownMarkdown = () =>
+    shownContent && sections
+      ? noteToMarkdown({
+          title: shownContent.title ?? "",
+          code: note?.code ?? "",
+          updatedAt: note?.updated_at,
+          sections: noteBlocks(shownContent, sections, { editable: false }).map((block) => ({
+            name: block.title ?? "",
+            text: block.section.text ?? "",
+          })),
+        })
+      : null;
+
   const onMarkdown = () => {
-    if (!shownContent || !sections) return;
-    const md = noteToMarkdown({
-      title: shownContent.title ?? "",
-      code: note?.code ?? "",
-      updatedAt: note?.updated_at,
-      sections: noteBlocks(shownContent, sections, { editable: false }).map((block) => ({
-        name: block.title ?? "",
-        text: block.section.text ?? "",
-      })),
-    });
+    const md = shownMarkdown();
+    if (md === null) return;
     saveBlob(new Blob([md], { type: "text/markdown;charset=utf-8" }), `${fileBase()}.md`);
   };
 
@@ -1851,35 +1845,6 @@ export function NoteEditorPage() {
     }
   };
 
-  /** A sharing change from the menu; the sheet does the same calls with its own feedback. */
-  const sharingAction = async (run: () => Promise<SharingView>, done?: string) => {
-    setBusy(true);
-    try {
-      setSharing(await run());
-      if (done) toast.success(done);
-    } catch (err) {
-      toast.error(messageFor(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onPublicLink = async () => {
-    if (sharing?.public_link) {
-      await copyToClipboard(publicLinkUrl(sharing.public_link.path), "Public link copied");
-      return;
-    }
-    setBusy(true);
-    try {
-      const view = await createPublicLink(noteId);
-      setSharing(view);
-      if (view.public_link) setMadeLink(view.public_link);
-    } catch (err) {
-      toast.error(messageFor(err));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const confirmedOpen = items.filter((i) => i.status === "open" && i.counts.confirms > 0 && i.counts.disputes === 0);
   const onMarkAllDone = async () => {
@@ -2054,51 +2019,25 @@ export function NoteEditorPage() {
   // A level from the envelope decides; an older server falls back to the sharing read.
   const canManage = myLevel ? canManageNote(myLevel) : (sharing?.can_manage ?? true);
   const canDelete = canManage && (sharing?.can_delete ?? true);
-  const hasLink = sharing?.public_link != null;
   const levelStrip = viewing ? null : readOnlyStrip(myLevel);
+  // Sharing lives behind the bar's Share button only; the menu keeps document actions.
   const menu: MenuItem[] = [
-    ...(canManage ? [{ label: "Share…", icon: <ShareIcon size={14} />, onClick: () => setShowShare("any") }] : []),
     {
       label: "Copy link",
       icon: <CopyIcon size={14} />,
       onClick: () => void copyToClipboard(`${window.location.origin}/notes/${noteId}`, "Link copied"),
     },
   ];
-  // Sharing actions are the manager's; anyone else does not see them at all.
   if (!viewing && note.status !== "cancelled" && canManage) {
-    menu.push(
-      { label: "Share with client…", icon: <UsersIcon size={14} />, sep: true, disabled: busy, onClick: () => setShowShare("client") },
-      {
-        label: "Mark all confirmed items done",
-        icon: <CheckIcon size={14} />,
-        disabled: busy || confirmedOpen.length === 0,
-        onClick: () => {
-          setActionError(null);
-          setConfirmMarkDone(true);
-        },
+    menu.push({
+      label: "Mark all confirmed items done",
+      icon: <CheckIcon size={14} />,
+      disabled: busy || confirmedOpen.length === 0,
+      onClick: () => {
+        setActionError(null);
+        setConfirmMarkDone(true);
       },
-      {
-        label: "Visible to everyone in the workspace",
-        icon: <UsersIcon size={14} />,
-        checked: sharing?.visibility === "workspace",
-        disabled: busy || !sharing,
-        onClick: () =>
-          void sharingAction(
-            () => setVisibility(noteId, sharing?.visibility === "workspace" ? "private" : "workspace"),
-            sharing?.visibility === "workspace" ? "Only people it is shared with can open it" : "Everyone in the workspace can open it",
-          ),
-      },
-      { label: hasLink ? "Copy public link" : "Create public link", icon: <GlobeIcon size={14} />, disabled: busy, onClick: () => void onPublicLink() },
-      { label: "Send by email…", icon: <MailIcon size={14} />, disabled: busy, onClick: () => setShowShare("people") },
-    );
-    if (hasLink) {
-      menu.push({
-        label: "Turn off public link",
-        icon: <LinkOffIcon size={14} />,
-        disabled: busy,
-        onClick: () => void sharingAction(() => revokePublicLink(noteId), "Public link turned off"),
-      });
-    }
+    });
   }
   menu.push(
     { label: showVersions ? "Hide history" : "History", icon: <HistoryIcon size={14} />, sep: true, onClick: () => void toggleVersions() },
@@ -2119,14 +2058,15 @@ export function NoteEditorPage() {
   if (!viewing && chatCount > 0) {
     menu.push({ label: "Clear chat", icon: <SparkleIcon size={14} />, sep: true, onClick: () => setAskReset((k) => k + 1) });
   }
+  menu.push({ label: `Copy note code (${note.code})`, icon: <CopyIcon size={14} />, sep: true, onClick: () => void copyToClipboard(note.code, "Note code copied") });
   if (jobId) {
-    menu.push({ label: "Copy job ID", icon: <CopyIcon size={14} />, sep: true, onClick: () => void copyToClipboard(jobId, "Job ID copied") });
+    menu.push({ label: "Copy job ID", icon: <CopyIcon size={14} />, onClick: () => void copyToClipboard(jobId, "Job ID copied") });
   }
   if (!viewing && canDelete) {
     menu.push({
       label: "Delete note",
       icon: <TrashIcon size={14} />,
-      sep: !jobId,
+      sep: true,
       danger: true,
       disabled: busy,
       onClick: () => {
@@ -2137,6 +2077,16 @@ export function NoteEditorPage() {
   }
 
   const authorName = note.primary_author_name?.trim() || "a colleague";
+  const tabsShown = hasTranscript || hasResponsesTab || isDraft;
+  const detailToggle = generated ? (
+    <DetailToggle
+      value={detail}
+      onChange={(next) => {
+        setDetail(next);
+        writeDetail(noteId, next);
+      }}
+    />
+  ) : null;
 
   return (
     <div className="doc-wrap">
@@ -2189,6 +2139,11 @@ export function NoteEditorPage() {
               {saveLabel}
             </span>
           )}
+          {canManage && !viewing && (
+            <button className="btn sm doc-share" onClick={() => setShowShare(true)}>
+              Share
+            </button>
+          )}
           <Menu items={menu} />
         </div>
 
@@ -2197,26 +2152,14 @@ export function NoteEditorPage() {
           disabled={!editable}
           onChange={(title) => onContentChange({ ...shownContent, title })}
         />
+        {/* One quiet line: when, what kind, where it is filed, and whose when it is not mine. */}
         <div className="doc-meta">
-          <span className="doc-pill" title={`Created ${formatDateTime(note.created_at)}`}>
-            <CalendarIcon size={13} />
+          <span className="doc-pill" title={`Updated ${relativeTime(note.updated_at)}`}>
             {formatDateTime(note.created_at)}
           </span>
-          <span className="doc-pill" title={`Updated ${formatDateTime(note.updated_at)}`}>
-            Updated {relativeTime(note.updated_at)}
-          </span>
-          {/* A collaborator's note is not "Me"; whose it is shows in Share. */}
-          {(readPurpose || !identity || note.primary_author_id === identity.id) && (
-            <span className="doc-pill">
-              <UserIcon size={13} />
-              {readPurpose ? authorName : "Me"}
-            </span>
-          )}
           <DocTypePill templateName={templateName} recordingType={recordingType} />
           {!guest && <SpacePill noteId={noteId} />}
-          <span className="doc-pill mono" title="This note's code">
-            {note.code}
-          </span>
+          {readPurpose && <span className="doc-pill">{authorName}</span>}
         </div>
 
         {conflict && (
@@ -2240,42 +2183,56 @@ export function NoteEditorPage() {
           </div>
         )}
 
-        {(hasTranscript || hasResponsesTab || isDraft) && (
-          <div className="tabs doc-tabs" role="tablist">
-            <button className={`tab ${tab === "notes" ? "on" : ""}`} role="tab" aria-selected={tab === "notes"} onClick={() => setTab("notes")}>
-              Notes
-            </button>
-            {hasTranscript && (
+        {tabsShown && (
+          <div className="doc-tabs-row">
+            <div className="tabs doc-tabs" role="tablist">
+              <button className={`tab ${tab === "notes" ? "on" : ""}`} role="tab" aria-selected={tab === "notes"} onClick={() => setTab("notes")}>
+                Notes
+              </button>
+              {hasTranscript && (
+                <button
+                  className={`tab ${tab === "transcript" ? "on" : ""}`}
+                  role="tab"
+                  aria-selected={tab === "transcript"}
+                  onClick={() => setTab("transcript")}
+                >
+                  Transcript
+                </button>
+              )}
+              {hasResponsesTab && (
+                <button
+                  className={`tab ${tab === "responses" ? "on" : ""}`}
+                  role="tab"
+                  aria-selected={tab === "responses"}
+                  onClick={() => setTab("responses")}
+                >
+                  Responses{responseCount > 0 && <span className="count">{responseCount}</span>}
+                </button>
+              )}
+              {/* Before sending anything, see what they will actually get. */}
+              {canManage && (
+                <button
+                  className={`tab ${tab === "client" ? "on" : ""}`}
+                  role="tab"
+                  aria-selected={tab === "client"}
+                  onClick={() => setTab("client")}
+                >
+                  Client version
+                </button>
+              )}
+            </div>
+            {tab === "notes" && shownContent && (
               <button
-                className={`tab ${tab === "transcript" ? "on" : ""}`}
-                role="tab"
-                aria-selected={tab === "transcript"}
-                onClick={() => setTab("transcript")}
+                className="btn ghost sm note-copy"
+                onClick={() => {
+                  const md = shownMarkdown();
+                  if (md !== null) void copyToClipboard(md, "Note copied");
+                }}
               >
-                Transcript
+                <CopyIcon size={14} /> Copy
               </button>
             )}
-            {hasResponsesTab && (
-              <button
-                className={`tab ${tab === "responses" ? "on" : ""}`}
-                role="tab"
-                aria-selected={tab === "responses"}
-                onClick={() => setTab("responses")}
-              >
-                Responses{responseCount > 0 && <span className="count">{responseCount}</span>}
-              </button>
-            )}
-            {/* Before sending anything, see what they will actually get. */}
-            {canManage && (
-              <button
-                className={`tab ${tab === "client" ? "on" : ""}`}
-                role="tab"
-                aria-selected={tab === "client"}
-                onClick={() => setTab("client")}
-              >
-                Client version
-              </button>
-            )}
+            {tab === "notes" && detailToggle}
           </div>
         )}
 
@@ -2356,15 +2313,7 @@ export function NoteEditorPage() {
                   : undefined
               }
             />
-            {generated && (
-              <DetailToggle
-                value={detail}
-                onChange={(next) => {
-                  setDetail(next);
-                  writeDetail(noteId, next);
-                }}
-              />
-            )}
+            {!tabsShown && detailToggle}
             {generated && editable && (
               <CorrectionsPanel noteId={noteId} rows={genRows} version={version} onChanged={load} />
             )}
@@ -2518,7 +2467,6 @@ export function NoteEditorPage() {
           noteTitle={shownContent.title ?? ""}
           tenantId={activeTenantId}
           meSub={identity?.id}
-          initialFocus={showShare === "any" ? undefined : showShare}
           owner={
             identity && note.primary_author_id === identity.id
               ? { name: identity.display_name, email: identity.email, isMe: true }
@@ -2527,15 +2475,6 @@ export function NoteEditorPage() {
                 : undefined
           }
           onClose={() => setShowShare(false)}
-        />
-      )}
-      {madeLink && (
-        <PublicLinkDialog
-          noteId={noteId}
-          noteTitle={shownContent.title ?? ""}
-          link={madeLink}
-          onChange={setSharing}
-          onClose={() => setMadeLink(null)}
         />
       )}
     </div>

@@ -212,6 +212,26 @@ _SPECS: Final[tuple[CategorySpec, ...]] = (
         digest_eligible=False,
     ),
     CategorySpec(
+        category=Category.NOTE_MOVED,
+        # The author team, named by the producer, when someone else moved their note.
+        recipient_rule=RecipientRule.EXPLICIT_HINTS,
+        default_in_app=True,
+        default_email_mode=EmailMode.OFF,
+        severity=Severity.INFO,
+        digest_eligible=False,
+    ),
+    CategorySpec(
+        category=Category.WORKSPACE_NOTES_SHARED,
+        # One per (author, workspace) from the W5 backfill script.
+        recipient_rule=RecipientRule.EXPLICIT_HINTS,
+        default_in_app=True,
+        default_email_mode=EmailMode.OFF,
+        severity=Severity.INFO,
+        digest_eligible=False,
+        # System-raised: the author is the recipient, not an actor to exclude.
+        exclude_actor=False,
+    ),
+    CategorySpec(
         category=Category.SYSTEM_DIGEST,
         recipient_rule=RecipientRule.EXPLICIT_HINTS,
         # The digest is an email; an in-app copy is noise.
