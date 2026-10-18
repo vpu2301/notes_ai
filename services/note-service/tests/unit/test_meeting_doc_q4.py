@@ -217,7 +217,7 @@ def test_a_speakers_own_forecast_is_theirs_and_says_so() -> None:
     )  # fmt: skip
     assert fact.attributed_to == "Fabian Reinbold"
     line = render.plain_line(fact, "de")
-    assert line == "- Das Aus für die Rente mit 63 wird abgeschwächt — laut Reinbold"
+    assert line == "- Das Aus für die Rente mit 63 wird abgeschwächt — laut Fabian Reinbold"
 
 
 def test_a_reported_position_is_held_by_who_the_speaker_reports() -> None:

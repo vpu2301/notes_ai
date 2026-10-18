@@ -103,7 +103,9 @@ def first_person(text: str) -> bool:
 
 def real_name(name: str | None) -> str | None:
     name = (name or "").strip()
-    return name if name and not _DEFAULT_NAME.match(name) else None
+    if not name or _DEFAULT_NAME.match(name) or not any(ch.isalpha() for ch in name):
+        return None
+    return name
 
 
 def _inside(start: int, end: int, adverts: Sequence[tuple[int, int]]) -> int:

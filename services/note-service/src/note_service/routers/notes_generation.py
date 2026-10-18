@@ -95,6 +95,13 @@ class GenerationView(BaseModel):
     """Q2 — what was left out, and how the facts cover the recording.
     Empty / null for generations made before Q2."""
     excluded_ranges: list[ExcludedRange] = []
+    """Why a finished note is not complete without missing minutes: ``summary_composed``,
+    ``topics_chapters``, ``claims_unverified``. Empty for complete and older generations."""
+    incomplete_reasons: list[str] = []
+    """The transcript revision it was written from, and the languages its lines were
+    spoken in (recording's first); empty for generations before multilingual evidence."""
+    transcript_rev: int | None = None
+    source_languages: list[str] = []
     coverage: Coverage | None = None
     """Q3 — what the recording was taken to be (``meeting``, ``podcast_broadcast``,
     ``lecture_webinar``, ``voice_memo``, …) and who decided: ``user`` (a
@@ -164,6 +171,14 @@ def _excluded(stats: dict) -> list[ExcludedRange]:
     return out
 
 
+def _source_languages(stats: dict) -> list[str]:
+    """Languages with spoken lines in this generation, the recording's first."""
+    languages = stats.get("languages") or {}
+    first = stats.get("recording_language")
+    spoken = [c for c, v in languages.items() if c != "unknown" and (v or {}).get("lines")]
+    return sorted(spoken, key=lambda c: (c != first, c))
+
+
 def _coverage(stats: dict) -> Coverage | None:
     thirds = stats.get("facts_by_third")
     if not isinstance(thirds, list) or len(thirds) != 3:
@@ -197,6 +212,9 @@ def _view(row: gen_repo.GenerationRow) -> GenerationView:
             else None
         ),
         excluded_ranges=_excluded(stats),
+        incomplete_reasons=[str(r) for r in stats.get("incomplete") or []],
+        transcript_rev=getattr(row, "transcript_rev", None),
+        source_languages=_source_languages(stats),
         coverage=_coverage(stats),
         recording_type=stats.get("recording_type"),
         recording_type_source=stats.get("recording_type_source"),

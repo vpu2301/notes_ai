@@ -4,7 +4,7 @@ against prompt injection. Truth is decided by :mod:`verify`, not here.
 
 from __future__ import annotations
 
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -77,6 +77,12 @@ NOISE_REASONS: Final[tuple[str, ...]] = (
     "artifact",
     "duplicate",
     "unrelated",
+)
+# Multilingual evidence offers no language reason. ``other_language`` stays in
+# NOISE_REASONS so saved exclusions and a model still sending it parse; it is advisory.
+OTHER_LANGUAGE: Final = "other_language"
+OFFERED_NOISE_REASONS: Final[tuple[str, ...]] = tuple(
+    r for r in NOISE_REASONS if r != OTHER_LANGUAGE
 )
 # Set by code only, never offered to the model.
 ADVERTISEMENT: Final = "advertisement"
@@ -223,9 +229,10 @@ def extract_schema(
     carried_items: int = 0,
     max_facts: int = MAX_FACTS_PER_WINDOW,
     noise: bool = True,
+    noise_reasons: tuple[str, ...] = NOISE_REASONS,
 ) -> dict[str, Any]:
     """The extraction schema for ONE family; ``noise=False`` (small-model profile)
-    drops the ``noise`` field. Built per call: the kind enum is the main lever on
+    drops the ``noise`` field, ``noise_reasons`` is the reason enum offered. Built per call: the kind enum is the main lever on
     a small model's accuracy."""
     properties: dict[str, Any] = {
         "kind": {"type": "string", "enum": list(kinds)},
@@ -293,7 +300,7 @@ def extract_schema(
                 "required": ["turn", "reason"],
                 "properties": {
                     "turn": {"type": "integer"},
-                    "reason": {"type": "string", "enum": list(NOISE_REASONS)},
+                    "reason": {"type": "string", "enum": list(noise_reasons)},
                 },
             },
         }
@@ -467,6 +474,123 @@ def figure_details_schema(count: int) -> dict[str, Any]:
                         "value": {"type": "string", "maxLength": 60},
                         "unit": {"type": "string", "maxLength": MAX_UNIT_CHARS},
                         "qualifier": {"type": "string", "maxLength": MAX_PERSON_FIELD_CHARS},
+                    },
+                },
+            }
+        },
+    }
+
+
+# The meaning check on a claim restated in another language than its line.
+SUPPORTED: Final = "supported"
+CONTRADICTED: Final = "contradicted"
+INSUFFICIENT: Final = "insufficient_evidence"
+MEANING_VERDICTS: Final[tuple[str, ...]] = (SUPPORTED, CONTRADICTED, INSUFFICIENT)
+MAX_VERDICT_REASON_CHARS: Final = 160
+MAX_VERDICT_LINES: Final = 5
+MAX_CLAIM_ID_CHARS: Final = 40
+
+
+class MeaningVerdict(BaseModel):
+    """One check, as 05-prompt-instructions.md specifies it. Bounds are checked here;
+    coverage and evidence membership by the caller."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    claim_id: str = Field(max_length=MAX_CLAIM_ID_CHARS)
+    verdict: Literal["supported", "contradicted", "insufficient_evidence"]
+    evidence_ids: list[str] = Field(default_factory=list, max_length=MAX_VERDICT_LINES)
+    reason: str = Field(default="", max_length=MAX_VERDICT_REASON_CHARS)
+    corrected_claim: str | None = Field(default=None, max_length=MAX_FACT_CHARS)
+
+
+class MeaningCheckOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    checks: list[MeaningVerdict] = Field(default_factory=list)
+
+
+def meaning_check_schema(count: int) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["checks"],
+        "properties": {
+            "checks": {
+                "type": "array",
+                "minItems": count,
+                "maxItems": count,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "claim_id",
+                        "verdict",
+                        "evidence_ids",
+                        "reason",
+                        "corrected_claim",
+                    ],
+                    "properties": {
+                        "claim_id": {"type": "string", "maxLength": MAX_CLAIM_ID_CHARS},
+                        "verdict": {"type": "string", "enum": list(MEANING_VERDICTS)},
+                        "evidence_ids": {
+                            "type": "array",
+                            "maxItems": MAX_VERDICT_LINES,
+                            "items": {"type": "string", "maxLength": MAX_CLAIM_ID_CHARS},
+                        },
+                        "reason": {"type": "string", "maxLength": MAX_VERDICT_REASON_CHARS},
+                        "corrected_claim": {
+                            "type": ["string", "null"],
+                            "maxLength": MAX_FACT_CHARS,
+                        },
+                    },
+                },
+            }
+        },
+    }
+
+
+# Deduplication (05-prompt-instructions.md): the relation between two candidate propositions.
+EQUIVALENT: Final = "equivalent"
+EXPLICIT_CORRECTION: Final = "explicit_correction"
+RELATIONS: Final[tuple[str, ...]] = (EQUIVALENT, EXPLICIT_CORRECTION, "contradiction", "distinct")
+
+
+class PairJudgement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    left_id: str = Field(max_length=MAX_CLAIM_ID_CHARS)
+    right_id: str = Field(max_length=MAX_CLAIM_ID_CHARS)
+    relation: Literal["equivalent", "explicit_correction", "contradiction", "distinct"]
+    reason: str = Field(default="", max_length=MAX_VERDICT_REASON_CHARS)
+    merged_text: str | None = Field(default=None, max_length=MAX_FACT_CHARS)
+
+
+class DeduplicationOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pairs: list[PairJudgement] = Field(default_factory=list)
+
+
+def deduplication_schema(count: int) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["pairs"],
+        "properties": {
+            "pairs": {
+                "type": "array",
+                "maxItems": count,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["left_id", "right_id", "relation", "reason", "merged_text"],
+                    "properties": {
+                        "left_id": {"type": "string", "maxLength": MAX_CLAIM_ID_CHARS},
+                        "right_id": {"type": "string", "maxLength": MAX_CLAIM_ID_CHARS},
+                        "relation": {"type": "string", "enum": list(RELATIONS)},
+                        "reason": {"type": "string", "maxLength": MAX_VERDICT_REASON_CHARS},
+                        "merged_text": {"type": ["string", "null"], "maxLength": MAX_FACT_CHARS},
                     },
                 },
             }

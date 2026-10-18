@@ -847,9 +847,100 @@ def pronoun_initial(text: str, language: str) -> bool:
 
 
 def real_name(name: str | None) -> str | None:
-    """A person's name — never a diarizer label or a default name."""
+    """A person's name — never a diarizer label, a default name or a bare number ("1")."""
     name = (name or "").strip()
-    return name if name and not _DEFAULT_SPEAKER.match(name) else None
+    if not name or _DEFAULT_SPEAKER.match(name) or not any(ch.isalpha() for ch in name):
+        return None
+    return name
+
+
+# ── Claims a word gate cannot vouch for ─────────────────────────────
+
+# Conditions, negations, comparisons, promises and modality: one changed word inverts
+# the claim while every other word still overlaps. Matched on the folded text.
+_RISK_WORDS: Final[dict[str, re.Pattern[str]]] = {
+    "en": re.compile(
+        r"\b(?:if|unless|only|provided|both|either|neither|not|no|never|none|nobody|without|"
+        r"more|less|fewer|than|most|least|higher|lower|promise[sd]?|pledge[sd]?|vow(?:s|ed)?|"
+        r"guarantee[sd]?|will|would|could|might|may|must|should|"
+        r"thousands?|millions?|billions?|trillions?|percent|dollars?|euros?)\b"
+    ),
+    "de": re.compile(
+        r"\b(?:wenn|falls|sofern|nur|beide[nmrs]?|sowohl|weder|nicht|kein(?:e[nmrs]?)?|nie|niemals|"
+        r"ohne|mehr|weniger|als|höher|niedriger|versprech\w*|versprich\w*|versproch\w*|"
+        r"zusag\w*|garantier\w*|wird|werden|würde[nt]?|könnte[nt]?|kann|soll(?:te)?|muss|müsste|"
+        r"tausend\w*|million\w*|milliard\w*|billion\w*|prozent|dollar|euro)\b"
+    ),
+    "uk": re.compile(
+        r"(?<!\w)(?:якщо|якби|лише|тільки|обидва|обидві|не|ні|ніколи|жоден|без|більше|менше|ніж|"
+        r"обіця\w*|пообіця\w*|гарант\w*|буде|будуть|би|може|можуть|мусить|має|"
+        r"тисяч\w*|мільйон\w*|мільярд\w*|трильйон\w*|відсот\w*|долар\w*|євро)(?!\w)"
+    ),
+}
+
+
+def high_risk(text: str, language: str) -> bool:
+    """A claim carrying money, a number, a condition, a negation, a comparison, a
+    promise or modality: its meaning is checked even when its words overlap."""
+    if any(ch.isdigit() for ch in text):
+        return True
+    pattern = _RISK_WORDS.get(language) or _RISK_WORDS["en"]
+    return pattern.search(_fold(text)) is not None
+
+
+_NEGATION: Final = re.compile(
+    r"(?<!\w)(?:not|no|never|none|nobody|without|n't|nicht|kein\w*|nie|niemals|ohne|"
+    r"не|ні|ніколи|жоден|жодн\w*|без)(?!\w)"
+)
+
+
+def negated(text: str) -> bool:
+    """The words negate something."""
+    return _NEGATION.search(_fold(text)) is not None
+
+
+_CONDITION: Final = re.compile(
+    r"(?<!\w)(?:if|unless|only if|provided|as long as|wenn|falls|sofern|nur wenn|solange|"
+    r"vorausgesetzt|якщо|якби|лише якщо|за умови)(?!\w)"
+)
+
+
+def conditional(text: str) -> bool:
+    """The words state a condition ("only if", "wenn", "якщо")."""
+    return _CONDITION.search(_fold(text)) is not None
+
+
+# Someone reported as holding a view: "X sagt/warnt/fordert", "according to X", "laut X".
+_REPORTING: Final = re.compile(
+    r"(?<!\w)(?:sag\w*|behaupt\w*|erklär\w*|warn\w*|forder\w*|versprech\w*|versprich\w*|"
+    r"befürcht\w*|mein\w*|kritisier\w*|betont\w*|laut|zufolge|"
+    r"says?|said|claims?|claimed|warns?|warned|argues?|argued|promis\w*|believes?|"
+    r"thinks?|fears?|told|according|states?|stated|expects?|expected|predicts?|estimates?|"
+    r"erwart\w*|rechne[nt]|schätz\w*|prognostizier\w*|очіку\w*|прогноз\w*|"
+    r"каже|сказа\w*|заяв\w*|вважа\w*|попереджа\w*|обіця\w*|словами)(?!\w)"
+)
+
+
+def reports(text: str) -> bool:
+    """The words report somebody else's view or speech."""
+    return _REPORTING.search(_fold(text)) is not None
+
+
+# "Speaker 2" as a reader says it; a holder with no name and no number is not written.
+_SPEAKER_WORD: Final[dict[str, str]] = {"en": "Speaker", "de": "Sprecher/in", "uk": "Спікер"}
+_SPEAKER_NUMBER: Final = re.compile(r"(?i)^(?:speaker[ _]?|sprecher(?:in)? |SPEAKER_)?(\d+)$")
+
+
+def display_actor(actor: str | None, language: str) -> str | None:
+    """The holder as written after "laut"/"according to": a real name whole (never cut
+    to its last word), a numbered label localized ("Sprecher/in 1"), else None."""
+    name = real_name(actor)
+    if name:
+        return name
+    number = _SPEAKER_NUMBER.match((actor or "").strip())
+    if number:
+        return f"{_SPEAKER_WORD.get(language, _SPEAKER_WORD['en'])} {number.group(1)}"
+    return None
 
 
 _CAPITAL_RUN: Final = re.compile(

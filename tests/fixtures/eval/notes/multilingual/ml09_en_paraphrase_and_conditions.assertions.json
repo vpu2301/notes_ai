@@ -1,0 +1,22 @@
+{
+ "id": "ml09_en_paraphrase_and_conditions",
+ "sentinel": "Same policy paraphrased twice → one proposition with combined evidence; two promises with different conditions remain separate",
+ "count_max": [
+  {
+   "match": [
+    "refund"
+   ],
+   "max": 1
+  }
+ ],
+ "must_contain_any": [
+  [
+   "Friday"
+  ],
+  [
+   "500",
+   "five hundred"
+  ]
+ ],
+ "excluded_language_ms_max": 0
+}

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import REPO, load_registry  # noqa: E402
+from _common import REPO, Paced, load_registry  # noqa: E402
 from notes_scoring import (  # noqa: E402
     copies_transcript,
     informs,
@@ -218,6 +218,40 @@ def check(
         found = (linted.get("unresolved") or {}) if linted is not None else None
         for code, limit in sorted(checklist["lint"].items()):
             add(f"lint[{code}]", found is not None and found.get(code, 0) <= int(limit), "lint")
+    # Multilingual evidence: a claim kept whole, cited to its original, never dropped for its language.
+    for i, groups in enumerate(checklist.get("same_line", [])):
+        add(
+            f"same_line[{i}]",
+            any(all(any(_has(ln["text"], m) for m in group) for group in groups) for ln in lines),
+            "same_line",
+        )
+    facts_by_id = {f.get("item_key"): f for f in produced.get("facts") or []}
+    for i, want in enumerate(checklist.get("source_cited", [])):
+        add(
+            f"source_cited[{i}]",
+            any(
+                any(_has(ln["text"], m) for m in want["match"])
+                and any(
+                    (facts_by_id.get(fid) or {}).get("source_language") == want["language"]
+                    for fid in ln.get("fact_ids") or []
+                )
+                for ln in lines
+            ),
+            "source_cited",
+        )
+    framing = " ".join(ln["text"] for ln in lines if ln.get("kind") in ("framing", "presenter"))
+    for i, forbidden in enumerate(checklist.get("framing_must_not_contain", [])):
+        add(f"framing_must_not_contain[{i}]", not _has(framing, forbidden), "framing")
+    for i, want in enumerate(checklist.get("count_max", [])):
+        hits = sum(1 for ln in lines if any(_has(ln["text"], m) for m in want["match"]))
+        add(f"count_max[{i}]", hits <= int(want["max"]), "count_max")
+    if "excluded_language_ms_max" in checklist:
+        add(
+            "excluded_language_ms_max",
+            int(stats.get("excluded_language_ms") or 0)
+            <= int(checklist["excluded_language_ms_max"]),
+            "excluded_language_ms_max",
+        )
     for i, topic in enumerate(checklist.get("topics", [])):
         under = [
             ln
@@ -281,6 +315,8 @@ ENGINE_CHECK_NAMES = frozenset(
         "overview.prose_paragraphs_min",
         "overview.bullets_above_first_heading",
         "excluded_reasons[0]",
+        # Decided by code: a language-only exclusion is the engine's, not the model's.
+        "excluded_language_ms_max",
     }
 )
 
@@ -297,7 +333,14 @@ def _scripted_provider() -> Any:
     return ScriptedProvider()
 
 
-async def main(backend_name: str, corpus: Path) -> int:
+async def main(
+    backend_name: str,
+    corpus: Path,
+    *,
+    multilingual: bool = False,
+    runs: int = 1,
+    fidelity: bool = False,
+) -> int:
     from notes_eval import EngineBlindError, run_pipeline
 
     from models import ProviderError, build_chat_provider
@@ -319,7 +362,7 @@ async def main(backend_name: str, corpus: Path) -> int:
         provider = _scripted_provider()
     else:
         resolved = load_registry().backend(backend_name, expect_kind="chat")
-        provider = build_chat_provider(resolved)
+        provider = Paced(build_chat_provider(resolved))
     failures = 0
     try:
         for path, checklist in cases:
@@ -327,30 +370,40 @@ async def main(backend_name: str, corpus: Path) -> int:
             gold = meeting.setdefault("gold", {})
             # The checklist's roster is what a person would have named.
             gold.setdefault("speakers", dict(checklist.get("speakers") or {}))
-            try:
-                produced = await run_pipeline(meeting, provider)
-            except (ProviderError, EngineBlindError) as exc:
-                print(f"{meeting['id']}: RUN FAILED ({type(exc).__name__})")
-                failures += 1
-                continue
-            shown = results = check(checklist, produced, meeting)
-            if backend_name == SCRIPTED:
-                results = [
-                    r
-                    for r in results
-                    if family(r[0]) in ENGINE_CHECKS or r[0] in ENGINE_CHECK_NAMES
-                ]
-            passed = sum(1 for _n, ok, _s in results if ok)
-            print(f"{meeting['id']}: {passed}/{len(results)} checks pass")
-            gated = {name for name, _ok, _s in results}
-            for name, ok, sprint in shown:
-                owner = f"  ({sprint})" if sprint else ""
-                codes = check_codes(name, checklist)
-                owner += f"  [{','.join(codes)}]" if codes else ""
-                verdict = ("PASS" if ok else "FAIL") if name in gated else "----"
-                note = "" if name in gated else "  (needs a model)"
-                print(f"  {verdict}  {name}{owner}{note}")
-            failures += len(results) - passed
+            for run in range(1, runs + 1):
+                label = f"{meeting['id']}" + (f" run {run}/{runs}" if runs > 1 else "")
+                try:
+                    produced = await run_pipeline(
+                        meeting, provider, multilingual=multilingual, fidelity=fidelity
+                    )
+                except (ProviderError, EngineBlindError) as exc:
+                    print(f"{label}: RUN FAILED ({type(exc).__name__})")
+                    failures += 1
+                    continue
+                shown = results = check(checklist, produced, meeting)
+                if backend_name == SCRIPTED:
+                    results = [
+                        r
+                        for r in results
+                        if family(r[0]) in ENGINE_CHECKS or r[0] in ENGINE_CHECK_NAMES
+                    ]
+                passed = sum(1 for _n, ok, _s in results if ok)
+                stats = produced.get("stats") or {}
+                print(
+                    f"{label}: {passed}/{len(results)} checks pass"
+                    f"  ({produced.get('seconds', 0):.0f}s, {produced.get('model_calls', 0)} calls,"
+                    f" {produced.get('input_tokens', 0)}+{produced.get('output_tokens', 0)} tokens,"
+                    f" meaning {stats.get('meaning_check') or {}})"
+                )
+                gated = {name for name, _ok, _s in results}
+                for name, ok, sprint in shown:
+                    owner = f"  ({sprint})" if sprint else ""
+                    codes = check_codes(name, checklist)
+                    owner += f"  [{','.join(codes)}]" if codes else ""
+                    verdict = ("PASS" if ok else "FAIL") if name in gated else "----"
+                    note = "" if name in gated else "  (needs a model)"
+                    print(f"  {verdict}  {name}{owner}{note}")
+                failures += len(results) - passed
     finally:
         if hasattr(provider, "aclose"):
             await provider.aclose()
@@ -361,5 +414,20 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--backend", required=True)
     ap.add_argument("--corpus", type=Path, default=REPO / "tests" / "fixtures" / "eval" / "notes")
+    ap.add_argument(
+        "--multilingual", action="store_true", help="as with MDX_NOTE_MULTILINGUAL_EVIDENCE=true"
+    )
+    ap.add_argument("--runs", type=int, default=1, help="every meeting this many times")
+    ap.add_argument("--fidelity", action="store_true", help="as with MDX_NOTE_FIDELITY=true")
     args = ap.parse_args()
-    sys.exit(asyncio.run(main(args.backend, args.corpus)))
+    sys.exit(
+        asyncio.run(
+            main(
+                args.backend,
+                args.corpus,
+                multilingual=args.multilingual,
+                runs=args.runs,
+                fidelity=args.fidelity,
+            )
+        )
+    )

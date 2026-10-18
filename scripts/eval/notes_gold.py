@@ -40,6 +40,16 @@ class Turn(_Model):
     t_start_ms: int = Field(ge=0)
     t_end_ms: int = Field(ge=0)
     text: str
+    # The language the ASR decoded this turn in, when not the meeting's (multilingual sentinels).
+    language: Literal["en", "de", "uk"] | None = None
+
+
+class NoiseMarker(_Model):
+    """A non-speech span the ASR marked (``result["noise"]``)."""
+
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+    kind: Literal["music", "noise", "silence"]
 
 
 class Action(_Model):
@@ -188,6 +198,9 @@ class Meeting(_Model):
     transcript: list[Turn]
     # Gold v3: the human-corrected transcript; faithfulness is scored against both.
     reference_transcript: list[Turn] | None = None
+    noise: list[NoiseMarker] = Field(default_factory=list)
+    # A person's explicit choice of note language (multilingual sentinels); absent = resolved.
+    output_language: Literal["en", "de", "uk"] | None = None
     gold: Gold
 
 

@@ -245,6 +245,9 @@ apps:
       MODELS_CONFIG: /app/config/models.yaml
       # Staging only (ADR-0060); prod stays off until precision >= 0.9.
       MDX_NOTE_ENTITY_MODEL_TIER: "true"
+      # Internal review of multilingual evidence; prod stays off until signed off.
+      MDX_NOTE_MULTILINGUAL_EVIDENCE: "true"
+      MDX_NOTE_FIDELITY: "true"
     secretEnv: [mdx-hf-endpoints]
     masterKey: true
     podLabels:

@@ -1,0 +1,31 @@
+{
+ "id": "ml05_de_interview_uk_quote",
+ "sentinel": "Ukrainian quote in a German interview: the source stays Ukrainian, the note is German",
+ "must_contain_any": [
+  [
+   "12",
+   "zwölf"
+  ],
+  [
+   "Bus"
+  ],
+  [
+   "Generator"
+  ]
+ ],
+ "source_cited": [
+  {
+   "language": "uk",
+   "match": [
+    "Bus"
+   ]
+  },
+  {
+   "language": "uk",
+   "match": [
+    "Generator"
+   ]
+  }
+ ],
+ "excluded_language_ms_max": 0
+}

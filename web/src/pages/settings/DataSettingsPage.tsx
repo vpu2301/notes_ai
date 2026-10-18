@@ -185,6 +185,11 @@ export function DataSettingsPage() {
             )}
           </section>
 
+          <p className="help">
+            The instructions and models used for each stage of note writing, and tests of changes to
+            them, are under <a href="/settings/ai-notes">AI notes</a>.
+          </p>
+
           <section className="card pad settings-card" aria-label="Automatic note writing">
             <h2 className="settings-h">Automatic note writing</h2>
             <p className="help">

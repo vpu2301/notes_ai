@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from collections.abc import Iterator
+from dataclasses import dataclass, field, fields
 from datetime import date, time
 from decimal import Decimal
 from typing import Final
@@ -52,6 +53,14 @@ FIRST_PERSON: Final = "first_person"
 DESCRIPTIVE: Final = "descriptive"
 # The text opens with a pronoun: evidence, never a line.
 SUBJECT_UNRESOLVED: Final = "subject_unresolved"
+# Restated in another language than its line was spoken in: the meaning check is
+# still to run (pending), or could not decide (unverified, kept for review).
+MEANING_PENDING: Final = "meaning_pending"
+MEANING_UNVERIFIED: Final = "meaning_unverified"
+# Merged into another fact (``VerifiedFact.also``): kept as one more source behind its lines.
+MERGED: Final = "merged"
+# Explicitly corrected by a later fact (which cites it): kept as evidence, never a line.
+SUPERSEDED: Final = "superseded"
 
 # Why a fact was dropped — counted in metrics and in the eval, never shown.
 DROPPED_QUOTE: Final = "dropped_quote"
@@ -149,6 +158,10 @@ class VerifiedFact:
     """The verified payload of a `figure` or an `introduction`."""
     figure: Figure | None = None
     person: Person | None = None
+    """The language its line was spoken in (ISO 639-1); None when not known."""
+    source_language: str | None = None
+    """Item keys of the facts merged into this one: every line citing it cites them too."""
+    also: tuple[str, ...] = ()
 
     @property
     def evidence_only(self) -> bool:
@@ -161,6 +174,8 @@ class VerifiedFact:
             or FIRST_PERSON in self.flags
             or DESCRIPTIVE in self.flags
             or SUBJECT_UNRESOLVED in self.flags
+            or MERGED in self.flags
+            or SUPERSEDED in self.flags
         )
 
     @property
@@ -482,14 +497,17 @@ def date_mentions(quote: str, *, meeting_date: date, language: str = "en") -> li
 
 
 def check_numbers(
-    text: str, *, quote: str, turn: Turn, language: str = "en"
+    text: str, *, quote: str, turn: Turn, language: str = "en", source_language: str | None = None
 ) -> tuple[str, list[str]]:
     """Every number in the text must have been said, in digits or in words;
-    an unsaid number is REMOVED from the text rather than dropping the fact."""
+    an unsaid number is REMOVED from the text rather than dropping the fact.
+    ``source_language``: the line's, when the text restates it in ``language``."""
     raw = f"{quote} {turn.text}"
     said = normalise_quote(raw)
     said_numbers = {n.replace(",", "").replace(".", "") for n in _NUMBER.findall(said)}
     said_values = set(numbers.numbers_in(raw, language))
+    if source_language and source_language != language:
+        said_values |= set(numbers.numbers_in(raw, source_language))
     flags: list[str] = []
     out = text
     for match in _NUMBER.findall(text):
@@ -611,6 +629,61 @@ class VerifyStats:
     subject_unresolved: int = 0
     introduction_fields_cleared: int = 0
     contact_steps: int = 0
+    """Facts restated across languages, sent to the meaning check instead of the word gate."""
+    cross_language: int = 0
+    """Same-language facts whose words passed but whose meaning is checked anyway (fidelity)."""
+    high_risk: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class FactTrace:
+    """What became of one extracted fact: the line it cited (numbers restart in a
+    coverage window, so ``start_ms`` places it), that line's language, and
+    ``verified`` or the counter that dropped it. Never text."""
+
+    window: int
+    line: int
+    kind: str
+    language: str | None
+    outcome: str
+    start_ms: int | None = None
+
+
+def _tally(stats: VerifyStats) -> dict[str, int]:
+    return {f.name: getattr(stats, f.name) for f in fields(stats) if f.name != "corrected"}
+
+
+def _traced(
+    facts: list[schema.Fact],
+    window: Window,
+    stats: VerifyStats,
+    out: list[VerifiedFact],
+    trace: list[FactTrace] | None,
+    recording_language: str | None,
+) -> Iterator[schema.Fact]:
+    """Each fact in turn; once its pass is over (kept or ``continue``), its outcome
+    goes to ``trace``: ``verified``, or the drop counter that rose."""
+    for fact in facts:
+        before, kept = _tally(stats), len(out)
+        yield fact
+        if trace is None:
+            continue
+        if len(out) > kept:
+            outcome = "verified"
+        else:
+            risen = [k for k, v in _tally(stats).items() if v > before[k]]
+            outcome = next((k for k in risen if "dropped" in k), risen[0] if risen else "dropped")
+        piece = window.turn(fact.turn)
+        trace.append(
+            FactTrace(
+                window=window.index,
+                line=fact.turn,
+                kind=fact.kind,
+                language=(piece.language or recording_language) if piece else None,
+                outcome=outcome,
+                start_ms=piece.start_ms if piece else None,
+            )
+        )
 
 
 # Echoed turn headers a small model copies into `text`: "[3] Anna (00:12):",
@@ -642,11 +715,22 @@ def verify_facts(
     language: str = "en",
     glossary: tuple[Term, ...] = (),
     recording_names: frozenset[str] = frozenset(),
+    multilingual: bool = False,
+    recording_language: str | None = None,
+    trace: list[FactTrace] | None = None,
+    fidelity: bool = False,
 ) -> list[VerifiedFact]:
     """One window's claims, checked; anything that fails is dropped.
 
     A kind outside ``allowed_kinds`` is dropped, never filed elsewhere.
     ``noise_lines`` are the CONFIRMED exclusions, never the model's raw flags.
+    ``multilingual``: a fact restated in ``language`` from a line spoken in another
+    (``Turn.language``, else ``recording_language``) skips the word gate and is kept
+    ``MEANING_PENDING`` for the meaning check; quote, numbers and kind are checked as
+    always. ``trace`` receives one :class:`FactTrace` per fact. ``fidelity``: a
+    decision, a commitment, a held view, or a claim or quote with money, a number, a
+    condition, a negation, a comparison, a promise or modality is ``MEANING_PENDING``
+    too, whatever its word overlap.
     """
     # Local import: prompts imports this module's normaliser (circular otherwise).
     from .prompts import echoes_example
@@ -654,7 +738,7 @@ def verify_facts(
     stats = stats or VerifyStats()
     allowed = allowed_kinds or frozenset(schema.FACT_KINDS)
     out: list[VerifiedFact] = []
-    for fact in facts:
+    for fact in _traced(facts, window, stats, out, trace, recording_language):
         if fact.kind not in allowed or not fact.text.strip():
             stats.dropped_quote += 1
             continue
@@ -740,8 +824,14 @@ def verify_facts(
             kind = schema.KEY_POINT
             stats.downgraded += 1
 
+        source_language = turn.language or recording_language or language
+        across = multilingual and source_language != language
         text, number_flags = check_numbers(
-            strip_turn_header(fact.text), quote=fact.quote, turn=turn, language=language
+            strip_turn_header(fact.text),
+            quote=fact.quote,
+            turn=turn,
+            language=language,
+            source_language=source_language,
         )
         if not text:
             stats.dropped_quote += 1
@@ -800,7 +890,11 @@ def verify_facts(
         if subject:
             known = known | {subject}
         paraphrase_flags: list[str] = []
-        if not by_payload and (
+        if across and not by_payload and not copied:
+            # Shared words cannot show a translation is faithful: the meaning check decides.
+            paraphrase_flags = [MEANING_PENDING]
+            stats.cross_language += 1
+        elif not by_payload and (
             support.support_ratio(text, said, language) < MIN_TEXT_SUPPORT
             or support.new_names(text, said, known)
         ):
@@ -850,6 +944,20 @@ def verify_facts(
         attributed, actor_fixes, _ = _correct(attributed, glossary, people, stats)
         corrections = [*corrections, *actor_fixes]
 
+        if (
+            fidelity
+            and not by_payload
+            and not copied
+            and MEANING_PENDING not in paraphrase_flags
+            and (
+                kind in _STRICT_KINDS
+                or fact.certainty in support.UNSURE_CERTAINTIES
+                or support.high_risk(text, language)
+                or support.high_risk(fact.quote, source_language)
+            )
+        ):
+            paraphrase_flags = [*paraphrase_flags, MEANING_PENDING]
+            stats.high_risk += 1
         flags = [
             *number_flags,
             *paraphrase_flags,
@@ -897,10 +1005,29 @@ def verify_facts(
                 copied=copied,
                 figure=figure,
                 person=person,
+                source_language=source_language,
             )
         )
         stats.kept += 1
     return out
+
+
+def settle_meaning(
+    fact: VerifiedFact, verdict: str | None, *, keep_rejected: bool = False
+) -> VerifiedFact | None:
+    """A ``MEANING_PENDING`` fact after the meaning check: ``supported`` clears the
+    flag, ``contradicted`` drops it (None) — or, ``keep_rejected``, keeps it for review —
+    and anything else (undecided, no answer, a failed check) keeps it ``MEANING_UNVERIFIED``."""
+    if MEANING_PENDING not in fact.flags:
+        return fact
+    if verdict == schema.CONTRADICTED and not keep_rejected:
+        return None
+    rest = [f for f in fact.flags if f != MEANING_PENDING]
+    if verdict != schema.SUPPORTED:
+        rest.append(MEANING_UNVERIFIED)
+    fact.flags = rest
+    fact.confidence = _confidence(fact.explicit, rest)
+    return fact
 
 
 # ── Figures, introductions, calls to action ────────────────────────
@@ -1362,7 +1489,8 @@ def _attribute(
     fact: schema.Fact, turn: Turn, window: Window, people: frozenset[str], stats: VerifyStats
 ) -> tuple[str | None, list[str]]:
     """``(attributed_to, flags)``."""
-    actor = accept_name(fact.attributed_to, window=window, known=people)
+    # A diarizer label or a number is nobody's name, however the roster spells it.
+    actor = support.real_name(accept_name(fact.attributed_to, window=window, known=people))
     if actor:
         stats.attribution_model += 1
         return actor, []
@@ -1422,7 +1550,13 @@ def resolve_side(
 
 
 def _confidence(explicit: bool, flags: list[str]) -> float:
-    if NUMBER_UNVERIFIED in flags or LOW_ASR_CONFIDENCE in flags or PARAPHRASE_UNSUPPORTED in flags:
+    if (
+        NUMBER_UNVERIFIED in flags
+        or LOW_ASR_CONFIDENCE in flags
+        or PARAPHRASE_UNSUPPORTED in flags
+        or MEANING_PENDING in flags
+        or MEANING_UNVERIFIED in flags
+    ):
         return CONF_FLAGGED
     if explicit:
         return CONF_EXPLICIT
@@ -1447,7 +1581,7 @@ class Exclusion:
 MAX_EXCLUDED_MS: Final = 10_000
 MAX_EXCLUDED_WORDS: Final = 12
 # Of speech time, per generation: above it, only exclusions code can
-# prove (another language, a duplicate) stand.
+# prove (a duplicate; another language too when multilingual evidence is off) stand.
 MAX_EXCLUDED_SHARE: Final = 0.02
 DUPLICATE_JACCARD: Final = 0.9
 MIN_OTHER_LANGUAGE_WORDS: Final = 20
@@ -1491,10 +1625,12 @@ def confirm_noise(
     window: Window,
     language: str,
     seen_pieces: tuple[str, ...] = (),
+    multilingual: bool = False,
 ) -> tuple[list[Exclusion], list[str]]:
     """``(confirmed exclusions, advisory reasons)`` for one window's flags: a flag
     that fails its reason's rule is counted, never acted on. ``seen_pieces`` are
-    the previous window's texts, for the duplicate rule. Pure."""
+    the previous window's texts, for the duplicate rule. ``multilingual``: a
+    language is never a reason, so ``other_language`` is always advisory. Pure."""
     confirmed: list[Exclusion] = []
     advisory: list[str] = []
     order = [t.number for t in window.turns]
@@ -1508,7 +1644,9 @@ def confirm_noise(
         if len(piece.text.split()) > total_words * schema.MAX_NOISE_SHARE:
             # Noise is marginal by definition: a line that is most of the window IS the recording.
             ok = False
-        elif reason == "other_language":
+        elif reason == schema.OTHER_LANGUAGE and multilingual:
+            ok = False
+        elif reason == schema.OTHER_LANGUAGE:
             # The ASR's per-segment language rules; the heuristic covers older artifacts.
             ok = (
                 piece.language != language
@@ -1531,13 +1669,17 @@ def confirm_noise(
     return confirmed, advisory
 
 
-def cap_exclusions(exclusions: list[Exclusion], *, speech_ms: int) -> tuple[list[Exclusion], int]:
+def cap_exclusions(
+    exclusions: list[Exclusion], *, speech_ms: int, multilingual: bool = False
+) -> tuple[list[Exclusion], int]:
     """``(what stands, how many were overridden)``: above ``MAX_EXCLUDED_SHARE`` of
-    the speech only provable exclusions (another language, a duplicate) stay out."""
+    the speech only provable exclusions (a duplicate; another language unless
+    ``multilingual``) stay out."""
     total = sum(max(0, e.end_ms - e.start_ms) for e in exclusions)
     if speech_ms <= 0 or total <= MAX_EXCLUDED_SHARE * speech_ms:
         return exclusions, 0
-    kept = [e for e in exclusions if e.reason in PROVABLE_REASONS]
+    provable = PROVABLE_REASONS - {schema.OTHER_LANGUAGE} if multilingual else PROVABLE_REASONS
+    kept = [e for e in exclusions if e.reason in provable]
     return kept, len(exclusions) - len(kept)
 
 

@@ -1,0 +1,23 @@
+{
+ "id": "ml02_de_short_en_quote",
+ "sentinel": "4-second relevant foreign quote: retained, no minimum-language-duration exclusion, negation kept",
+ "must_contain_any": [
+  [
+   "Preis"
+  ]
+ ],
+ "source_cited": [
+  {
+   "language": "en",
+   "match": [
+    "Preis"
+   ]
+  }
+ ],
+ "must_not_contain": [
+  "erhöht die Preise",
+  "Preise steigen",
+  "Preiserhöhung geplant"
+ ],
+ "excluded_language_ms_max": 0
+}

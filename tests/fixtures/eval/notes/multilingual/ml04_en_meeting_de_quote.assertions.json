@@ -1,0 +1,28 @@
+{
+ "id": "ml04_en_meeting_de_quote",
+ "sentinel": "German quote inside an English recording: same behaviour in the reverse direction",
+ "same_line": [
+  [
+   [
+    "35"
+   ],
+   [
+    "shift"
+   ]
+  ]
+ ],
+ "must_contain_any": [
+  [
+   "March"
+  ]
+ ],
+ "source_cited": [
+  {
+   "language": "de",
+   "match": [
+    "35"
+   ]
+  }
+ ],
+ "excluded_language_ms_max": 0
+}

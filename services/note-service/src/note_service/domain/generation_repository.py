@@ -47,12 +47,15 @@ class GenerationRow:
     error_kind: str | None
     created_at: datetime
     finished_at: datetime | None
+    """What this generation runs with, pinned at enqueue (S3); None for older rows."""
+    config_snapshot: dict[str, Any] | None = None
 
 
 _COLUMNS: Final = (
     "id, note_id, job_id, requested_by, reason, status, step, windows_total, "
     "windows_done, windows_failed, failed_ranges, prompt_version, backend, "
-    "model_id, transcript_rev, snapshot_key, stats, error_kind, created_at, finished_at"
+    "model_id, transcript_rev, snapshot_key, stats, error_kind, created_at, finished_at, "
+    "config_snapshot"
 )
 
 
@@ -84,6 +87,7 @@ def _row(record: asyncpg.Record) -> GenerationRow:
         error_kind=record["error_kind"],
         created_at=record["created_at"],
         finished_at=record["finished_at"],
+        config_snapshot=_loads(record["config_snapshot"], None),
     )
 
 
@@ -99,6 +103,7 @@ async def create(
     transcript_rev: int,
     snapshot_key: str | None,
     generation_id: UUID | None = None,
+    config_snapshot: dict[str, Any] | None = None,
 ) -> UUID:
     """Start a run. Raises ``UniqueViolationError`` when one is already live (the
     regenerate route's 409). ``generation_id`` MUST be the id the snapshot was
@@ -107,9 +112,10 @@ async def create(
         """
         INSERT INTO note_generations (
             id, tenant_id, note_id, job_id, requested_by, reason, status,
-            prompt_version, transcript_rev, snapshot_key
+            prompt_version, transcript_rev, snapshot_key, config_snapshot
         )
-        VALUES (COALESCE($9, gen_random_uuid()), $1, $2, $3, $4, $5, 'queued', $6, $7, $8)
+        VALUES (COALESCE($9, gen_random_uuid()), $1, $2, $3, $4, $5, 'queued', $6, $7, $8,
+                $10::jsonb)
         RETURNING id
         """,
         tenant_id,
@@ -121,6 +127,7 @@ async def create(
         transcript_rev,
         snapshot_key,
         generation_id,
+        json.dumps(config_snapshot) if config_snapshot is not None else None,
     )
     return stored
 

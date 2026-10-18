@@ -1,0 +1,42 @@
+{
+ "id": "ml03_de_codeswitch",
+ "language": "de",
+ "meeting_type": "auto",
+ "recorded_on": "2026-10-14",
+ "recording_type": "meeting",
+ "transcript": [
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 0,
+   "t_end_ms": 14000,
+   "text": "Kurzer Stand zum Projekt Kestrel. Das Backend ist fertig, die Lasttests laufen seit gestern stabil."
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 14000,
+   "t_end_ms": 30000,
+   "text": "Wir liefern das Release am Freitag aus, but only if the client signs the change order by Wednesday, sonst verschiebt sich alles um eine Woche."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 30000,
+   "t_end_ms": 40000,
+   "text": "Gut, dann schicke ich dem Kunden heute noch die Änderungsanforderung zur Unterschrift."
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 40000,
+   "t_end_ms": 48000,
+   "text": "Danke. Ich kümmere mich bis Donnerstag um die Release-Notes."
+  }
+ ],
+ "gold": {
+  "speakers": {
+   "SPEAKER_1": "Jonas Keller",
+   "SPEAKER_2": "Priya Nair"
+  },
+  "key_facts": [
+   "Das Release wird am Freitag ausgeliefert, nur wenn der Kunde die Änderungsanforderung bis Mittwoch unterschreibt; sonst verschiebt es sich um eine Woche."
+  ]
+ }
+}

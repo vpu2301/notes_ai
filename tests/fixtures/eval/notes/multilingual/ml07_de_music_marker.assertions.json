@@ -1,0 +1,16 @@
+{
+ "id": "ml07_de_music_marker",
+ "sentinel": "Non-speech/music marker: still handled as non-speech",
+ "excluded_reasons": [
+  "music"
+ ],
+ "must_contain_any": [
+  [
+   "Fähre"
+  ],
+  [
+   "400.000",
+   "400000"
+  ]
+ ]
+}

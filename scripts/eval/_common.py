@@ -69,3 +69,32 @@ def write_report(kind: str, backend: str, payload: dict[str, Any], *, suffix: st
     }
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return path
+
+
+class Paced:
+    """An eval provider that waits out a rate limit (``retry_after_s``, else 5/10/20/40 s)
+    instead of scoring a 429 as the model's answer. Never used by the service."""
+
+    WAITS = (5.0, 10.0, 20.0, 40.0)
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.rate_limited = 0
+
+    async def complete(self, *args: Any, **kwargs: Any) -> Any:
+        import asyncio
+
+        from models import ProviderError
+
+        for wait in (*self.WAITS, None):
+            try:
+                return await self._inner.complete(*args, **kwargs)
+            except ProviderError as exc:
+                if exc.kind != "rate_limited" or wait is None:
+                    raise
+                self.rate_limited += 1
+                await asyncio.sleep(exc.retry_after_s or wait)
+        raise AssertionError("unreachable")
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)

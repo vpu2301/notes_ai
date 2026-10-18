@@ -1611,3 +1611,42 @@ li:hover > span > .line-comment, p:hover > .line-comment, .line-comment:focus-vi
 .member-avatar { background: var(--accent-soft); color: var(--accent-text); margin-right: 10px; }
 .seat-meter { display: flex; flex-direction: column; gap: 4px; min-width: 180px; }
 .seat-meter .meter { height: 6px; max-width: 240px; }
+
+/* Settings › AI notes: profiles, the stage editor, A/B comparison. */
+.ai-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: calc(13.5px * var(--fs)); }
+.ai-facts dt { color: var(--text-2); }
+.ai-facts dd { margin: 0; color: var(--text-1); }
+.ai-editor-row { display: flex; flex-wrap: wrap; gap: calc(12px * var(--density)); align-items: flex-end; }
+.ai-editor-row .field { min-width: 160px; }
+.ai-stage-text { width: 100%; min-height: 240px; font-family: var(--font-mono, ui-monospace, monospace); font-size: calc(12.5px * var(--fs)); line-height: 1.5; resize: vertical; }
+.ai-stage-meta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.ai-problems { margin: 0; padding-left: 18px; }
+.ai-diff { border: var(--hairline) solid var(--line-2); border-radius: var(--radius-sm); padding: 8px 10px; font-family: var(--font-mono, ui-monospace, monospace); font-size: calc(12px * var(--fs)); max-height: 240px; overflow: auto; }
+.ai-diff-removed { color: var(--danger); white-space: pre-wrap; }
+.ai-diff-added { color: var(--accent-text); white-space: pre-wrap; }
+.ai-preview summary { cursor: pointer; font-weight: 600; }
+.ai-preview-head { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+.ai-preview-text { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; font-size: calc(12px * var(--fs)); max-height: 360px; overflow: auto; }
+.ai-search { display: flex; gap: 8px; }
+.ai-search .input { flex: 1; }
+.ai-hits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ai-compare-grid { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(300px, 1.4fr) minmax(300px, 1.4fr); gap: calc(14px * var(--density)); align-items: start; }
+.ai-pane { min-width: 0; border: var(--hairline) solid var(--line-2); border-radius: var(--radius); padding: 10px 12px; max-height: 70vh; overflow: auto; }
+.ai-topic { margin: 10px 0 4px; font-size: calc(13px * var(--fs)); color: var(--text-2); }
+.ai-line { display: block; width: 100%; text-align: left; background: none; border: 0; border-radius: var(--radius-sm); padding: 4px 6px; color: var(--text-1); font: inherit; cursor: pointer; }
+.ai-line:hover:not([disabled]), .ai-line[aria-pressed="true"] { background: var(--accent-soft); }
+.ai-line[disabled] { cursor: default; color: var(--text-2); }
+.ai-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ai-evidence { margin: 0 0 10px; }
+.ai-evidence blockquote { margin: 0 0 4px; padding-left: 10px; border-left: 3px solid var(--accent); }
+.ai-compare-tabs { display: none; gap: 4px; margin-bottom: 8px; }
+.ai-review { border: 0; padding: 0; margin: 12px 0 0; display: flex; flex-direction: column; gap: 10px; }
+.ai-findings { display: flex; flex-wrap: wrap; gap: 24px; }
+.ai-findings > div { display: flex; flex-direction: column; gap: 4px; }
+.ai-table-wrap { overflow-x: auto; }
+/* Narrow screens: the evidence and the two outputs are tabs, one at a time. */
+@media (max-width: 900px) {
+  .ai-compare-tabs { display: flex; }
+  .ai-compare-grid { grid-template-columns: 1fr; }
+  .ai-pane[data-shown="false"] { display: none; }
+}

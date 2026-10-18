@@ -137,7 +137,6 @@ def create_app() -> FastAPI:
         title="Dictation Service",
         description="Streaming ASR over WebSockets (dictation.v1).",
         version="0.4.0",
-        openapi_version="3.1.0",
         lifespan=_lifespan,
         docs_url="/docs",
         redoc_url="/redoc",

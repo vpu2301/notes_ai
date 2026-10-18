@@ -19,6 +19,8 @@ const REASONS: Record<string, string> = {
   no_snapshot: "The recording could not be read when the note was written.",
   snapshot_unreadable: "The recording could not be read when the note was written.",
   model_unavailable: "The model was unavailable. Try writing the note again.",
+  profile_incompatible:
+    "The workspace's AI notes settings are out of date, so this note was not written. An admin can fix it in Settings › AI notes.",
 };
 
 /**
@@ -181,8 +183,17 @@ export function GenerationStatus({
     return (
       <p className="banner banner-warn gen-status" role="status">
         <span className="grow">
-          Some of the recording could not be read{minutes ? ` (around minute ${minutes})` : ""}. The
-          rest of the note is written from what was readable.
+          {minutes || !view.incomplete_reasons?.length ? (
+            <>
+              Some of the recording could not be read{minutes ? ` (around minute ${minutes})` : ""}.
+              The rest of the note is written from what was readable.
+            </>
+          ) : (
+            <>
+              Parts of this note could not be fully verified. Unchecked points are offered for
+              review instead of being written as fact.
+            </>
+          )}
         </span>
         {canRegenerate && (
           <button className="btn sm" disabled={busy} onClick={() => void again()}>

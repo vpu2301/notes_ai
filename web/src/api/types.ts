@@ -1499,6 +1499,12 @@ export interface GenerationView {
   sections_written?: number | null;
   /** Stretches left out of the notes; empty for older generations. */
   excluded_ranges?: ExcludedRange[];
+  /** Why a finished note is incomplete with no missing minutes; empty for older generations. */
+  incomplete_reasons?: string[];
+  /** The transcript revision it was written from; absent from older servers. */
+  transcript_rev?: number | null;
+  /** Languages its lines were spoken in, the recording's first; empty before multilingual evidence. */
+  source_languages?: string[];
   /** How the facts spread over the recording; null for older generations. */
   coverage?: GenerationCoverage | null;
   /** What the recording was taken to be, and who decided. */
@@ -1607,4 +1613,243 @@ export interface ChangePlanResult {
   action: "applied" | "redirect";
   redirect_url: string | null;
   billing: Billing;
+}
+
+// ── AI notes: prompt/model profiles and experiments (S3/S4) ──────────
+
+export type ProfileStage = "extraction" | "composition" | "verification";
+export type NoteLength = "short" | "standard" | "detailed";
+
+export interface StageParams {
+  temperature?: number | null;
+  max_output_tokens?: number | null;
+  timeout_s?: number | null;
+}
+
+/** One complete configuration. A null stage text keeps the bundled one; a null model keeps routing. */
+export interface ProfileConfig {
+  stages: Partial<Record<ProfileStage, string | null>>;
+  models: Partial<Record<ProfileStage, string | null>>;
+  params: Partial<Record<ProfileStage, StageParams>>;
+  output_language: "auto" | "en" | "de" | "uk";
+  length: NoteLength;
+}
+
+export interface ProfileVersionSummary {
+  id: string;
+  version_number: number;
+  content_hash: string;
+  created_by: string;
+  created_at: string;
+  compatible: boolean;
+  incompatible_reason?: string | null;
+}
+
+export interface PromptProfile {
+  id: string;
+  name: string;
+  description: string;
+  created_at: string;
+  versions: ProfileVersionSummary[];
+}
+
+export interface ActiveProfile {
+  /** null = the profile bundled with this deployment. */
+  profile_version_id: string | null;
+  revision: number;
+  activated_by?: string | null;
+  activated_at?: string | null;
+}
+
+export interface PromptProfilesView {
+  active: ActiveProfile;
+  profiles: PromptProfile[];
+  can_edit: boolean;
+  contract_version: string;
+  algorithm_version: string;
+  stages: ProfileStage[];
+  max_stage_chars: number;
+  variables: string[];
+}
+
+export interface ProfileVersionView extends ProfileVersionSummary {
+  profile_id: string;
+  config: ProfileConfig;
+  contract_version: string;
+  schema_version: string;
+  algorithm_version: string;
+  effective: Record<ProfileStage, string>;
+  language: string;
+}
+
+export interface ProfileProblem {
+  field: string;
+  code: string;
+  detail: string;
+}
+
+export interface ProfilePreview {
+  problems: ProfileProblem[];
+  effective: Partial<Record<ProfileStage, string>>;
+  language: string;
+  /** Each stage's bundled task text: where an edit starts (never the platform contract). */
+  bundled: Record<ProfileStage, string>;
+}
+
+export interface ModelCapability {
+  backend: string;
+  model_id: string;
+  processor: string | null;
+  region: string | null;
+  acknowledged: boolean;
+  small_model: boolean;
+  context_window: number;
+  stages: ProfileStage[];
+  supported: Partial<Record<"temperature" | "max_output_tokens" | "timeout_s", { min: number; max: number }>>;
+  unsupported: Record<string, string>;
+}
+
+export interface ModelCapabilities {
+  models: ModelCapability[];
+  stage_operations: Record<ProfileStage, string>;
+  writer?: AiWriter | null;
+}
+
+export interface ActivationRecord {
+  profile_version_id: string | null;
+  previous_version_id: string | null;
+  revision: number;
+  actor: string;
+  evaluation_ref: string | null;
+  created_at: string;
+}
+
+export interface ExperimentRequest {
+  sources: { note_id: string; transcript_rev: number }[];
+  /** null = the bundled profile. */
+  candidate_version_ids: (string | null)[];
+  repetitions: number;
+  length: NoteLength;
+  output_language: "auto" | "en" | "de" | "uk";
+  budget_cap_cents: number;
+  idempotency_key: string;
+}
+
+export interface ExperimentEstimate {
+  runs: number;
+  /** null: a backend has no price — show "unknown", never a guess. */
+  estimate_cents: number | null;
+  token_cap: number;
+  cost_known: boolean;
+  sources: { note_id: string; transcript_rev: number; languages: string[] }[];
+}
+
+export type ExperimentState = "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
+
+export interface ModelCall {
+  stage: ProfileStage;
+  backend: string;
+  model_id: string;
+  calls: number;
+  failed: number;
+  input_tokens: number;
+  output_tokens: number;
+  latency_ms: number;
+}
+
+export interface ExperimentRun {
+  id: string;
+  candidate_index: number;
+  source_index: number;
+  repetition: number;
+  state: "pending" | "running" | "done" | "failed" | "cancelled";
+  metrics: {
+    calls?: ModelCall[];
+    tokens?: number;
+    partial?: boolean;
+    meaning_check?: Record<string, number>;
+    meaning_unverified?: number;
+    incomplete?: string[];
+    summary_fallback?: string | null;
+    topics_fallback?: string | null;
+    windows_failed?: number;
+    [key: string]: unknown;
+  };
+  error_kind: string | null;
+  cost_cents: number | null;
+  latency_ms: number | null;
+  artifact_available: boolean;
+  config: Record<string, unknown>;
+}
+
+export interface ExperimentView {
+  id: string;
+  state: ExperimentState;
+  sources: { note_id: string; transcript_rev: number; readable: boolean }[];
+  candidates: (string | null)[];
+  repetitions: number;
+  length: NoteLength;
+  output_language: string;
+  budget_cap_cents: number;
+  reserved_cents: number;
+  spent_cents: number;
+  cost_known: boolean;
+  token_cap: number;
+  tokens_used: number;
+  error_kind: string | null;
+  runs: ExperimentRun[];
+  stale: boolean;
+}
+
+export interface ExperimentSummary {
+  id: string;
+  state: ExperimentState;
+  candidates: (string | null)[];
+  sources: number;
+  repetitions: number;
+  cost_known: boolean;
+  spent_cents: number;
+  created_at: string;
+}
+
+export interface ArtifactFact {
+  item_key: string;
+  kind: string;
+  text: string;
+  /** Always the words as spoken, in `source_language` — never a translation. */
+  quote: string;
+  source_language: string | null;
+  start_ms: number;
+  end_ms: number;
+  speaker_label: string | null;
+  attributed_to: string | null;
+  flags: string[];
+}
+
+export interface RunArtifact {
+  language: string;
+  sections: {
+    section_key: string;
+    title: string | null;
+    lines: { kind: string; text: string; fact_ids: string[] }[];
+  }[];
+  facts: ArtifactFact[];
+}
+
+export type FindingLabel =
+  | "wrong_actor"
+  | "missing_condition"
+  | "unsupported_claim"
+  | "omission"
+  | "duplicate"
+  | "unclear_attribution";
+
+export interface ReviewRequest {
+  run_a_id: string;
+  run_b_id: string;
+  blind: boolean;
+  revealed: boolean;
+  preference: "a" | "b" | "tie" | "neither";
+  findings: { run: "a" | "b"; label: FindingLabel; line?: string }[];
+  comment: string;
 }

@@ -46,6 +46,9 @@ PINNED: dict[str, str] = {
     "2026-10-01": "1860764b1df50e455660a394c445c001fe680d6d34daf4f32a52c62cc0f16307",  # Sprint SQ1: same wording, the version is now a real date (2026-10-23 was ahead of the calendar)
     "2026-10-01.2": "21876f4555c36c6d710bac22c6ccc986a88aaf7ed962d0cd5731fd3ee26c8e1c",  # Sprint SQ2: coverage variant of extraction, transcript-segmented blocks, extraction windows capped
     "2026-10-01.3": "c9e744e3376b1cefb39f918610b0a933a139860702ebe54aa36cd44c8bcc85bd",  # Sprint SQ3: title prompt reads beginning/middle/end excerpts and the note's themes and facts
+    "2026-10-18.1": "cf074b7122798aa41bef5a67f158eb105b8454537728fc2915c42e68761513c0",  # Multilingual evidence (dev only, superseded by 2026-10-18.2 before release)
+    "2026-10-18.2": "818baef94d26c0b6e0d4555aebc6b620546cd25c8f3d8447545c6902126b1c09",  # Multilingual evidence + fidelity before 05-prompt-instructions (dev only, superseded before release)
+    "2026-10-18.3": "d5c30b2c51f360cfcd5dd0dbc8ebbfcb7242f1716fedaee6c04e3506592cb4b1",  # 05-prompt-instructions.md: common + stage task texts over the builders, verifier/dedup contracts (flag off sends 2026-10-01.3)
 }
 
 FIXTURE_DIRS = (EVAL_FIXTURES, REPO / "tests" / "fixtures" / "meeting_doc")

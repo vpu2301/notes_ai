@@ -1,0 +1,50 @@
+{
+ "id": "ml04_en_meeting_de_quote",
+ "language": "en",
+ "meeting_type": "auto",
+ "recorded_on": "2026-10-13",
+ "recording_type": "podcast_broadcast",
+ "transcript": [
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 0,
+   "t_end_ms": 20000,
+   "text": "Welcome back to Supply Lines, I'm Sam Ortiz. Today we look at the rail strike in Germany and what it means for freight to the Netherlands. Our correspondent Hanna Vogel spoke to the union leader this morning."
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 20000,
+   "t_end_ms": 32000,
+   "text": "That's right, I met Dieter Brandl of the train drivers' union in Frankfurt, and he was very clear about his conditions for ending the strike."
+  },
+  {
+   "speaker": "SPEAKER_3",
+   "t_start_ms": 32000,
+   "t_end_ms": 44000,
+   "text": "Wir beenden den Streik nur, wenn die Bahn die 35-Stunden-Woche für alle Schichtarbeiter zusagt, und zwar schriftlich bis Ende März.",
+   "language": "de"
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 44000,
+   "t_end_ms": 68000,
+   "text": "The rail company says that is not affordable. Its latest offer is a 38-hour week from next year, plus a one-off payment of 1,500 euros per employee."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 68000,
+   "t_end_ms": 84000,
+   "text": "Thanks, Hanna. Shippers expect delays of up to four days on the Rotterdam route for as long as the strike lasts."
+  }
+ ],
+ "gold": {
+  "speakers": {
+   "SPEAKER_1": "Sam Ortiz",
+   "SPEAKER_2": "Hanna Vogel",
+   "SPEAKER_3": "Dieter Brandl"
+  },
+  "key_facts": [
+   "The union will end the strike only if the railway commits in writing by the end of March to a 35-hour week for all shift workers."
+  ]
+ }
+}

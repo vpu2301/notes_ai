@@ -82,15 +82,40 @@ class Window:
 
     def render(self) -> str:
         """The window as the model sees it: numbered, named, timed."""
-        return "\n".join(
-            f"[{t.number}] {t.display_name} ({_mmss(t.start_ms)}):{_language_tag(t)} {t.text}"
-            for t in self.turns
-        )
+        return "\n".join(render_line(t) for t in self.turns)
+
+    def around(self, number: int, reach: int = 1) -> tuple[Turn, ...]:
+        """The line with this number and up to ``reach`` lines either side of it."""
+        at = next((i for i, t in enumerate(self.turns) if t.number == number), None)
+        if at is None:
+            return ()
+        return self.turns[max(0, at - reach) : at + reach + 1]
 
     @property
     def text(self) -> str:
         """Just the words, for substring checks."""
         return "\n".join(t.text for t in self.turns)
+
+
+def render_line(turn: Turn) -> str:
+    """``[7] Anna (12:04): [en] …`` — one line as the model sees it."""
+    return f"[{turn.number}] {turn.display_name} ({_mmss(turn.start_ms)}):{_language_tag(turn)} {turn.text}"
+
+
+def dominant_language(turns: list[Turn], recording_language: str | None) -> str | None:
+    """The language most of the speech was in, by duration (``Turn.language``, else
+    the recording's); the recording's on a tie; None when nothing says."""
+    spoken: dict[str, int] = {}
+    for t in turns:
+        code = t.language or recording_language
+        if code:
+            spoken[code] = spoken.get(code, 0) + max(0, t.end_ms - t.start_ms)
+    if not spoken:
+        return None
+    best = max(spoken.values())
+    if recording_language and spoken.get(recording_language) == best:
+        return recording_language
+    return max(spoken, key=lambda code: spoken[code])
 
 
 def _language_tag(turn: Turn) -> str:

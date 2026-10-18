@@ -415,4 +415,5 @@ def test_the_result_carries_exclusions_and_coverage_as_numbers() -> None:
     assert len(stats["facts_by_third"]) == 3 and sum(stats["facts_by_third"]) == len(
         [f for f in document.facts if f.kind not in (schema.COMPLETION, schema.JUDGEMENT)]
     )
-    assert stats["prompt_version"] == prompts.PROMPT_VERSION
+    # Multilingual evidence off: the previous version's prompts, recorded as such.
+    assert stats["prompt_version"] == prompts.PREVIOUS_PROMPT_VERSION

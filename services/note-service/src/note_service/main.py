@@ -18,6 +18,8 @@ from .deps import install_state
 from .main_deps import build_state, teardown_state
 from .middleware import AnonymousCorsMiddleware, RequestIDMiddleware
 from .routers import (
+    ai_experiments,
+    ai_profiles,
     ai_settings,
     audio_clips,
     billing,
@@ -156,7 +158,6 @@ def create_app() -> FastAPI:
         title="Note Service",
         description="Notes core: templates + notes / versions / diff / search.",
         version="0.8.0",
-        openapi_version="3.1.0",
         lifespan=_lifespan,
         docs_url="/docs",
         redoc_url="/redoc",
@@ -209,6 +210,8 @@ def create_app() -> FastAPI:
     app.include_router(spaces.router)
     app.include_router(glossary.router)
     app.include_router(ai_settings.router)
+    app.include_router(ai_profiles.router)
+    app.include_router(ai_experiments.router)
     app.include_router(billing.router)
     FastAPIInstrumentor.instrument_app(app)
     return app

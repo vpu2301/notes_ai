@@ -1,0 +1,57 @@
+{
+ "id": "ml01_de_host_en_promise",
+ "language": "de",
+ "meeting_type": "auto",
+ "recorded_on": "2026-10-18",
+ "recording_type": "podcast_broadcast",
+ "transcript": [
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 0,
+   "t_end_ms": 38000,
+   "text": "Willkommen zu einer neuen Folge von Weltlage kompakt, ich bin Lena Brandt. In den Vereinigten Staaten wird im November der Kongress gewählt, also das ganze Repräsentantenhaus und ein Drittel des Senats. Präsident Robert Calder steht selbst nicht auf dem Wahlzettel, macht den Wahlkampf seiner Partei aber zur Abstimmung über sich. Bei einer Kundgebung in Ohio hat er dafür ein ungewöhnliches Versprechen abgegeben."
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 38000,
+   "t_end_ms": 58000,
+   "text": "And here is my promise. If we win the House of Representatives and the United States Senate, both of them, I will issue a dividend to every adult citizen in the United States of America for $5,000. So if we win, you win, and you get five thousand dollars.",
+   "language": "en"
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 58000,
+   "t_end_ms": 92000,
+   "text": "Wie genau das finanziert werden soll, lässt Calder offen. Fachleute schätzen die Kosten auf mehr als eine Billion Dollar, ungefähr so viel wie der gesamte Verteidigungshaushalt. Politisch gilt das Versprechen als unrealistisch. Auf derselben Kundgebung bat Calder seine Anhänger um etwas anderes."
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 92000,
+   "t_end_ms": 98000,
+   "text": "So I'm asking you to pretend that I'm on the ballot.",
+   "language": "en"
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 98000,
+   "t_end_ms": 140000,
+   "text": "Die Opposition setzt dagegen auf die Lebenshaltungskosten. Ihre Kandidatinnen versprechen niedrigere Mieten und günstigere Medikamente und wollen die Zölle des Präsidenten zurücknehmen. Umfragen sehen die Partei des Präsidenten derzeit hinten: Im September waren nur 32 Prozent der Befragten mit seiner Arbeit zufrieden."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 140000,
+   "t_end_ms": 152000,
+   "text": "Das war Weltlage kompakt. Schreibt uns eure Einschätzung in die Kommentare, und bis zum nächsten Mal."
+  }
+ ],
+ "gold": {
+  "speakers": {
+   "SPEAKER_1": "Lena Brandt",
+   "SPEAKER_2": "Robert Calder"
+  },
+  "key_facts": [
+   "Calder verspricht jedem erwachsenen US-Bürger eine Dividende von 5.000 Dollar, falls seine Partei Repräsentantenhaus und Senat gewinnt.",
+   "Die Kosten werden auf mehr als eine Billion Dollar geschätzt."
+  ]
+ }
+}

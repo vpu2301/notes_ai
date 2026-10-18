@@ -1,0 +1,26 @@
+{
+ "id": "ml06_de_duplicate_artifact",
+ "sentinel": "Duplicate ASR artifact: collapsed, without removing the different later clarification",
+ "count_max": [
+  {
+   "match": [
+    "sechs Prozent",
+    "6 Prozent",
+    "6 %",
+    "6%"
+   ],
+   "max": 1
+  }
+ ],
+ "must_contain_any": [
+  [
+   "Nordamerika"
+  ],
+  [
+   "zwei Prozent",
+   "2 Prozent",
+   "2 %",
+   "2%"
+  ]
+ ]
+}

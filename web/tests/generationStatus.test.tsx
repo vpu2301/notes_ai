@@ -134,6 +134,19 @@ describe("generation status", () => {
     expect(await screen.findByText(/around minute 2/i)).toBeInTheDocument();
   });
 
+  it("calls an unverified note incomplete without blaming the recording", async () => {
+    server({
+      ...BASE,
+      status: "partial",
+      failed_ranges: [],
+      incomplete_reasons: ["claims_unverified"],
+      finished_at: "x",
+    });
+    strip({ canRegenerate: true });
+    expect(await screen.findByText(/could not be fully verified/i)).toBeInTheDocument();
+    expect(screen.queryByText(/could not be read/i)).toBeNull();
+  });
+
   it("says why when the workspace turned generation off, without polling", async () => {
     server(404);
     strip({ blocked: "generation_disabled" });

@@ -14,13 +14,16 @@ import signal
 from typing import Any
 from uuid import UUID
 
+from db import tenant_connection
 from jobs import CostTable, HandlerSpec, JobContext, JobQueue, JobRunner, UsageLedger
 from models import Registry, build_chat_provider
 from observability import bootstrap
 
 from .collaboration_metrics import rehome_total
 from .config import settings
+from .domain import experiments
 from .domain.note_move import REHOME_JOB_KIND
+from .jobs.evaluate_note import EvaluationDeps, handle_evaluate
 from .jobs.generate_note import GenerationDeps, handle_generate, mark_dead
 from .jobs.rehome_media import handle_rehome, mark_failed
 
@@ -47,13 +50,16 @@ class _Providers:
         # Called synchronously by the registry, so it answers from a cache `warm()` fills per job.
         self._settings = settings_source
 
-    def _resolve(self, workspace_id: str, operation: str = "summarize") -> Any:
+    def _load(self) -> Registry:
         if self._registry is None:
             from .domain.model_routing import load_registry
 
             # `validate=False`: an unrelated (ASR) misconfiguration must not stop notes.
             self._registry = load_registry(self._settings)
-        return self._registry.resolve(workspace_id, operation)
+        return self._registry
+
+    def _resolve(self, workspace_id: str, operation: str = "summarize") -> Any:
+        return self._load().resolve(workspace_id, operation)
 
     async def shadow(self, workspace_id: str) -> Any:
         """The candidate backend for this workspace, or None: a workspace only shadows
@@ -106,6 +112,16 @@ class _Providers:
             )
         return provider
 
+    async def named(self, name: str) -> Any:
+        """A registered chat backend by name (an experiment's pinned binding); the
+        registry enforces env, enabled and credentials exactly as for routing."""
+        resolved = self._load().backend(name, expect_kind="chat")
+        provider = self._cache.get(resolved.name)
+        if provider is None:
+            provider = build_chat_provider(resolved)
+            self._cache[resolved.name] = provider
+        return provider
+
     def backend_of(self, workspace_id: str) -> tuple[str, int]:
         return self._resolve(workspace_id).name, COLD_START_SECONDS
 
@@ -150,6 +166,9 @@ async def run() -> None:
         operation_provider_for=providers.get,
         shadow_provider_for=providers.shadow,
         entity_model_tier=settings.note_entity_model_tier,
+        multilingual_evidence=settings.note_multilingual_evidence,
+        fidelity=settings.note_fidelity,
+        provider_named=providers.named,
         coverage_retry_budget_s_per_hour=settings.note_coverage_retry_budget_s_per_hour,
         shadow_percent=(
             settings.note_generation_shadow_percent
@@ -205,12 +224,37 @@ async def run() -> None:
             error_kind=error_kind,
         )
 
+    # S3: experiments run the same pipeline into their own tables, never a note.
+    evaluation = EvaluationDeps(
+        app_pool=app_pool,
+        transcripts_store=transcripts,
+        provider_for=providers.get,
+        provider_named=providers.named,
+        costs=CostTable.load(settings.models_config),
+    )
+
+    async def _evaluate(ctx: JobContext) -> dict[str, Any] | None:
+        return await handle_evaluate(
+            evaluation, tenant_id=UUID(str(ctx.job.tenant_id)), payload=dict(ctx.job.payload)
+        )
+
+    async def _evaluate_dead(ctx: JobContext, error_kind: str) -> None:
+        async with tenant_connection(app_pool, UUID(str(ctx.job.tenant_id))) as conn:
+            await experiments.set_state(
+                conn,
+                experiment_id=UUID(str(ctx.job.payload["experiment_id"])),
+                state="failed",
+                error_kind=error_kind,
+                only_from=experiments.ACTIVE,
+            )
+
     queue = JobQueue(jobs_pool)
     runner = JobRunner(
         queue,
         {
             JOB_KIND: HandlerSpec(run=_run, backend=_backend, probe=_probe, on_dead=_on_dead),
             REHOME_JOB_KIND: HandlerSpec(run=_rehome, on_dead=_rehome_dead),
+            experiments.JOB_KIND: HandlerSpec(run=_evaluate, on_dead=_evaluate_dead),
         },
         worker_id=settings.registry_environ().get("HOSTNAME") or "note-worker",
         ledger=UsageLedger(CostTable.load(settings.models_config)),

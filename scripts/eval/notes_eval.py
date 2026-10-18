@@ -159,10 +159,14 @@ def as_asr_result(meeting: dict[str, Any]) -> dict[str, Any]:
                 "start_ms": t["t_start_ms"],
                 "end_ms": t["t_end_ms"],
                 "paragraphs": [t["text"]],
+                # The ASR's per-turn language, as the result view carries it.
+                **({"language": t["language"]} if t.get("language") else {}),
             }
             for t in meeting["transcript"]
         ],
     }
+    if meeting.get("noise"):
+        result["noise"] = list(meeting["noise"])
     if meeting.get("recorded_on"):
         result["recorded_on"] = meeting["recorded_on"]
     return result
@@ -202,6 +206,7 @@ def _fact_dict(fact: Any) -> dict[str, Any]:
         "text": fact.text,
         "quote": fact.quote,
         "turn": fact.turn,
+        "line": getattr(fact, "line", None),
         "certainty": getattr(fact, "certainty", None),
         "owner": fact.owner_label,
         "due_text": fact.due_text,
@@ -215,6 +220,8 @@ def _fact_dict(fact: Any) -> dict[str, Any]:
         "start_ms": fact.start_ms,
         "end_ms": fact.end_ms,
         "window_index": fact.window_index,
+        "source_language": getattr(fact, "source_language", None),
+        "flags": list(getattr(fact, "flags", ())),
         # The verified payloads.
         "figure": fact.figure.payload() if getattr(fact, "figure", None) else None,
         "person": (
@@ -232,10 +239,12 @@ def _fact_dict(fact: Any) -> dict[str, Any]:
 # ── the two arms ────────────────────────────────────────────────────
 
 
-async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]:
+async def run_pipeline(
+    meeting: dict[str, Any], provider: Any, *, multilingual: bool = False, fidelity: bool = False
+) -> dict[str, Any]:
     """The engine, exactly as the worker runs it: the result view the
     worker snapshots, the template's roles, the meeting's date and the
-    ASR's name candidates."""
+    ASR's name candidates. ``multilingual``: as with MDX_NOTE_MULTILINGUAL_EVIDENCE."""
     from types import SimpleNamespace
 
     from note_service.domain.glossary import Term
@@ -252,6 +261,11 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
     # The note's template, as creation would have picked it for this type.
     template_family = types.family_for_type(meeting_type)
     result = as_asr_result(meeting)
+    if multilingual:
+        # The worker's resolution (jobs.generate_note): settled once for the whole run.
+        language, _source = pipeline.resolve_output_language(
+            result, explicit=meeting.get("output_language")
+        )
     started = time.monotonic()
     # Every model call of this meeting, from the provider's usage records.
     tokens = _TokenTally.install()
@@ -288,6 +302,9 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
         built=built,
         recording_type=recording_type,
         recording_type_source=source,
+        output_language=language,
+        multilingual=multilingual,
+        fidelity=fidelity,
     )
     # The worker's linter on every output: the eval scores what the writer receives.
     document = await doclint.enforce(
@@ -346,13 +363,27 @@ async def run_pipeline(meeting: dict[str, Any], provider: Any) -> dict[str, Any]
         "stats": dict(document.stats),
         "brief": dict(document.brief),
         "noise_ranges": [list(r) for r in document.noise_ranges],
+        # What became of every extracted fact: line, language, outcome (no text).
+        "trace": [
+            {
+                "window": t.window,
+                "line": t.line,
+                "kind": t.kind,
+                "language": t.language,
+                "outcome": t.outcome,
+                "start_ms": t.start_ms,
+            }
+            for t in document.trace
+        ],
+        "backend": document.backend,
+        "model_id": document.model_id,
         "evidence": "facts",
         # The sections as written, for notes_assert (content: never in a report).
         "sections": [
             {"section_key": s.section_key, "title": s.title, "role": s.role, "text": s.text}
             for s in document.sections
         ],
-        "language": meeting.get("language", "en"),
+        "language": language,
         "title": title,
         # The note as a reader sees it — only ever written to local disk
         # (--save-notes, for blind rating), never into a report.

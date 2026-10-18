@@ -243,13 +243,12 @@ def patch_claim(
     fact = unsure[0]
     lang = language if language in support.CERTAINTY_PHRASES else "en"
     phrases = support.CERTAINTY_PHRASES[lang]
-    actor = fact.attributed_to
+    actor = support.display_actor(fact.attributed_to, lang)
     if actor and not support.names_actor(text, actor):
-        last = actor.split()[-1]
         if fact.certainty == "proposal":
-            text = f"{text} ({phrases['proposal']}: {last})"
+            text = f"{text} ({phrases['proposal']}: {actor})"
         else:
-            text = f"{text} — {support.ACCORDING_TO[lang]} {last}"
+            text = f"{text} — {support.ACCORDING_TO[lang]} {actor}"
     if not support.has_marker(text, lang):
         joiner = " —" if paragraph else ":"
         text = f"{phrases[fact.certainty]}{joiner} {text}"

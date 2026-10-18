@@ -51,6 +51,9 @@ apps:
     env:
       # Off until model_tier_precision >= 0.9 (ADR-0060).
       MDX_NOTE_ENTITY_MODEL_TIER: "false"
+      # Off until the bilingual review signs off the multilingual benchmark.
+      MDX_NOTE_MULTILINGUAL_EVIDENCE: "false"
+      MDX_NOTE_FIDELITY: "false"
   auth-service:
     replicas: 2
     # W4: the native flip in production is its own decision (ADR-0069). The chart's

@@ -5,10 +5,11 @@ keep the earliest quote, prefer the explicit owner, union the flags. Pure.
 from __future__ import annotations
 
 import dataclasses
+import re
 from typing import Final
 
 from . import support
-from .verify import CONF_EXPLICIT, VerifiedFact
+from .verify import CONF_EXPLICIT, MERGED, VerifiedFact
 
 # Deliberately high: merging two DIFFERENT tasks loses one of them.
 SAME_FACT_JACCARD: Final = 0.8
@@ -92,6 +93,110 @@ def merge_facts(facts: list[VerifiedFact]) -> list[VerifiedFact]:
         kept[match_at] = (_tokens(merged.text), merged)
 
     return [fact for _, fact in kept]
+
+
+# ── Fidelity: merge only what says the same thing, and keep every source ──
+
+# Below SAME_FACT_JACCARD but this close: a candidate for the meaning-equivalence check.
+CANDIDATE_JACCARD: Final = 0.45
+_DIGITS: Final = re.compile(r"\d[\d.,]*")
+
+
+def _figures(text: str) -> frozenset[str]:
+    return frozenset(m.replace(",", "").replace(".", "") for m in _DIGITS.findall(text))
+
+
+def compatible(a: VerifiedFact, b: VerifiedFact) -> bool:
+    """Code's veto before any merge: same kind and figure, the same numbers, both or
+    neither negated, both or neither conditional. Two amounts or two conditions are
+    two statements, however alike their words."""
+    if a.kind != b.kind or a.figure != b.figure:
+        return False
+    if _figures(a.text) != _figures(b.text):
+        return False
+    if support.negated(a.text) != support.negated(b.text):
+        return False
+    return support.conditional(a.text) == support.conditional(b.text)
+
+
+def absorb(survivor: VerifiedFact, copy: VerifiedFact) -> tuple[VerifiedFact, VerifiedFact]:
+    """``(survivor, copy as evidence)``: the copy's key joins ``survivor.also`` and its
+    own doubts the survivor's flags; the copy stays, flagged ``MERGED``, as a source."""
+    flags = list(survivor.flags)
+    for flag in copy.flags:
+        if flag not in flags:
+            flags.append(flag)
+    merged = dataclasses.replace(
+        survivor,
+        also=tuple(dict.fromkeys([*survivor.also, copy.item_key, *copy.also])),
+        flags=flags,
+        owner_label=survivor.owner_label or copy.owner_label,
+        due_text=survivor.due_text or copy.due_text,
+        due_date=survivor.due_date or copy.due_date,
+        attributed_to=survivor.attributed_to or copy.attributed_to,
+    )
+    source = dataclasses.replace(copy, flags=[*copy.flags, MERGED], also=())
+    return merged, source
+
+
+def precise_first(
+    a: VerifiedFact, b: VerifiedFact, language: str
+) -> tuple[VerifiedFact, VerifiedFact]:
+    """``(survivor, copy)``: the more specific wording survives; on a tie, the earlier."""
+    sa, sb = support.specificity(a.text, language), support.specificity(b.text, language)
+    if sb > sa or (sb == sa and b.start_ms < a.start_ms):
+        return b, a
+    return a, b
+
+
+def merge_with_sources(
+    facts: list[VerifiedFact], *, language: str
+) -> tuple[list[VerifiedFact], list[VerifiedFact]]:
+    """``(kept, sources)``: like :func:`merge_facts`, but only :func:`compatible` facts
+    merge, the more precise wording survives, and every merged copy is returned as a
+    source (``MERGED``) its survivor cites through ``also``."""
+    ordered = sorted(facts, key=lambda f: (f.start_ms, f.window_index, f.turn))
+    kept: list[VerifiedFact] = []
+    sources: list[VerifiedFact] = []
+    for fact in ordered:
+        tokens = _tokens(fact.text)
+        at = next(
+            (
+                i
+                for i, other in enumerate(kept)
+                if compatible(fact, other)
+                and (
+                    fact.item_key == other.item_key
+                    or _jaccard(tokens, _tokens(other.text)) >= SAME_FACT_JACCARD
+                )
+            ),
+            None,
+        )
+        if at is None:
+            kept.append(fact)
+            continue
+        survivor, copy = precise_first(kept[at], fact, language)
+        if copy.item_key == survivor.item_key:
+            # The same statement twice (overlapping windows): nothing new to cite.
+            kept[at] = survivor
+            continue
+        kept[at], source = absorb(survivor, copy)
+        sources.append(source)
+    return kept, sources
+
+
+def candidates(facts: list[VerifiedFact]) -> list[tuple[int, int]]:
+    """Index pairs close in words but under the merge bar, :func:`compatible`: what the
+    meaning-equivalence check decides. Nearest first, so a cap keeps the likeliest."""
+    tokens = [_tokens(f.text) for f in facts]
+    scored = [
+        (_jaccard(tokens[i], tokens[j]), i, j)
+        for i in range(len(facts))
+        for j in range(i + 1, len(facts))
+        if compatible(facts[i], facts[j])
+        and CANDIDATE_JACCARD <= _jaccard(tokens[i], tokens[j]) < SAME_FACT_JACCARD
+    ]
+    return [(i, j) for _score, i, j in sorted(scored, reverse=True)]
 
 
 def by_kind(facts: list[VerifiedFact]) -> dict[str, list[VerifiedFact]]:

@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from typing import Final
 
 from . import support
-from .verify import PARAPHRASE_UNSUPPORTED, VerifiedFact, _has_date_word
+from .verify import MEANING_UNVERIFIED, PARAPHRASE_UNSUPPORTED, VerifiedFact, _has_date_word
 
 # What the recording is, per language.
 TYPE_LABELS: Final[dict[str, dict[str, str]]] = {
@@ -151,8 +151,10 @@ def composed_sentences(
     language: str,
     known: frozenset[str] = frozenset(),
     key_ids: list[str] | None = None,
+    connectives: bool = True,
 ) -> list[tuple[str, list[str]]]:
-    """Ladder rung 3: 3–6 facts' texts in time order, joined by connectives, each citing its fact."""
+    """Ladder rung 3: 3–6 facts' texts in time order, joined by connectives, each citing its fact.
+    ``connectives=False`` (fidelity): no "First — / Then —": unrelated facts are no sequence."""
     usable = [
         f
         for f in facts
@@ -160,6 +162,7 @@ def composed_sentences(
         and f.figure is None
         and f.person is None
         and PARAPHRASE_UNSUPPORTED not in f.flags
+        and MEANING_UNVERIFIED not in f.flags
     ]
     if not usable:
         return []
@@ -186,7 +189,7 @@ def composed_sentences(
         sentence = _sentence(fact.text)
         if not sentence:
             continue
-        if len(chosen) >= COMPOSED_MIN:
+        if connectives and len(chosen) >= COMPOSED_MIN:
             lead = first if n == 0 else last if n == len(chosen) - 1 else middle
             sentence = f"{lead} {sentence}"
         out.append((sentence, [fact.item_key]))

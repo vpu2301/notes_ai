@@ -211,6 +211,12 @@ class Settings(BaseSettings):
     # One bounded model call per generation to respell unknown names. OFF: precision
     # on the small model was 0/8; enable per environment only with an eval clearing 0.9.
     note_entity_model_tier: bool = Field(default=False, alias="MDX_NOTE_ENTITY_MODEL_TIER")
+    # Every transcript language stays eligible as evidence; a claim restated across
+    # languages is checked by meaning. OFF = the previous path (the rollback).
+    note_multilingual_evidence: bool = Field(default=False, alias="MDX_NOTE_MULTILINGUAL_EVIDENCE")
+    # Meaning checks on high-risk claims, one repair, attribution by holder, merges that keep
+    # conditions. Needs multilingual evidence on; OFF restores the S1 composition only.
+    note_fidelity: bool = Field(default=False, alias="MDX_NOTE_FIDELITY")
     # `none` shows plans and changes nothing; `manual` changes the plan at once; `stripe` later.
     billing_provider: Literal["none", "manual"] = Field(
         default="none", alias="MDX_BILLING_PROVIDER"

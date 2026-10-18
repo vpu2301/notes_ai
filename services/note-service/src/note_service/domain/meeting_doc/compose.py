@@ -30,14 +30,21 @@ P2_SENTENCES: Final = (3, 6)
 QUOTE_CHILD_WORDS: Final = 20
 
 
+# Short / Standard / Detailed (S3 profiles) as a share of the standard volume.
+LENGTH_SCALE: Final[dict[str, float]] = {"short": 0.6, "standard": 1.0, "detailed": 1.5}
+
+
 @dataclass(frozen=True, slots=True)
 class VolumeBudget:
     minutes: float
     blocks: int = 1
+    """A profile's length (S3): fewer or more bullets, the same claims — a claim
+    is kept whole or left out, never shortened."""
+    scale: float = 1.0
 
     @property
     def target_words(self) -> int:
-        return round(WORDS_PER_MINUTE * self.minutes)
+        return round(WORDS_PER_MINUTE * self.minutes * self.scale)
 
     @property
     def bullets_per_block(self) -> int:
@@ -113,14 +120,33 @@ def top_per_block(
     return out
 
 
-def fallback_heading(facts: Sequence[VerifiedFact], language: str, known: frozenset[str]) -> str:
+# A theme heads a block only when this share of its words is in the block's facts.
+THEME_SUPPORT: Final = 0.5
+
+
+def fallback_heading(
+    facts: Sequence[VerifiedFact],
+    language: str,
+    known: frozenset[str],
+    *,
+    themes: Sequence[str] = (),
+) -> str:
+    """``mm:ss — what it is about``: the brief's theme the block's facts carry best
+    (``themes``, fidelity) — content, never a voice — else its most named thing."""
     if not facts:
         return ""
+    stamp = overview.mmss(min(f.start_ms for f in facts))
+    evidence = " ".join(f"{f.text} {f.quote}" for f in facts)
+    scored = sorted(
+        ((support.support_ratio(t, evidence, language), t) for t in themes if t.strip()),
+        reverse=True,
+    )
+    if scored and scored[0][0] >= THEME_SUPPORT:
+        return f"{stamp} — {scored[0][1].strip()}"
     name = overview._top_name(list(facts), language, known)
     if not name:
         runs = Counter(run for f in facts for run in support.capital_runs(f.text))
         name = runs.most_common(1)[0][0] if runs else ""
-    stamp = overview.mmss(min(f.start_ms for f in facts))
     return f"{stamp} — {name}" if name else stamp
 
 
@@ -149,6 +175,14 @@ _ROLE_WORDS: Final[dict[str, dict[str, str]]] = {
     "de": {"narrator": "Erzähler/in", "host": "Moderator/in"},
     "uk": {"narrator": "оповідач", "host": "ведучий"},
 }
+
+
+def role_word(role: str, language: str) -> str:
+    """ "Moderator/in", "the host" — a voice's role as a reader says it."""
+    words = _ROLE_WORDS.get(language) or _ROLE_WORDS["en"]
+    return words.get(role, words["host"])
+
+
 _SHOW: Final = re.compile(
     r"\b(?P<show>[A-ZÄÖÜ][\w'’-]{2,}(?:\s[A-ZÄÖÜ][\w'’-]{2,})?)\s+(?:Podcast|podcast)\b"
     r"|(?:willkommen (?:bei|zu|zum)|welcome to|ви слухаєте)\s+(?P<show2>[A-ZÄÖÜ][\w'’-]{2,}"

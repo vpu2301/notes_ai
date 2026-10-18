@@ -1,0 +1,41 @@
+{
+ "id": "ml06_de_duplicate_artifact",
+ "language": "de",
+ "meeting_type": "auto",
+ "recorded_on": "2026-10-11",
+ "recording_type": "podcast_broadcast",
+ "transcript": [
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 0,
+   "t_end_ms": 16000,
+   "text": "Guten Morgen, hier ist die Hafenrunde. Der Containerumschlag in Bremerhaven ist im dritten Quartal um sechs Prozent gesunken."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 16000,
+   "t_end_ms": 24000,
+   "text": "Der Containerumschlag in Bremerhaven ist im dritten Quartal um sechs Prozent gesunken."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 24000,
+   "t_end_ms": 38000,
+   "text": "Grund sind vor allem die Umleitungen der Reedereien über das Kap der Guten Hoffnung und der Streik der Lotsen im August."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 38000,
+   "t_end_ms": 56000,
+   "text": "Eine Korrektur noch: Der Rückgang betrifft nur den Umschlag mit Asien. Der Verkehr mit Nordamerika ist im selben Zeitraum um zwei Prozent gestiegen."
+  }
+ ],
+ "gold": {
+  "speakers": {
+   "SPEAKER_1": "Moderator"
+  },
+  "key_facts": [
+   "Der Rückgang betrifft nur den Asien-Verkehr; der Nordamerika-Verkehr stieg um zwei Prozent."
+  ]
+ }
+}

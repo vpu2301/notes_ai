@@ -16,9 +16,11 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
+from ..config import settings
 from . import ai_settings
 from . import generation_repository as gen_repo
-from .meeting_doc.prompts import PROMPT_VERSION
+from . import prompt_profile_repository as profile_repo
+from . import prompt_profiles as profiles
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +88,11 @@ async def start(
 
     generation_id = uuid4()
     job_id = uuid4()
+    # Pinned now: a settings or profile change after this never alters this job.
+    config_snapshot, incompatible = await pinned_configuration(
+        conn, tenant_id=tenant_id, language_hint=str(transcript.get("language") or "en")
+    )
+    prompt_version = str(config_snapshot["prompt_version"])
     key = snapshot_key(tenant_id, note_id, generation_id)
 
     # Before the row: an orphan object is cheap, an orphan row is not.
@@ -109,15 +116,28 @@ async def start(
             job_id=job_id,
             requested_by=requested_by,
             reason=reason,
-            prompt_version=PROMPT_VERSION,
+            prompt_version=prompt_version,
             transcript_rev=transcript_rev,
             snapshot_key=key,
             # Must be the id the snapshot was sealed with (AAD + object key), or the DEK unwrap fails.
             generation_id=generation_id,
+            config_snapshot=config_snapshot,
         )
     except asyncpg.UniqueViolationError as exc:
         # The live-generation index. One run per note at a time.
         raise GenerationBusyError from exc
+
+    if incompatible is not None:
+        # The active profile cannot run on this deployment: a visible failure, never a
+        # quiet switch to some other configuration.
+        await gen_repo.mark(
+            conn,
+            generation_id=stored_id,
+            status=gen_repo.FAILED,
+            error_kind=PROFILE_INCOMPATIBLE,
+            finished=True,
+        )
+        return stored_id, gen_repo.FAILED
 
     await queue.enqueue(
         tenant_id,
@@ -128,10 +148,49 @@ async def start(
         priority=PRIORITY_REGENERATE
         if reason == "regenerate"
         else (priority if priority is not None else PRIORITY_AUTO),
-        idempotency_key=(f"{note_id}:{transcript_rev}:{PROMPT_VERSION}:{secrets.token_hex(4)}"),
+        idempotency_key=(f"{note_id}:{transcript_rev}:{prompt_version}:{secrets.token_hex(4)}"),
         conn=conn,
     )
     return stored_id, gen_repo.QUEUED
+
+
+# A generation whose workspace's active profile this deployment cannot run.
+PROFILE_INCOMPATIBLE: Final = "profile_incompatible"
+
+
+async def pinned_configuration(
+    conn: asyncpg.Connection, *, tenant_id: UUID, language_hint: str
+) -> tuple[dict[str, Any], str | None]:
+    """``(config snapshot, why the active version cannot run or None)`` for a generation
+    queued now: the active profile version (else the bundled one), the flags as they are
+    now, and each stage's binding — a named backend, or the workspace's routing."""
+    config, version = await profile_repo.active_config(conn, tenant_id=tenant_id)
+    incompatible = (
+        profiles.compatible(
+            contract_version=version.contract_version,
+            schema=version.schema_version,
+            algorithm_version=version.algorithm_version,
+        )
+        if version is not None
+        else None
+    )
+    snapshot = profiles.snapshot(
+        config,
+        version_id=str(version.id) if version is not None else None,
+        version_hash=version.content_hash if version is not None else None,
+        multilingual=settings.note_multilingual_evidence,
+        fidelity=settings.note_fidelity,
+        language_hint=language_hint if language_hint in profiles.LANGUAGE_NAMES else "en",
+        models={
+            stage: (
+                {"backend": config.models[stage], "routed": False}
+                if config.models.get(stage)
+                else {"routed": True}
+            )
+            for stage in profiles.STAGES
+        },
+    )
+    return snapshot, incompatible
 
 
 async def check_allowed(

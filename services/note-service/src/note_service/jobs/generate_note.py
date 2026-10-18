@@ -22,17 +22,19 @@ from ..domain import carry_over, note_title
 from ..domain import generation_repository as gen_repo
 from ..domain import meetings_repository as meetings
 from ..domain import notes_repository as repo
+from ..domain import prompt_profiles as profiles
 from ..domain.meeting_doc import (
     classify,
     doclint,
     pipeline,
-    prompts,
     roles,
     types,
     windows,
     writer,
 )
 from ..domain.meeting_doc.render import RenderedSection
+from ..domain.meeting_doc.stage_provider import Metered, StageProvider
+from .evaluate_note import per_model
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,9 @@ class GenerationDeps:
         entity_model_tier: bool = False,
         operation_provider_for: Any = None,
         coverage_retry_budget_s_per_hour: float | None = None,
+        multilingual_evidence: bool = False,
+        fidelity: bool = False,
+        provider_named: Any = None,
     ) -> None:
         self.app_pool = app_pool
         self.transcripts_store = transcripts_store
@@ -75,6 +80,10 @@ class GenerationDeps:
         self.shadow_percent = shadow_percent
         self.entity_model_tier = entity_model_tier
         self.coverage_retry_budget_s_per_hour = coverage_retry_budget_s_per_hour
+        self.multilingual_evidence = multilingual_evidence
+        self.fidelity = fidelity
+        # Builds a registered backend by name: a profile stage's pinned binding (S3).
+        self.provider_named = provider_named
 
 
 def _retry_budget(deps: GenerationDeps, built: list[Any] | None) -> float | None:
@@ -130,7 +139,13 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
     classify_provider = await _operation_provider(deps, tenant_id, "classify", provider)
     title_provider = await _operation_provider(deps, tenant_id, "title", provider)
     entity_provider = await _operation_provider(deps, tenant_id, "entities", provider)
-    language = str(result.get("language") or "en")
+    pinned, multilingual, fidelity, config = run_configuration(generation, deps)
+    if multilingual:
+        # Settled once: every later step of this job writes in it.
+        explicit = config.output_language if config.output_language != "auto" else None
+        language, language_source = pipeline.resolve_output_language(result, explicit=explicit)
+    else:
+        language, language_source = str(result.get("language") or "en"), "recording"
     # Relative dates resolve against the day it was RECORDED, not today.
     started = getattr(meeting, "started_at", None) if meeting else None
     meeting_date = (started or note.created_at or datetime.now(UTC)).date()
@@ -155,6 +170,7 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         deps, tenant_id, note_id=note_id, recording_type=recording_type, source=recording_source
     )
     known_people, glossary = await _known_names(deps, tenant_id, result=result, meeting=meeting)
+    staged, meters = await _stage_providers(deps, provider, config, pinned)
 
     document = await pipeline.run(
         result,
@@ -173,11 +189,22 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         entity_model_tier=deps.entity_model_tier,
         entity_provider=entity_provider,
         retry_budget_s=_retry_budget(deps, built),
+        output_language=language,
+        multilingual=multilingual,
+        fidelity=fidelity,
+        instructions=profiles.stage_overrides(config) if pinned else None,
+        stage_providers=staged,
+        length=config.length,
     )
     # Lint, repair, fall back, record (stats.lint). Never raises.
     document = await doclint.enforce(
         document, regenerate=document.regenerator, known=frozenset(known_people)
     )
+    # Where the output language came from (explicit, dominant, default, recording).
+    document.stats["output_language_source"] = language_source
+    # The profile it ran with, and which backend and model actually answered each stage.
+    document.stats["profile_version_id"] = pinned.get("profile_version_id")
+    document.stats["calls"] = per_model([c for m in meters for c in m.calls])
     # The title comes after the whole recording was read; one short call that cannot stop the note.
     themes, title_facts = _title_context(document)
     await _name_note(
@@ -215,7 +242,7 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
             sections=items_sections,
             requested_by=generation.requested_by,
             generation_id=generation_id,
-            prompt_version=prompts.PROMPT_VERSION,
+            prompt_version=str(document.stats["prompt_version"]),
             step=STEP_WRITE_ITEMS,
             previous_hashes=previous_hashes,
         )
@@ -239,7 +266,7 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
             sections=doc_sections,
             requested_by=generation.requested_by,
             generation_id=generation_id,
-            prompt_version=prompts.PROMPT_VERSION,
+            prompt_version=str(document.stats["prompt_version"]),
             step=STEP_WRITE_DOC,
             previous_hashes=previous_hashes,
         )
@@ -302,6 +329,9 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         family=family,
         carried=carried,
         counterpart=counterpart,
+        output_language=language,
+        multilingual=multilingual,
+        fidelity=bool(getattr(deps, "fidelity", False)),
     )
 
     # The transcript still lives in asr-service; a second copy is a retention decision
@@ -339,6 +369,13 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
             "lint_unresolved": (document.stats.get("lint") or {}).get("unresolved"),
             "lint_error": bool((document.stats.get("lint") or {}).get("error")),
             "prompt_version": document.stats.get("prompt_version"),
+            "multilingual_evidence": document.stats.get("multilingual_evidence"),
+            "output_language": document.stats.get("output_language"),
+            "facts_dropped_noise": document.stats.get("facts_dropped_noise", 0),
+            "noise_confirmed": document.stats.get("noise_confirmed", 0),
+            "facts_cross_language": document.stats.get("facts_cross_language", 0),
+            "meaning_unverified": document.stats.get("meaning_unverified", 0),
+            "fidelity": document.stats.get("fidelity"),
         },
     )
     return {
@@ -348,6 +385,56 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         "sections_suggested": suggested,
         "facts": len(document.facts),
     }
+
+
+def run_configuration(generation: Any, deps: Any) -> tuple[dict[str, Any], bool, bool, Any]:
+    """``(pinned snapshot, multilingual, fidelity, profile config)`` this job runs with:
+    what was pinned when it was queued (S3), whatever the settings say now; a row from
+    before S3 runs on this deployment's flags and the bundled profile, as it always did."""
+    pinned = getattr(generation, "config_snapshot", None) or {}
+    if pinned:
+        return (
+            pinned,
+            bool(pinned.get("multilingual")),
+            bool(pinned.get("fidelity")),
+            profiles.ProfileConfig.model_validate(pinned.get("config") or {}),
+        )
+    return (
+        {},
+        bool(getattr(deps, "multilingual_evidence", False)),
+        bool(getattr(deps, "fidelity", False)),
+        profiles.BUNDLED,
+    )
+
+
+async def _stage_providers(
+    deps: GenerationDeps, provider: Any, config: Any, pinned: dict[str, Any]
+) -> tuple[dict[str, Any], list[Any]]:
+    """``({stage: provider}, meters)`` for a pinned job: a stage bound to a backend calls
+    that backend, an unbound one the workspace's routed writer, each with the version's
+    settings and metered (the actual model per call). Unpinned: the routed writer alone."""
+    if not pinned:
+        return {}, []
+    staged: dict[str, Any] = {}
+    meters: list[Any] = []
+    for stage in profiles.STAGES:
+        binding = (pinned.get("models") or {}).get(stage) or {}
+        named = getattr(deps, "provider_named", None)
+        inner = await named(binding["backend"]) if binding.get("backend") and named else provider
+        params = config.params.get(stage) or profiles.StageParams()
+        meter = Metered(
+            StageProvider(
+                inner,
+                stage=stage,
+                temperature=params.temperature,
+                max_output_tokens=params.max_output_tokens,
+                timeout_s=params.timeout_s,
+            ),
+            stage=stage,
+        )
+        staged[stage] = meter
+        meters.append(meter)
+    return staged, meters
 
 
 async def _operation_provider(

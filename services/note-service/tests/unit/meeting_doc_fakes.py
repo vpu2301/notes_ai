@@ -56,6 +56,9 @@ def step_of(schema: dict[str, Any] | None) -> str:
         "figures",
         "people",
         "steps",
+        "checks",
+        "repairs",
+        "pairs",
     ):
         if key in props:
             return {

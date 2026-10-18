@@ -7,12 +7,118 @@ stored with every generation and pinned by fingerprint in the tests.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, Final
 
 # Versions 2026-10-12 … 2026-10-23 were labels set ahead of the calendar; compare
 # versions by the hash table in test_meeting_doc_prompts.py, never by string order.
-PROMPT_VERSION: Final = "2026-10-01.3"
+PROMPT_VERSION: Final = "2026-10-18.3"
+# What a generation with multilingual evidence OFF sends, byte for byte (the rollback path).
+PREVIOUS_PROMPT_VERSION: Final = "2026-10-01.3"
+
+
+def effective_version(*, multilingual: bool, fidelity: bool = False) -> str:
+    """The prompt text a generation with these flags sends: this version's with
+    multilingual evidence on, the previous one's byte for byte without it. Fidelity
+    adds calls from the same tables; ``stats["fidelity"]`` records it, not the version."""
+    del fidelity  # the same tables either way; kept so callers name both flags
+    return PROMPT_VERSION if multilingual else PREVIOUS_PROMPT_VERSION
+
+
+# Stages whose task instructions a workspace profile may replace (S3); the rest is contract.
+EDITABLE_STAGES: Final[tuple[str, ...]] = ("extraction", "composition", "verification")
+BUNDLED_LANGUAGES: Final[tuple[str, ...]] = ("en", "de", "uk")
+
+
+def _bundled(stage: str) -> dict[str, str]:
+    """The stage's bundled instructions per language, from the package's resources."""
+    from importlib import resources
+
+    folder = resources.files(__package__).joinpath("prompt_templates")
+    return {
+        lang: folder.joinpath(f"{stage}.{lang}.txt").read_text(encoding="utf-8")
+        for lang in BUNDLED_LANGUAGES
+    }
+
+
+# The guide's editable layer (05-prompt-instructions.md): common rules plus one text per
+# stage, English, rendered with code-supplied variables. The builders' localized rules,
+# the schemas and the data guard stay underneath it, whatever a stage text says.
+TASK_RESOURCES: Final[tuple[str, ...]] = (
+    "common",
+    "extraction",
+    "composition",
+    "verification",
+    "context",
+    "deduplication",
+)
+TASK_VARIABLES: Final[frozenset[str]] = frozenset({"output_language", "length_mode"})
+LANGUAGE_NAMES: Final[dict[str, str]] = {"en": "English", "de": "German", "uk": "Ukrainian"}
+_SLOT: Final = re.compile(r"\{\{\s*([^{}]*?)\s*\}\}")
+# composition.md's subsections, by their heading line.
+_SUBTASK: Final = re.compile(
+    r"^(GENERAL|SUMMARY SUBTASK|TOPIC/BULLET SUBTASK|HEADING SUBTASK|CHRONOLOGY)$", re.M
+)
+
+
+def _resource(name: str) -> str:
+    from importlib import resources
+
+    folder = resources.files(__package__).joinpath("prompt_templates")
+    return folder.joinpath(f"{name}.md").read_text(encoding="utf-8").strip()
+
+
+def render_slots(text: str, *, output_language: str, length_mode: str) -> str:
+    """Allowlisted ``{{name}}`` slots filled in; anything else is left as written text."""
+    values = {
+        "output_language": LANGUAGE_NAMES.get(output_language, output_language),
+        "length_mode": length_mode,
+    }
+    return _SLOT.sub(lambda m: values.get(m.group(1), m.group(0)), text)
+
+
+@dataclass(frozen=True, slots=True)
+class Task:
+    """One generation's rendered task texts (bundled, or a profile's for an editable stage)."""
+
+    common: str
+    extraction: str
+    composition: str
+    verification: str
+    context: str
+    deduplication: str
+
+    def composing(self, *subtasks: str) -> str:
+        """GENERAL plus the named subsections of the composition text — one operation's
+        instructions, not every operation's. A text without the headings is used whole."""
+        parts = _SUBTASK.split(self.composition)
+        if len(parts) < 3:
+            return self.composition
+        sections = {parts[k]: parts[k + 1].strip() for k in range(1, len(parts) - 1, 2)}
+        head = parts[0].strip()
+        chosen = [sections[name] for name in ("GENERAL", *subtasks) if name in sections]
+        return "\n\n".join(p for p in (head, *chosen) if p)
+
+
+def task(
+    output_language: str, length_mode: str = "standard", overrides: dict[str, str] | None = None
+) -> Task:
+    """The task texts for one generation: ``overrides`` (a profile's extraction,
+    composition or verification text) in place of the bundled ones."""
+    texts = {name: (overrides or {}).get(name) or _resource(name) for name in TASK_RESOURCES}
+    return Task(
+        **{
+            name: render_slots(text, output_language=output_language, length_mode=length_mode)
+            for name, text in texts.items()
+        }
+    )
+
+
+def _with_task(task_texts: str | None, rules: str) -> str:
+    return f"{task_texts}\n\n{rules}" if task_texts else rules
+
 
 DATA_OPEN: Final = "⟦"
 DATA_CLOSE: Final = "⟧"
@@ -174,169 +280,72 @@ _NOISE_RULE: Final[dict[str, str]] = {
     ),
 }
 
-EXTRACT_SYSTEM: Final[dict[str, str]] = {
+# Multilingual evidence: a language is never a reason for `noise`.
+_NOISE_RULE_MULTILINGUAL: Final[dict[str, str]] = {
     "en": (
-        "You read one part of a meeting transcript and list what was said, as typed "
-        "facts, for a professional meeting record. Every fact must carry a VERBATIM "
-        "quote of 3 to 30 words copied exactly from the transcript, and the number in "
-        "brackets of the line it came from.\n"
-        "Rules:\n"
-        "- Never write anything that is not in the transcript. If in doubt, leave it out.\n"
-        "- `text` is the point restated as ONE neutral business statement, in the third "
-        "person or impersonal. Never the quote copied. Never 'X said', 'X thinks', "
-        "'X believes', 'X wants', 'X was worried'. Never 'we', 'I' or 'our'. "
-        f"'{_EN['worry_quote']}' becomes '{_EN['worry_text']}' Name a person only when "
-        "ownership, a formal decision or an expert's recommendation depends on it.\n"
-        "- Skip greetings, small talk, jokes, filler, hesitation, repetition and remarks "
-        "that carry no information. One fact per point; a point made twice is one fact.\n"
-        "- A decision is something the group AGREED. A suggestion nobody answered is a "
-        "key_point, not a decision. A proposal stays a proposal: "
-        f"'{_EN['proposal_right']}', not '{_EN['proposal_wrong']}'.\n"
-        "- An action has an owner only if a person took it on, or was named. "
-        '"We should…" has no owner.\n'
-        "- A due date only if it was spoken. Never calculate one.\n"
-        "- Copy numbers exactly. Do not round, convert or correct them.\n"
-        "- Keep the speaker's certainty and set `certainty`: an estimate stays an "
-        f"estimate ('{_EN['estimate_text']}'), a prediction a prediction, an opinion an "
-        f"opinion ('{_EN['opinion_text']}'), a proposal a proposal, an allegation an "
-        "allegation. Never make a claim more certain than it was said.\n"
-        "- `attributed_to` is who holds this position — a speaker, or a person or "
-        "organisation the speaker reports; null for a plain fact.\n"
-        "- `text` never opens with a pronoun (he, she, it, they). Write who it is, and put "
-        "that name in `subject`: "
-        f"'{_EN['subject_quote']}' becomes subject 'Marek Quill', text '{_EN['subject_text']}'. "
-        "Take the name from these lines only; if nobody is named, leave the fact out.\n"
-        "- Do not open with 'It was stated/noted/mentioned/established/discussed that'. "
-        "State the point, with enough context to stand on its own — the reader did not "
-        f"attend: '{_EN['standalone_right']}', not '{_EN['standalone_wrong']}'.\n"
-        "- One fact = one specific claim: who or what, and the number, date or name that "
-        "makes it checkable. A scene (what could be seen or heard) is not a fact.\n"
-        "- `figure`: a number a speaker attaches to a named quantity. `name` is the "
-        "quantity, `value` the number exactly as said (digits or words), `unit` as said "
-        "(may be empty), `qualifier` the speaker's own hedge ('just under', 'about', "
-        "'up to') or empty. Never compute, round or convert. "
-        f"'{_EN['figure_quote']}' → name '{_EN['figure_name']}', value 'two', unit "
-        "'kilos', qualifier 'just under'.\n"
-        "- `introduction`: somebody introducing themselves or someone else — `name`, "
-        "`role`, `organisation` and `qualifier` in the words that were said, nothing "
-        "added.\n"
-        "- `next_step`: what the listener is asked to do (write, call, comment, visit).\n"
-        "- The examples in these instructions are about an invented company. Never copy "
-        "a name or a sentence from them.\n"
-        f"{_NOISE_RULE['en']}"
-        "- Never describe the transcript, the notes or how they were made.\n"
-        "- Answer in the same language as the transcript."
+        "- List in `noise` the turns that are clearly not part of this conversation — "
+        "background speech, a transcription artifact, a duplicated passage, an unrelated "
+        "fragment — with the reason. Take no facts from them. The language a line is in "
+        "is never a reason: a quote, a clip or a sentence in another language is part "
+        "of the conversation.\n"
     ),
     "de": (
-        "Du liest einen Teil eines Besprechungsprotokolls und listest auf, was gesagt "
-        "wurde, als typisierte Fakten für ein professionelles Protokoll. Jeder Fakt "
-        "braucht ein WÖRTLICHES Zitat von 3 bis 30 Wörtern, exakt aus dem Transkript "
-        "kopiert, und die Nummer in eckigen Klammern der Zeile, aus der es stammt.\n"
-        "Regeln:\n"
-        "- Schreibe nie etwas, das nicht im Transkript steht. Im Zweifel weglassen.\n"
-        "- `text` ist der Punkt als EINE neutrale Aussage im Geschäftsstil, in der dritten "
-        "Person oder unpersönlich. Nie das Zitat kopiert. Nie „X sagte“, „X glaubt“, "
-        "„X meint“, „X möchte“, „X war besorgt“, nie „man glaubte“. Nie „wir“, „ich“ oder "
-        f"„unser“. „{_DE['worry_quote']}“ wird zu „{_DE['worry_text']}“ Eine Person nur "
-        "nennen, wenn Verantwortung, eine formelle Entscheidung oder eine "
-        "Expertenempfehlung davon abhängt.\n"
-        "- Begrüßungen, Smalltalk, Witze, Füllwörter, Zögern, Wiederholungen und Bemerkungen "
-        "ohne Informationswert weglassen. Ein Fakt pro Punkt; ein zweimal gemachter Punkt "
-        "ist ein Fakt.\n"
-        "- Eine Entscheidung ist etwas, dem die Gruppe ZUGESTIMMT hat. Ein Vorschlag, "
-        "auf den niemand geantwortet hat, ist key_point. Ein Vorschlag bleibt ein "
-        f"Vorschlag: „{_DE['proposal_right']}“, nicht „{_DE['proposal_wrong']}“.\n"
-        "- Eine Aufgabe hat nur dann eine verantwortliche Person, wenn jemand sie "
-        'übernommen hat oder genannt wurde. "Wir sollten…" hat keine.\n'
-        "- Eine Frist nur, wenn sie gesagt wurde. Niemals selbst berechnen.\n"
-        "- Zahlen exakt übernehmen. Nicht runden, umrechnen oder korrigieren.\n"
-        "- Die Gewissheit des Sprechers beibehalten und `certainty` setzen: eine "
-        f"Schätzung bleibt eine Schätzung („{_DE['estimate_text']}“), eine Prognose eine "
-        f"Prognose, eine Meinung eine Meinung („{_DE['opinion_text']}“), ein Vorschlag "
-        "ein Vorschlag, ein Vorwurf ein Vorwurf. Nie eine Aussage sicherer machen, als "
-        "sie gesagt wurde.\n"
-        "- `attributed_to` ist, wer diese Position vertritt — ein Sprecher oder eine "
-        "Person oder Organisation, über die berichtet wird; null bei einer reinen "
-        "Tatsache.\n"
-        "- `text` beginnt nie mit einem Pronomen (er, sie, es). Schreibe, wer es ist, und "
-        "setze diesen Namen in `subject`: "
-        f"„{_DE['subject_quote']}“ wird zu subject „Marek Quill“, text „{_DE['subject_text']}“. "
-        "Den Namen nur aus diesen Zeilen nehmen; nennt ihn niemand, den Fakt weglassen.\n"
-        "- Nicht mit „Es wurde gesagt/erwähnt/festgestellt/besprochen, dass“ beginnen. "
-        "Die Sache nennen, mit genug Kontext, um allein zu stehen — der Leser war nicht "
-        f"dabei: „{_DE['standalone_right']}“, nicht „{_DE['standalone_wrong']}“.\n"
-        "- Ein Fakt = eine konkrete Aussage: wer oder was, und die Zahl, das Datum oder der "
-        "Name, die sie überprüfbar machen. Eine Szene (was zu sehen oder zu hören war) ist "
-        "kein Fakt.\n"
-        "- `figure`: eine Zahl, die jemand einer benannten Größe zuordnet. `name` ist die "
-        "Größe, `value` die Zahl genau wie gesagt (Ziffern oder Wörter), `unit` wie gesagt "
-        "(darf leer sein), `qualifier` die eigene Einschränkung („knapp“, „etwa“, „bis zu“) "
-        "oder leer. Nie rechnen, runden oder umrechnen. "
-        f"„{_DE['figure_quote']}“ → name „{_DE['figure_name']}“, value „zwei“, unit "
-        "„Kilo“, qualifier „knapp“.\n"
-        "- `introduction`: jemand stellt sich oder eine andere Person vor — `name`, `role`, "
-        "`organisation` und `qualifier` in den gesagten Worten, nichts hinzugefügt.\n"
-        "- `next_step`: wozu die Zuhörer aufgefordert werden (schreiben, anrufen, "
-        "kommentieren, besuchen).\n"
-        "- Die Beispiele in diesen Anweisungen handeln von einer erfundenen Firma. Nie "
-        "einen Namen oder Satz daraus übernehmen.\n"
-        f"{_NOISE_RULE['de']}"
-        "- Nie das Transkript, die Notizen oder ihre Entstehung beschreiben.\n"
-        "- Antworte in der Sprache des Transkripts."
+        "- In `noise` die Redebeiträge nennen, die eindeutig nicht zu diesem Gespräch "
+        "gehören — Hintergrundgespräch, Transkriptionsartefakt, doppelte Passage, "
+        "unzusammenhängendes Fragment — mit dem Grund. Daraus keine Fakten nehmen. Die "
+        "Sprache einer Zeile ist nie ein Grund: ein Zitat, ein Einspieler oder ein Satz "
+        "in einer anderen Sprache gehört zum Gespräch.\n"
     ),
     "uk": (
-        "Ти читаєш частину стенограми зустрічі й перелічуєш сказане у вигляді "
-        "типізованих фактів для професійного протоколу. Кожен факт повинен мати "
-        "ДОСЛІВНУ цитату з 3–30 слів, скопійовану точно зі стенограми, і номер у дужках рядка, з якого вона взята.\n"
-        "Правила:\n"
-        "- Ніколи не пиши того, чого немає у стенограмі. Якщо сумніваєшся — пропусти.\n"
-        "- `text` — це суть, переказана ОДНИМ нейтральним діловим твердженням, у третій "
-        "особі або безособово. Ніколи не копіюй цитату. Ніколи «X сказав», «X вважає», "
-        f"«X думає», «X хоче», «X переймався». Ніколи «ми», «я» чи «наш». «{_UK['worry_quote']}» "
-        f"стає «{_UK['worry_text']}» Називай людину лише тоді, коли від цього залежить "
-        "відповідальність, формальне рішення або рекомендація експерта.\n"
-        "- Пропускай привітання, світські розмови, жарти, слова-паразити, вагання, повтори "
-        "та зауваження без інформації. Один факт на думку; думка, сказана двічі, — один "
-        "факт.\n"
-        "- Рішення — це те, з чим група ПОГОДИЛАСЯ. Пропозиція, на яку ніхто не "
-        "відповів, — це key_point. Пропозиція лишається пропозицією: "
-        f"«{_UK['proposal_right']}», а не «{_UK['proposal_wrong']}».\n"
-        "- Завдання має виконавця лише тоді, коли людина взяла його на себе або її "
-        "назвали. «Треба…» не має виконавця.\n"
-        "- Термін — лише якщо його назвали. Ніколи не обчислюй його сам.\n"
-        "- Числа переписуй точно. Не округлюй, не переводь, не виправляй.\n"
-        "- Зберігай упевненість мовця і задавай `certainty`: оцінка лишається оцінкою "
-        f"(«{_UK['estimate_text']}»), прогноз — прогнозом, думка — думкою "
-        f"(«{_UK['opinion_text']}»), пропозиція — пропозицією, звинувачення — "
-        "звинуваченням. Ніколи не роби твердження впевненішим, ніж його сказали.\n"
-        "- `attributed_to` — хто дотримується цієї позиції: мовець або людина чи "
-        "організація, про яку він розповідає; null для простого факту.\n"
-        "- `text` ніколи не починається із займенника (він, вона, воно, вони). Напиши, хто це, "
-        "і постав це ім'я в `subject`: "
-        f"«{_UK['subject_quote']}» стає subject «Марек Квілл», text «{_UK['subject_text']}». "
-        "Бери ім'я лише з цих рядків; якщо його ніхто не назвав, пропусти факт.\n"
-        "- Не починай з «Було зазначено/сказано/встановлено/обговорено, що». Називай "
-        "суть із достатнім контекстом, щоб вона стояла окремо — читач не був присутній: "
-        f"«{_UK['standalone_right']}», а не «{_UK['standalone_wrong']}».\n"
-        "- Один факт = одне конкретне твердження: хто чи що, і число, дата чи назва, що "
-        "робить його перевірюваним. Сцена (що було видно чи чутно) — не факт.\n"
-        "- `figure`: число, яке мовець пов'язує з названою величиною. `name` — величина, "
-        "`value` — число точно як сказано (цифрами чи словами), `unit` — як сказано (може "
-        "бути порожнім), `qualifier` — власне застереження мовця («трохи менше», "
-        "«приблизно», «до») або порожньо. Ніколи не рахуй, не округлюй і не переводь. "
-        f"«{_UK['figure_quote']}» → name «{_UK['figure_name']}», value «двох», unit "
-        "«кілограмів», qualifier «трохи менше».\n"
-        "- `introduction`: хтось представляє себе чи іншу людину — `name`, `role`, "
-        "`organisation` і `qualifier` сказаними словами, нічого не додаючи.\n"
-        "- `next_step`: що слухачам пропонують зробити (написати, зателефонувати, "
-        "прокоментувати, відвідати).\n"
-        "- Приклади в цих інструкціях стосуються вигаданої компанії. Ніколи не копіюй "
-        "з них імен чи речень.\n"
-        f"{_NOISE_RULE['uk']}"
-        "- Ніколи не описуй стенограму, нотатки чи те, як їх зроблено.\n"
-        "- Відповідай мовою стенограми."
+        "- У `noise` перелічи репліки, що явно не належать до цієї розмови — фонова "
+        "мова, артефакт транскрипції, повторений уривок, непов'язаний фрагмент — із "
+        "причиною. Не бери з них фактів. Мова рядка ніколи не є причиною: цитата, "
+        "вставка чи речення іншою мовою — частина розмови.\n"
     ),
 }
+
+# Multilingual evidence: lines tagged [en]/[de]/[uk] are sources like any other.
+_SOURCE_LANGUAGE_RULE: Final[dict[str, str]] = {
+    "en": (
+        "- A line tagged [de], [uk] or another code was spoken in that language. It is "
+        "evidence like every other line: take its facts.\n"
+        "- `quote` is copied exactly as spoken, in the language it was spoken. `text` is "
+        "always in English.\n"
+        "- A claim carried into English keeps its meaning exactly: every condition ('if', "
+        "'only if', 'both'), who receives or does what, every negation, every amount and "
+        "unit.\n"
+        "- A sentence that switches language midway is one point: keep it whole."
+    ),
+    "de": (
+        "- Eine mit [en], [uk] oder einem anderen Kürzel markierte Zeile wurde in dieser "
+        "Sprache gesprochen. Sie ist ein Beleg wie jede andere Zeile: nimm ihre Fakten auf.\n"
+        "- `quote` wird genau so kopiert, wie es gesprochen wurde, in der Sprache, in der "
+        "es gesprochen wurde. `text` ist immer auf Deutsch.\n"
+        "- Eine Aussage, die ins Deutsche übertragen wird, behält ihre Bedeutung genau: "
+        "jede Bedingung („wenn“, „nur wenn“, „beide“), wer was erhält oder tut, jede "
+        "Verneinung, jeden Betrag und jede Einheit.\n"
+        "- Ein Satz, der mittendrin die Sprache wechselt, ist ein Punkt: behalte ihn ganz."
+    ),
+    "uk": (
+        "- Рядок, позначений [en], [de] чи іншим кодом, сказано тією мовою. Це такий самий "
+        "доказ, як і кожен інший рядок: бери з нього факти.\n"
+        "- `quote` копіюй точно так, як сказано, тією мовою, якою сказано. `text` — "
+        "завжди українською.\n"
+        "- Твердження, перенесене українською, зберігає точний зміст: кожну умову («якщо», "
+        "«лише якщо», «обидва»), хто що отримує чи робить, кожне заперечення, кожну суму "
+        "й одиницю.\n"
+        "- Речення, що посередині змінює мову, — це один пункт: зберігай його цілим."
+    ),
+}
+# The closing line the source-language rule replaces, per language.
+_ANSWER_LANGUAGE_LINE: Final[dict[str, str]] = {
+    "en": "- Answer in the same language as the transcript.",
+    "de": "- Antworte in der Sprache des Transkripts.",
+    "uk": "- Відповідай мовою стенограми.",
+}
+
+# The extraction builder's own rules (kinds, quotes, fields): prompt_templates/extract_rules.<lang>.txt.
+EXTRACT_SYSTEM: Final[dict[str, str]] = _bundled("extract_rules")
 
 # Four NEGATIVE examples (the costliest mistakes), each showing the right answer.
 _EXTRACT_SHOTS: Final[dict[str, str]] = {
@@ -476,48 +485,8 @@ REDUCE_TOPICS_SYSTEM: Final[dict[str, str]] = {
     ),
 }
 
-REDUCE_SUMMARY_SYSTEM: Final[dict[str, str]] = {
-    "en": (
-        "You write at most 5 short sentences summarising a meeting, for someone who "
-        "was not there, in the style of an executive meeting record. Use only the facts "
-        "given. State outcomes, not the flow of the conversation: "
-        f"'{_EN['summary_right']}', not '{_EN['summary_wrong']}'. Third person or impersonal; never 'we', 'I' or 'our', never 'X said' or 'X thinks'. "
-        "Say what was discussed, what was decided and what is next; no preamble, no "
-        "conclusion, no adjectives that are not in the facts, no filler. The opening "
-        "sentence that says what kind of conversation this was is already written: do "
-        "not repeat it; write the substance, keeping each fact's certainty. Put the ids "
-        "of the facts a sentence rests on in `fact_ids` ONLY — never in the sentence. "
-        "Use only names that appear in the facts. Name who holds each opinion or "
-        "forecast, and keep its hedge."
-    ),
-    "de": (
-        "Du schreibst höchstens 5 kurze Sätze, die eine Besprechung zusammenfassen — "
-        "für jemanden, der nicht dabei war, im Stil eines Management-Protokolls. Nutze "
-        "nur die gegebenen Fakten. Nenne Ergebnisse, nicht den Gesprächsverlauf: "
-        f"„{_DE['summary_right']}“, nicht „{_DE['summary_wrong']}“. Dritte Person oder unpersönlich; nie „wir“, „ich“ oder „unser“, nie "
-        "„X sagte“, „X glaubt“ oder „man glaubte“. Sage, was besprochen, was entschieden "
-        "wurde und was als Nächstes kommt; keine Einleitung, kein Fazit, keine "
-        "Adjektive, die nicht in den Fakten stehen, keine Füllsätze. Der Einleitungssatz, "
-        "der sagt, was für ein Gespräch das war, ist bereits geschrieben: nicht "
-        "wiederholen; schreibe die Substanz und behalte die Gewissheit jedes Fakts. Die "
-        "ids der Fakten, auf denen ein Satz beruht, gehören NUR in `fact_ids` — nie in "
-        "den Satz. Verwende nur Namen, die in den Fakten vorkommen. Nenne, wer eine "
-        "Meinung oder Prognose vertritt, und behalte ihre Unsicherheit bei."
-    ),
-    "uk": (
-        "Ти пишеш щонайбільше 5 коротких речень, що підсумовують зустріч, для людини, "
-        "якої там не було, у стилі ділового протоколу. Використовуй лише надані факти. "
-        f"Називай результати, а не хід розмови: «{_UK['summary_right']}», а не "
-        f"«{_UK['summary_wrong']}». Третя особа або безособово; ніколи «ми», "
-        "«я» чи «наш», ніколи «X сказав» чи «X вважає». Скажи, що обговорили, що "
-        "вирішили і що далі; без вступу, без висновку, без прикметників, яких немає у "
-        "фактах, без води. Вступне речення про те, що це була за розмова, вже "
-        "написано: не повторюй його; пиши суть, зберігаючи впевненість кожного факту. "
-        "Id фактів, на яких ґрунтується речення, — ЛИШЕ у `fact_ids`, ніколи в реченні. "
-        "Використовуй лише імена, що є у фактах. Називай, хто висловлює кожну "
-        "думку чи прогноз, і зберігай їхню непевність."
-    ),
-}
+# The summary builder's own rules: prompt_templates/summary_rules.<lang>.txt.
+REDUCE_SUMMARY_SYSTEM: Final[dict[str, str]] = _bundled("summary_rules")
 
 REDUCE_CONTEXT_SYSTEM: Final[dict[str, str]] = {
     "en": (
@@ -599,12 +568,25 @@ def guard(language: str) -> str:
     return _pick(_GUARD, language)
 
 
-def extract_system(language: str, *, noise: bool = True) -> str:
-    """``noise=False`` (small-model profile) leaves out the rule for the absent field."""
+def extract_system(
+    language: str, *, noise: bool = True, multilingual: bool = False, task: Task | None = None
+) -> str:
+    """``noise=False`` (small-model profile) leaves out the rule for the absent field.
+    ``multilingual``: no language is noise, and lines in another language are evidence
+    restated in ``language``; off, the prompt is byte for byte the previous version's.
+    ``task``: the common rules and the extraction text go first; this builder's rules
+    (kinds, quotes, fields, the noise and source-language rules, the guard) stay under them."""
     text = _pick(EXTRACT_SYSTEM, language)
+    rule = _pick(_NOISE_RULE, language)
+    if multilingual:
+        text = text.replace(rule, _pick(_NOISE_RULE_MULTILINGUAL, language))
+        rule = _pick(_NOISE_RULE_MULTILINGUAL, language)
+        if language in _SOURCE_LANGUAGE_RULE:
+            text = text.replace(_ANSWER_LANGUAGE_LINE[language], _SOURCE_LANGUAGE_RULE[language])
     if not noise:
-        text = text.replace(_pick(_NOISE_RULE, language), "")
-    return f"{text}\n\n{guard(language)}"
+        text = text.replace(rule, "")
+    rules = f"{text}\n\n{guard(language)}"
+    return _with_task(f"{task.common}\n\n{task.extraction}" if task else None, rules)
 
 
 _CARRIED_HEADING: Final[dict[str, str]] = {
@@ -905,9 +887,14 @@ SUMMARY_BLOCKS: Final[dict[str, str]] = {
 }
 
 
-def block_system(language: str, bullets: int = 4) -> str:
+def block_system(language: str, bullets: int = 4, *, task: Task | None = None) -> str:
     text = _pick(BLOCK_SYSTEM, language).replace("{bullets}", str(bullets))
-    return f"{text}\n\n{guard(language)}"
+    composing = (
+        task.composing("TOPIC/BULLET SUBTASK", "HEADING SUBTASK", "CHRONOLOGY") if task else ""
+    )
+    return _with_task(
+        f"{task.common}\n\n{composing}" if task else None, f"{text}\n\n{guard(language)}"
+    )
 
 
 # Small-model profile: heading and bullets in two calls, flat schema.
@@ -972,13 +959,22 @@ SCHEMA_ECHO: Final[dict[str, str]] = {
 }
 
 
-def block_heading_system(language: str) -> str:
-    return f"{_pick(BLOCK_HEADING_SYSTEM, language)}\n\n{guard(language)}"
+def block_heading_system(language: str, *, task: Task | None = None) -> str:
+    return _with_task(
+        f"{task.common}\n\n{task.composing('HEADING SUBTASK')}" if task else None,
+        f"{_pick(BLOCK_HEADING_SYSTEM, language)}\n\n{guard(language)}",
+    )
 
 
-def block_bullets_system(language: str, bullets: int = 4) -> str:
+def block_bullets_system(language: str, bullets: int = 4, *, task: Task | None = None) -> str:
+    # The small-model profile keeps the meaning-preservation rules (common + GENERAL).
     text = _pick(BLOCK_BULLETS_SYSTEM, language).replace("{bullets}", str(bullets))
-    return f"{text}\n\n{guard(language)}"
+    return _with_task(
+        f"{task.common}\n\n{task.composing('TOPIC/BULLET SUBTASK', 'CHRONOLOGY')}"
+        if task
+        else None,
+        f"{text}\n\n{guard(language)}",
+    )
 
 
 def schema_echo(language: str, json_schema: dict[str, Any]) -> str:
@@ -1022,8 +1018,12 @@ def topics_system(language: str) -> str:
     return f"{_pick(REDUCE_TOPICS_SYSTEM, language)}\n\n{guard(language)}"
 
 
-def summary_system(language: str) -> str:
-    return f"{_pick(REDUCE_SUMMARY_SYSTEM, language)}\n\n{guard(language)}"
+def summary_system(language: str, *, task: Task | None = None) -> str:
+    rules = f"{_pick(REDUCE_SUMMARY_SYSTEM, language)}\n\n{guard(language)}"
+    return _with_task(
+        f"{task.common}\n\n{task.composing('SUMMARY SUBTASK', 'CHRONOLOGY')}" if task else None,
+        rules,
+    )
 
 
 # The one follow-up for figures that came back without their fields.
@@ -1072,6 +1072,57 @@ PERSON_DETAILS_SYSTEM: Final[dict[str, str]] = {
         "якщо рядок цього не каже."
     ),
 }
+
+
+# Meaning, not words: a claim restated in another language than its line was spoken in.
+
+
+# The verifier's and the deduplicator's output contract (docs/development/ai-notes-quality/
+# 05-prompt-instructions.md): fixed by code, never part of an editable stage text.
+_VERIFICATION_CONTRACT: Final = (
+    "Each claim in the data has an id (claim_id) and the lines shown for it; a line's "
+    "evidence id is the number in its brackets. Answer one check per claim, every claim "
+    "exactly once: claim_id as given; verdict supported, contradicted or "
+    "insufficient_evidence; evidence_ids only from the lines shown for that claim; a reason "
+    "of a few words; corrected_claim in the claim's own language, or null."
+)
+_DEDUPLICATION_CONTRACT: Final = (
+    "Each pair in the data has a left and a right proposition, each with its id and quote. "
+    "Answer one judgement per pair: left_id and right_id as given; relation equivalent, "
+    "explicit_correction, contradiction or distinct (for explicit_correction the right_id "
+    "is the proposition that corrects the left); a reason of a few words; merged_text for "
+    "an equivalent pair, or null."
+)
+
+
+def meaning_check_system(language: str, *, task: Task) -> str:
+    """Common rules, the verification stage text, the output contract, the data guard."""
+    return f"{task.common}\n\n{task.verification}\n\n{_VERIFICATION_CONTRACT}\n\n{guard(language)}"
+
+
+def meaning_check_prompt(items: list[tuple[str, str, str, list[str]]]) -> str:
+    """``items`` = ``[(claim_id, claim, quote, rendered lines)]``; the cited line is among
+    the rendered lines with its neighbours."""
+    blocks = []
+    for claim_id, claim, quote, lines in items:
+        shown = "\n".join(f"   {line}" for line in lines)
+        blocks.append(f"claim_id {claim_id}: {claim}\n   quote: {quote}\n{shown}")
+    return f"{DATA_OPEN}\n" + "\n".join(blocks) + f"\n{DATA_CLOSE}"
+
+
+def deduplication_system(language: str, *, task: Task) -> str:
+    return (
+        f"{task.common}\n\n{task.deduplication}\n\n{_DEDUPLICATION_CONTRACT}\n\n{guard(language)}"
+    )
+
+
+def deduplication_prompt(pairs: list[tuple[tuple[str, str, str], tuple[str, str, str]]]) -> str:
+    """``pairs`` = ``[((id, text, quote), (id, text, quote))]`` — left, right."""
+    blocks = [
+        f"left {a[0]}: {a[1]}\n   quote: {a[2]}\nright {b[0]}: {b[1]}\n   quote: {b[2]}"
+        for a, b in pairs
+    ]
+    return f"{DATA_OPEN}\n" + "\n\n".join(blocks) + f"\n{DATA_CLOSE}"
 
 
 def person_details_system(language: str) -> str:
@@ -1124,8 +1175,11 @@ def contact_details_system(language: str) -> str:
     return f"{_pick(CONTACT_DETAILS_SYSTEM, language)}\n\n{guard(language)}"
 
 
-def context_system(language: str) -> str:
-    return f"{_pick(REDUCE_CONTEXT_SYSTEM, language)}\n\n{guard(language)}"
+def context_system(language: str, *, task: Task | None = None) -> str:
+    return _with_task(
+        f"{task.common}\n\n{task.context}" if task else None,
+        f"{_pick(REDUCE_CONTEXT_SYSTEM, language)}\n\n{guard(language)}",
+    )
 
 
 _BRIEF_LABELS: Final[dict[str, tuple[str, str, str]]] = {
@@ -1334,6 +1388,12 @@ def fingerprint() -> str:
         "brief": _BRIEF_LABELS,
         "block": BLOCK_SYSTEM,
         "noise_rule": _NOISE_RULE,
+        "noise_rule_multilingual": _NOISE_RULE_MULTILINGUAL,
+        "task_resources": {name: _resource(name) for name in TASK_RESOURCES},
+        "verification_contract": _VERIFICATION_CONTRACT,
+        "deduplication_contract": _DEDUPLICATION_CONTRACT,
+        "source_language_rule": _SOURCE_LANGUAGE_RULE,
+        "answer_language_line": _ANSWER_LANGUAGE_LINE,
         "shot_one": _EXTRACT_SHOT_ONE,
         "block_heading": BLOCK_HEADING_SYSTEM,
         "block_bullets": BLOCK_BULLETS_SYSTEM,
@@ -1356,6 +1416,11 @@ def fingerprint() -> str:
             "block_heading": schema.HEADING_SCHEMA,
             "block_bullets": schema.BLOCK_BULLETS_SCHEMA,
             "merge": schema.MERGE_SCHEMA,
+            "meaning_check": schema.meaning_check_schema(1),
+            "deduplication": schema.deduplication_schema(1),
+            "extract_multilingual": schema.extract_schema(
+                noise_reasons=schema.OFFERED_NOISE_REASONS
+            ),
             "title": _title_prompt_schema(),
         },
     }

@@ -240,6 +240,8 @@ class LintContext:
     known: frozenset[str] = frozenset()
     brief: dict[str, Any] = field(default_factory=dict)
     title: str | None = None
+    """Fidelity composition: no invented sequence in composed prose."""
+    fidelity: bool = False
     """Facts and speech minutes per third, from the engine's stats."""
     facts_by_third: tuple[int, ...] = ()
     minutes_by_third: tuple[float, ...] = ()
@@ -747,6 +749,9 @@ def _check_lines(sections: Sequence[RenderedSection], ctx: LintContext) -> list[
 
 
 def _certainty_missing(line: Line, ctx: LintContext) -> bool:
+    # The framing says what the episode is: a description, never a claim to label.
+    if line.kind == "framing":
+        return False
     unsure = [
         ctx.facts[i]
         for i in line.fact_ids
@@ -1184,7 +1189,11 @@ def _composed_p2(ctx: LintContext, current: list[Line]) -> list[Line]:
     facts = sorted(ctx.facts.values(), key=lambda f: f.start_ms)
     candidates = []
     for sentence, ids in overview.composed_sentences(
-        facts, language=ctx.language, known=ctx.known, key_ids=ctx.brief.get("key_fact_ids")
+        facts,
+        language=ctx.language,
+        known=ctx.known,
+        key_ids=ctx.brief.get("key_fact_ids"),
+        connectives=not ctx.fidelity,
     ):
         line = Line(sentence, "summary", tuple(ids))
         if line_fault(line, ctx) is None:
@@ -1502,6 +1511,7 @@ def context_of(
         title=title,
         facts_by_third=tuple(int(n) for n in stats.get("facts_by_third") or ()),
         minutes_by_third=tuple(float(m) for m in stats.get("speech_minutes_by_third") or ()),
+        fidelity=bool(stats.get("fidelity")),
     )
 
 

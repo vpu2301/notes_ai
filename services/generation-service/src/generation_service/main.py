@@ -77,7 +77,6 @@ def create_app() -> FastAPI:
         title="Generation Service",
         description="Sprint-15 Layer C inline generative completion (ADR-0036).",
         version="0.15.0",
-        openapi_version="3.1.0",
         lifespan=_lifespan,
         docs_url="/docs",
         redoc_url="/redoc",

@@ -207,6 +207,21 @@ codes.
 | `channel_layout_mismatch` | 422 | `POST /asr/jobs` | `channel_layout=mic_system` was declared but the file does not have exactly 2 channels. A client bug (the macOS app sends the field only for its own 2-channel files); retry without the field to upload as an ordinary recording. |
 | `local_speaker_name_invalid` | 422 | `POST /asr/jobs` | `local_speaker_name` is longer than 80 characters after collapsing whitespace. Send a shorter display name, or omit it. |
 
+## note-service — AI profiles and experiments (S3)
+
+| Code | Status | Where | Meaning / client action |
+| --- | --- | --- | --- |
+| `invalid_profile` | 422 | `POST /v1/ai/prompt-profiles/{id}/versions`, `/activate`, `POST /v1/ai/experiments` | The configuration cannot be saved or run. `problems[]` = `{field, code, detail}` per reason (`unknown_variable`, `too_long`, `empty`, `unbalanced_braces`, `context_budget`, `unknown_stage`, `model_unavailable`, `unsupported`, `out_of_range`, `unsupported_language`); show each beside its field. Nothing is clamped or dropped. |
+| `version_conflict` | 409 | `POST /v1/ai/prompt-profiles/{id}/versions` | Another version of the profile was saved at the same moment. Reload and save again. |
+| `incompatible_version` | 409 | `/activate`, `POST /v1/ai/experiments` | The version was written against a prompt contract or algorithm this deployment no longer runs; `detail` says which. Save it again as a new version. |
+| `active_revision_conflict` | 409 | `POST /v1/ai/prompt-profiles/{id}/activate` | Another admin moved the active pointer since this page loaded; `current_revision` is the new one. Reload and decide again — never an overwrite. |
+| `evaluation_required` | 409 | `POST /v1/ai/prompt-profiles/{id}/activate` | A version that never wrote this workspace's notes needs `evaluation_ref`: a completed experiment in which it ran, every run done, and no review finding `wrong_actor`, `missing_condition` or `unsupported_claim` against it. A rollback to a previously active version does not. |
+| `transcript_not_shared` | 403 | `POST /v1/ai/experiments`, `/estimate` | The caller can see the note but not its transcript. Choose another source or ask its author. |
+| `source_revision_conflict` | 409 | `POST /v1/ai/experiments`, `/estimate` | The transcript changed since it was chosen; `transcript_rev` is the current one. Choose it again. |
+| `experiment_budget` | 409 | `POST /v1/ai/experiments` | The estimate (`estimate_cents`) does not fit `cap_cents` or what is left of the month's budget (`left_cents`). Lower repetitions or sources, or raise the cap. An unpriced backend is never refused this way: its cost is unknown and a token cap bounds it. |
+| `experiment_active` | 429 | `POST /v1/ai/experiments` | One experiment at a time per workspace. Wait for it, or cancel it. |
+| `invalid_finding` | 422 | `POST /v1/ai/experiments/{id}/reviews` | A finding is not `{run: a\|b, label}` with a label from `labels`. |
+
 ## note-service — reading somebody else's note
 
 Note reads carry no `code`; the client branches on the problem `type`.

@@ -140,6 +140,22 @@ const COPY: Record<string, string> = {
   note_cancelled: "This note was cancelled and cannot be written again.",
   not_available_for_type: "A one-to-one and an interview debrief have no client version.",
 
+  // ── AI notes: profiles and experiments (S3/S4) ─────────────────────
+  invalid_profile: "Some settings cannot be saved. Each problem is shown beside its field.",
+  version_conflict: "Someone saved a version of this profile at the same moment. Reload and save again.",
+  incompatible_version:
+    "This version was made for an older way of writing notes. Open it and save it again as a new version.",
+  active_revision_conflict:
+    "Another admin changed which version is active since you opened this page. Reload and decide again.",
+  evaluation_required:
+    "This version has not passed an evaluation yet, so it stays a draft. Test it against your notes first.",
+  transcript_not_shared: "You can see that note but not its transcript, so it cannot be used for a test.",
+  source_revision_conflict: "A transcript changed since you chose it. Choose it again.",
+  experiment_budget:
+    "This test would cost more than its limit or what is left of this month's budget. Use fewer notes or repetitions.",
+  experiment_active: "Another test is still running. Wait for it to finish, or cancel it.",
+  invalid_finding: "That finding could not be recorded. Choose one of the listed labels.",
+
   // ── note roles & comments (W3) ────────────────────────────────────
   // The `required` level is in the problem; the sentence does not need it.
   insufficient_role: "Your access to this note does not include that. Ask its author for more.",

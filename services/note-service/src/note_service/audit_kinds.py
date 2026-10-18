@@ -127,5 +127,11 @@ NOTE_GENERATION_FAILED: Final = "note.generation_failed"  # error_kind
 # Closed vocabulary and counts; never a processor's commercial terms.
 AI_SETTINGS_CHANGED: Final = "ai.settings_changed"  # tier, provider, generation_enabled
 AI_BUDGET_REACHED: Final = "ai.budget_reached"  # cents, budget_cents
+# ── Prompt profiles and experiments (S3) ────────────────────────────
+# Ids, version numbers, revisions and counts; never instruction text or note content.
+AI_PROFILE_VERSION_SAVED: Final = "ai.profile_version_saved"  # profile_id, version_number, stages
+AI_PROFILE_ACTIVATED: Final = "ai.profile_activated"  # version_id, previous_version_id, revision
+AI_EXPERIMENT_STARTED: Final = "ai.experiment_started"  # sources, candidates, repetitions
+AI_EXPERIMENT_CANCELLED: Final = "ai.experiment_cancelled"  # runs_cancelled
 BILLING_PLAN_CHANGED: Final = "billing.plan_changed"  # from_plan, to_plan, provider
 BILLING_CODE_REDEEMED: Final = "billing.code_redeemed"  # from_plan, to_plan, days
