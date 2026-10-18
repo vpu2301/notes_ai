@@ -24,6 +24,8 @@ class Category(StrEnum):
     NOTE_COMMENTED = "note.commented"
     # This account's role on a note changed or was revoked; only that person hears.
     NOTE_ACCESS_CHANGED = "note.access_changed"
+    # W5: someone else moved the author team's note to another workspace (ids only).
+    NOTE_MOVED = "note.moved"
     # A recipient acted on the shared page; debounced per link by the producer.
     NOTE_RECIPIENT_RESPONDED = "note.recipient_responded"
     # A recipient link was opened; in-app only.
@@ -43,6 +45,8 @@ class Category(StrEnum):
     WORKSPACE_INVITATION_ACCEPTED = "workspace.invitation_accepted"
     # This account was removed from a workspace; written in their personal workspace.
     WORKSPACE_MEMBER_REMOVED = "workspace.member_removed"
+    # W5: the visibility backfill opened N of this author's notes to the workspace.
+    WORKSPACE_NOTES_SHARED = "workspace.notes_shared"
     SYSTEM_DIGEST = "system.digest"
 
 

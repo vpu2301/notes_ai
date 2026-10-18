@@ -18,8 +18,11 @@ from jobs import CostTable, HandlerSpec, JobContext, JobQueue, JobRunner, UsageL
 from models import Registry, build_chat_provider
 from observability import bootstrap
 
+from .collaboration_metrics import rehome_total
 from .config import settings
+from .domain.note_move import REHOME_JOB_KIND
 from .jobs.generate_note import GenerationDeps, handle_generate, mark_dead
+from .jobs.rehome_media import handle_rehome, mark_failed
 
 logger = logging.getLogger(__name__)
 
@@ -176,10 +179,39 @@ async def run() -> None:
             error_kind=error_kind,
         )
 
+    # W5: a moved note's audio and transcripts, re-encrypted into the workspace it moved to.
+    stores = {"audio": state.audio_store, "transcripts": transcripts}
+
+    async def _rehome(ctx: JobContext) -> dict[str, Any] | None:
+        try:
+            return await handle_rehome(
+                app_pool=app_pool,
+                stores=stores,
+                audit_writer=state.audit_writer,
+                tenant_id=UUID(str(ctx.job.tenant_id)),
+                payload=dict(ctx.job.payload),
+                enqueued_at=ctx.job.created_at,
+            )
+        except Exception:
+            rehome_total.add(1, {"result": "retry"})
+            raise
+
+    async def _rehome_dead(ctx: JobContext, error_kind: str) -> None:
+        await mark_failed(
+            app_pool=app_pool,
+            audit_writer=state.audit_writer,
+            tenant_id=UUID(str(ctx.job.tenant_id)),
+            payload=dict(ctx.job.payload),
+            error_kind=error_kind,
+        )
+
     queue = JobQueue(jobs_pool)
     runner = JobRunner(
         queue,
-        {JOB_KIND: HandlerSpec(run=_run, backend=_backend, probe=_probe, on_dead=_on_dead)},
+        {
+            JOB_KIND: HandlerSpec(run=_run, backend=_backend, probe=_probe, on_dead=_on_dead),
+            REHOME_JOB_KIND: HandlerSpec(run=_rehome, on_dead=_rehome_dead),
+        },
         worker_id=settings.registry_environ().get("HOSTNAME") or "note-worker",
         ledger=UsageLedger(CostTable.load(settings.models_config)),
         lease_seconds=LEASE_SECONDS,

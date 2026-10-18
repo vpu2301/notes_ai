@@ -147,7 +147,25 @@ def test_a_real_quote_survives_normalisation(spoken: str) -> None:
     window = _window(_turn(0, "Anna", spoken))
     kept = verify.verify_facts([_fact()], window=window, meeting_date=MEETING_DATE)
     assert len(kept) == 1
-    assert kept[0].start_ms == 0
+    assert 0 <= kept[0].start_ms < kept[0].end_ms <= 5_000
+
+
+def test_a_fact_is_timed_to_its_quote_not_the_whole_line() -> None:
+    # A long single-speaker line: a replay of the whole of it would be refused (> 60 s).
+    before = "a " * 200
+    after = " b" * 200
+    line = Turn(
+        index=0,
+        speaker_label="SPEAKER_0",
+        speaker_name="Anna",
+        text=f"{before}I'll send the pricing proposal by Tuesday{after}",
+        start_ms=100_000,
+        end_ms=220_000,
+    )
+    kept = verify.verify_facts([_fact()], window=_window(line), meeting_date=MEETING_DATE)
+    assert len(kept) == 1
+    assert 100_000 < kept[0].start_ms < kept[0].end_ms < 220_000
+    assert kept[0].end_ms - kept[0].start_ms < 20_000
 
 
 def test_a_quote_from_another_turn_in_the_window_still_resolves() -> None:

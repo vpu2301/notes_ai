@@ -41,6 +41,9 @@ ALLOWED_PAYLOAD_KEYS: Final[dict[Category, frozenset[str]]] = {
     Category.WORKSPACE_INVITED: frozenset({"tenant_id", "invitation_id", "role"}),
     Category.WORKSPACE_INVITATION_ACCEPTED: frozenset({"invitation_id", "role"}),
     Category.WORKSPACE_MEMBER_REMOVED: frozenset({"tenant_id"}),
+    # W5: the destination's id, never its name; the client names it if it is in its list.
+    Category.NOTE_MOVED: frozenset({"note_code", "to_workspace_id"}),
+    Category.WORKSPACE_NOTES_SHARED: frozenset({"count"}),
 }
 
 # Labels for the workspace-role vocabulary; an unknown value renders as nothing.
@@ -160,6 +163,10 @@ def render_title(event: NotificationEvent) -> str:
             return "Your invitation was accepted"
         case Category.WORKSPACE_MEMBER_REMOVED:
             return "You were removed from a workspace"
+        case Category.NOTE_MOVED:
+            return f"Note {code} was moved to another workspace"
+        case Category.WORKSPACE_NOTES_SHARED:
+            return "Your notes are now visible to the workspace"
     raise KeyError(event.category)
 
 
@@ -250,6 +257,14 @@ def render_body(event: NotificationEvent) -> str:
             return f"A new member joined as {role}." if role else "A new member joined."
         case Category.WORKSPACE_MEMBER_REMOVED:
             return "Your notes in your other workspaces are unaffected."
+        case Category.NOTE_MOVED:
+            return f"A colleague moved note {code}. Its links keep working."
+        case Category.WORKSPACE_NOTES_SHARED:
+            count = fields.get("count", "0")
+            return (
+                f"Notes in this workspace are now visible to everyone in it. "
+                f"{count} of yours changed. Review them to keep any private."
+            )
     raise KeyError(event.category)
 
 

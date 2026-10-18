@@ -164,7 +164,10 @@ def can_delete(note: NoteRow, claims: Claims) -> bool:
 
 
 def can_read_transcript(note: NoteRow, claims: Claims) -> bool:
-    """Transcript and audio: edit or above, or any reader once the author turned it on."""
+    """Transcript and audio: edit or above, or any reader once the author turned it on.
+    Nobody while a moved note's media is still on its way (W5 ``media_state``)."""
+    if note.media_state != "ready":
+        return False
     found = level(note, claims)
     return _rank(found) >= _rank("edit") or (found is not None and note.transcript_shared)
 

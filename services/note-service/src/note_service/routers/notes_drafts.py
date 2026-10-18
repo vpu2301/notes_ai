@@ -16,7 +16,7 @@ from note_models import NoteContent, NoteStatus
 
 from .. import audit_kinds
 from ..deps import get_state, requires
-from ..domain import access
+from ..domain import access, relocation
 from ..domain import notes_repository as repo
 from ..domain.conflicts import OptimisticLockMismatchError
 from ..domain.content_metadata import template_field_types
@@ -93,7 +93,11 @@ async def update_draft(
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         # A private note the caller was not given is a 404.
-        row = access.require_edit(await repo.lock_note_for_update(conn, note_id=note_id), claims)
+        locked = await repo.lock_note_for_update(conn, note_id=note_id)
+        if locked is None:
+            # W5: an editor left open on a note that moved gets told where it went.
+            await relocation.raise_if_moved(conn, note_id=note_id, claims=claims)
+        row = access.require_edit(locked, claims)
         if row.status != NoteStatus.DRAFT:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,

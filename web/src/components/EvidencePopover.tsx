@@ -17,6 +17,9 @@ export const CERTAINTY_LABELS: Record<string, string> = {
 /** Seconds of recording played either side of the quote. */
 export const CLIP_PADDING_MS = 1_500;
 
+/** The server refuses longer clips (MDX_CLIP_MAX_SPAN_MS); a long line plays from its start. */
+export const CLIP_MAX_SPAN_MS = 60_000;
+
 /** "Forecast · Reinbold" — or null for a plain fact. */
 export function chipLabel(row: GeneratedItem): string | null {
   const label = row.certainty ? CERTAINTY_LABELS[row.certainty] : undefined;
@@ -60,8 +63,12 @@ export function LineEvidence({
     setProblem(null);
     setPlaying(true);
     try {
-      const url = await createClip(noteId, row.start_ms - CLIP_PADDING_MS, row.end_ms + CLIP_PADDING_MS);
-      await new Audio(url).play();
+      const start = Math.max(0, row.start_ms - CLIP_PADDING_MS);
+      const end = Math.min(row.end_ms + CLIP_PADDING_MS, start + CLIP_MAX_SPAN_MS);
+      const url = await createClip(noteId, start, end);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      await audio.play();
     } catch (err) {
       setProblem(err instanceof ApiError && err.status === 410 ? "Recording no longer available" : messageFor(err));
     } finally {

@@ -8,6 +8,15 @@ export function speakerTint(name: string): string {
   return `var(--speaker-${h + 1})`;
 }
 
+const COLLAB_COUNT = 8;
+
+/** A `--tint` for a collaborator's avatar: one of the brighter `--collab-N` tokens; same hash as the native apps. */
+export function collabTint(name: string): string {
+  let h = 0;
+  for (const ch of name) h = (h + (ch.codePointAt(0) ?? 0)) % COLLAB_COUNT;
+  return `var(--collab-${h + 1})`;
+}
+
 export function speakerInitials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
   const pick = words.length >= 2 ? [words[0], words[words.length - 1]] : words.slice(0, 1);

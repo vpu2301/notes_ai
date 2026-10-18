@@ -8,6 +8,9 @@
           "note.amended",
           "note.chain_failure",
           "note.shared_with_you",
+          "note.commented",
+          "note.access_changed",
+          "note.moved",
           "note.recipient_responded",
           "note.link_status_changed",
           "share.reported",
@@ -19,6 +22,7 @@
           "workspace.invited",
           "workspace.invitation_accepted",
           "workspace.member_removed",
+          "workspace.notes_shared",
           "system.digest"
         ],
         "title": "Category",

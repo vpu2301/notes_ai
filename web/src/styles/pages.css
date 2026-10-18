@@ -278,8 +278,8 @@ section:first-of-type > .tpl-cat { margin-top: 0; }
 /* The note title gets the larger cut; the meeting stage keeps the smaller one. */
 .doc > .title-input {
   font-family: var(--serif);
-  font-size: calc(38px * var(--fs)); font-weight: 400;
-  line-height: 1.15; letter-spacing: -0.02em;
+  font-size: calc(32px * var(--fs)); font-weight: 400;
+  line-height: 1.2; letter-spacing: -0.015em;
 }
 .title-input:focus { outline: none; box-shadow: none; }
 /* Unframed title: the focus cue is a hairline underneath. */
@@ -295,6 +295,12 @@ textarea.title-input { resize: none; overflow: hidden; display: block; }
   margin: calc(4px * var(--density)) calc(-8px * var(--density)) 0;
   margin-bottom: calc(6px * var(--density));
 }
+/* On the note page it reads as one line of text: "Oct 18, 14:03 · Meeting · Sales". */
+.doc > .doc-meta { gap: 0; margin-top: 0; }
+.doc > .doc-meta > * + *::before { content: "·"; color: var(--muted); padding: 0 calc(2px * var(--density)); }
+.doc > .doc-meta .doc-pill { height: calc(24px * var(--density)); padding: 0 calc(6px * var(--density)); font-size: calc(14px * var(--fs)); }
+.doc > .doc-meta .doc-pill svg { display: none; }
+.doc > .doc-meta .doc-pill.tpl { color: var(--text-3); background: none; margin: 0; }
 .doc-pill {
   display: inline-flex; align-items: center; gap: calc(6px * var(--density));
   height: calc(28px * var(--density));
@@ -319,15 +325,46 @@ button.doc-pill:hover svg, a.doc-pill:hover svg { color: var(--text-2); }
 .doc-pill.tpl svg { color: currentColor; }
 .doc-pill.on { background: var(--surface-2); color: var(--text-1); border-color: transparent; }
 
-.doc-tabs { margin: calc(14px * var(--density)) 0 calc(6px * var(--density)); align-self: flex-start; }
+.doc-tabs-row {
+  display: flex; align-items: center; gap: calc(12px * var(--density));
+  margin: calc(14px * var(--density)) 0 calc(6px * var(--density));
+  border-bottom: var(--hairline) solid var(--line);
+}
+.doc-tabs-row > .detail-toggle { margin: 0 0 0 auto; }
+.doc-tabs-row > .note-copy { margin-left: auto; }
+.doc-tabs-row > .note-copy + .detail-toggle { margin-left: 0; }
+/* The note's views read as tabs, not a second toggle: ink labels on a hairline, a moss bar under the open one. */
+.tabs.doc-tabs {
+  gap: calc(22px * var(--density));
+  padding: 0; border-radius: 0; background: none;
+}
+.doc-tabs .tab {
+  position: relative;
+  height: 38px; padding: 0 1px;
+  border: 0; border-radius: 0; background: none; box-shadow: none;
+  font-size: calc(14.5px * var(--fs)); font-weight: 500;
+  color: var(--text-3);
+}
+.doc-tabs .tab:hover { color: var(--text-1); }
+.doc-tabs .tab.on { background: none; box-shadow: none; color: var(--text-1); }
+.doc-tabs .tab::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
+  height: 2px; border-radius: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transition: transform var(--t) var(--ease);
+}
+.doc-tabs .tab.on::after { transform: scaleX(1); }
+@media (prefers-reduced-motion: reduce) { .doc-tabs .tab::after { transition: none; } }
 /* Section names are the document's headings. */
 .doc .section-name {
-  font-family: var(--serif);
-  font-size: calc(20px * var(--fs)); font-weight: 500;
+  font-family: var(--display);
+  font-size: calc(19px * var(--fs)); font-weight: 600;
   letter-spacing: -0.01em;
 }
+.doc .section-name::before, .doc .rt-h::before { display: none; }
 .doc-body { display: flex; flex-direction: column; }
-.doc-section { padding: calc(10px * var(--density)) 0; }
+.doc-section { padding: calc(14px * var(--density)) 0 calc(6px * var(--density)); }
 .doc-section .field { gap: calc(6px * var(--density)); }
 /* The "#" hangs in the gutter outside the text column; dropped when there is no gutter. */
 .section-name {
@@ -363,8 +400,8 @@ button.doc-pill:hover svg, a.doc-pill:hover svg { color: var(--text-2); }
 .section-ro {
   white-space: pre-wrap; overflow-wrap: anywhere;
   color: var(--text-1);
-  font-size: calc(13.5px * var(--fs));
-  line-height: 1.65;
+  font-size: calc(16px * var(--fs));
+  line-height: 1.7;
 }
 .section-ro.empty-val { color: var(--muted); font-style: normal; }
 /* The typeset body shares the editor's hover paper: the only cue that it is editable. */
@@ -385,11 +422,11 @@ button.doc-pill:hover svg, a.doc-pill:hover svg { color: var(--text-2); }
 
 /* ─── Typeset note body (RichText) ──────────────────────────────────────── */
 /* Tight rhythm on purpose: a note is scanned, not read through. */
-.rt { color: var(--text-1); font-size: calc(13.5px * var(--fs)); line-height: 1.65; overflow-wrap: anywhere; }
+.rt { color: var(--text-1); font-size: calc(16px * var(--fs)); line-height: 1.7; overflow-wrap: anywhere; }
 .rt > :first-child { margin-top: 0; }
 .rt > :last-child { margin-bottom: 0; }
 .rt.empty-val { color: var(--muted); }
-.rt-p { margin: 0 0 calc(9px * var(--density)); }
+.rt-p { margin: 0 0 calc(12px * var(--density)); }
 /* Transcript turn */
 .rt-turn, .turn {
   display: grid; grid-template-columns: 28px 1fr; column-gap: calc(12px * var(--density)); row-gap: 2px;
@@ -413,8 +450,8 @@ button.doc-pill:hover svg, a.doc-pill:hover svg { color: var(--text-2); }
   letter-spacing: -0.01em;
   margin: calc(16px * var(--density)) 0 calc(6px * var(--density));
 }
-.rt-h[data-level="3"] { font-size: calc(14.5px * var(--fs)); }
-.rt-h[data-level="4"] { font-size: calc(13.5px * var(--fs)); color: var(--text-2); }
+.rt-h[data-level="3"] { font-size: calc(17px * var(--fs)); }
+.rt-h[data-level="4"] { font-size: calc(16px * var(--fs)); color: var(--text-2); }
 .rt-h::before {
   content: "#";
   position: absolute; left: calc(-22px * var(--density));
@@ -423,9 +460,9 @@ button.doc-pill:hover svg, a.doc-pill:hover svg { color: var(--text-2); }
   color: var(--muted); opacity: .4;
 }
 @media (max-width: 820px) { .rt-h::before { display: none; } }
-.rt-list { margin: 0 0 calc(9px * var(--density)); padding-left: calc(18px * var(--density)); list-style: none; }
+.rt-list { margin: 0 0 calc(12px * var(--density)); padding-left: calc(20px * var(--density)); list-style: none; }
 .rt-list .rt-list { margin: calc(3px * var(--density)) 0 0; }
-.rt-list li { position: relative; margin-bottom: calc(3px * var(--density)); }
+.rt-list li { position: relative; margin-bottom: calc(6px * var(--density)); }
 .rt-list li:last-child { margin-bottom: 0; }
 /* Bullet glyphs per level: filled, hollow, dash */
 ul.rt-list > li::before {
@@ -585,8 +622,8 @@ ol.rt-list > li::before {
   border: var(--hairline) solid transparent;
   background: transparent;
   border-radius: var(--radius);
-  font-size: calc(13.5px * var(--fs));
-  line-height: 1.65;
+  font-size: calc(16px * var(--fs));
+  line-height: 1.7;
   transition: background var(--t) var(--ease), border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
 .seamless:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--line-2); }
@@ -637,7 +674,7 @@ ol.rt-list > li::before {
 .turn-speaker { font-family: var(--display); font-size: calc(14.5px * var(--fs)); font-weight: 600; letter-spacing: -0.005em; color: var(--text-1); }
 .turn-speaker:hover { color: var(--accent-text); }
 .turn-time { font-family: var(--mono); font-size: calc(11px * var(--fs)); color: var(--muted); font-variant-numeric: tabular-nums; }
-.turn-text { grid-column: 2; margin: 0; font-size: calc(13.5px * var(--fs)); line-height: 1.65; color: var(--text-1); overflow-wrap: anywhere; }
+.turn-text { grid-column: 2; margin: 0; font-size: calc(15px * var(--fs)); line-height: 1.65; color: var(--text-1); overflow-wrap: anywhere; }
 .turn-text + .turn-text { margin-top: calc(6px * var(--density)); }
 /* A turn in another language than the recording */
 .turn-lang { color: var(--text-3); background: var(--surface-2); align-self: center; }
@@ -1369,7 +1406,22 @@ ol.rt-list > li::before {
 .evidence-problem { color: var(--danger); font-size: calc(12px * var(--fs)); }
 .evidence-more ul { margin: 4px 0 0 16px; padding: 0; font-size: calc(12.5px * var(--fs)); }
 .detail-toggle { margin: 0 0 calc(12px * var(--density)); align-self: flex-start; width: fit-content; }
-.also-said { margin-top: 6px; font-size: calc(13px * var(--fs)); }
+/* How much to show: a small outlined pill, the chosen length filled with soft moss. */
+.seg.detail-toggle {
+  gap: 0; padding: 2px;
+  background: none;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-pill);
+}
+.detail-toggle .seg-opt {
+  height: 26px; padding: 0 calc(12px * var(--density));
+  border: 0; border-radius: var(--radius-pill);
+  font-size: calc(12.5px * var(--fs)); font-weight: 500;
+  color: var(--text-3);
+}
+.detail-toggle .seg-opt:hover:not([aria-checked="true"]) { color: var(--text-1); background: var(--surface-2); }
+.detail-toggle .seg-opt[aria-checked="true"] { background: var(--accent-soft); color: var(--accent-text); box-shadow: none; }
+.also-said { margin-top: 6px; font-size: calc(14px * var(--fs)); }
 .corrections-panel { margin: 0 0 calc(12px * var(--density)); }
 .corrections-panel ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
 .corrections-panel li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: calc(13px * var(--fs)); }
@@ -1505,6 +1557,12 @@ ol.rt-list > li::before {
 .presence { display: inline-flex; align-items: center; }
 .presence-avatar { width: 24px; height: 24px; font-size: 10px; margin: 0; border: 2px solid var(--surface); }
 .presence-avatar + .presence-avatar { margin-left: -6px; }
+/* Collaborators (not speakers): a bright gradient disc with white initials. */
+.speaker-avatar.collab-avatar, .avatar.collab-avatar {
+  background: linear-gradient(140deg, color-mix(in srgb, var(--tint, var(--collab-1)) 70%, #fff), var(--tint, var(--collab-1)));
+  color: #fff; font-weight: 600;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+}
 .presence-more { margin-left: 4px; font-size: calc(11.5px * var(--fs)); color: var(--muted); }
 .doc-comments-btn { position: relative; display: inline-flex; align-items: center; gap: 4px; }
 .doc-comments-btn.on { background: var(--accent-soft); color: var(--accent-text); }

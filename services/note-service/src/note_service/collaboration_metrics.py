@@ -26,3 +26,40 @@ access_refused = _meter.create_counter(
     description="Note writes refused for an insufficient level (label: level_required)",
     unit="1",
 )
+
+# W5: the workspace is the folder. `source` author|backfill|move; `to` private|workspace.
+visibility_changed = _meter.create_counter(
+    "mdx_note_visibility_changed_total",
+    description="Note visibility changes (labels: source, to)",
+    unit="1",
+)
+visibility_backfill = _meter.create_counter(
+    "mdx_note_visibility_backfill_total",
+    description="W5 backfill outcomes per note (label: outcome changed|sensitive|author_choice)",
+    unit="1",
+)
+note_moves = _meter.create_counter(
+    "mdx_note_move_total",
+    description="Moves between workspaces (labels: result moved|refused, reason)",
+    unit="1",
+)
+note_copies = _meter.create_counter(
+    "mdx_note_copy_total",
+    description="Copies into another workspace (label: result)",
+    unit="1",
+)
+rehome_total = _meter.create_counter(
+    "mdx_note_rehome_total",
+    description="Media re-home jobs of moved notes (label: result done|retry|dead)",
+    unit="1",
+)
+rehome_bytes = _meter.create_histogram(
+    "mdx_note_rehome_bytes",
+    description="Plaintext bytes re-encrypted per re-home",
+    unit="By",
+)
+rehome_seconds = _meter.create_histogram(
+    "mdx_note_rehome_seconds",
+    description="Move to media ready, per re-home (SLO p95 < 90 s)",
+    unit="s",
+)

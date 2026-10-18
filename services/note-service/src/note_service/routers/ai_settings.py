@@ -301,6 +301,7 @@ async def put_ai_settings(
                 actor=claims.sub,
             )
 
+        personal = row.personal
         row = await rules.upsert(
             conn,
             tenant_id=claims.tid,
@@ -315,6 +316,7 @@ async def put_ai_settings(
             ),
             updated_by=claims.sub,
         )
+        row.personal = personal
         spend = await rules.month_to_date_cents(conn, tenant_id=claims.tid)
 
     # The registry's cache would otherwise serve the old tier for a minute.

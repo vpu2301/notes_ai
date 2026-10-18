@@ -143,8 +143,9 @@ measure-turnaround: ## ASR turnaround on a fixture: `make measure-turnaround FIX
 
 ##@ Code Quality
 
-lint: ## Run ruff linter across all packages
+lint: ## Run ruff linter across all packages (+ the W5 note-move table check)
 	uv run ruff check .
+	uv run python scripts/ci/check-note-move-covers-all-tables.py
 
 lint-fix: ## Run ruff with auto-fix
 	uv run ruff check --fix .

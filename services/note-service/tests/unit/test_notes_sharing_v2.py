@@ -155,7 +155,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
             visibility=note.visibility, transcript_shared=shared, collaborators=note.collaborators
         )
 
-    async def _set_visibility(conn, *, note_id, visibility):  # noqa: ANN001
+    async def _set_visibility(conn, *, note_id, visibility, source):  # noqa: ANN001
+        state["visibility_source"] = source
         note = state["note"]
         state["note"] = _note(
             visibility=visibility,
@@ -415,3 +416,7 @@ def test_workspace_visibility_in_a_team_workspace(client: TestClient) -> None:
     assert r.status_code == 200
     assert r.json()["visibility"] == "workspace"
     assert "note.visibility_changed" in _kinds(client)
+    # W5: an explicit change is the author's choice; nothing later overrides it.
+    assert client.state_["visibility_source"] == "author"  # type: ignore[attr-defined]
+    event = next(c for c in client.audit if c["kind"] == "note.visibility_changed")  # type: ignore[attr-defined]
+    assert event["payload"]["source"] == "author"

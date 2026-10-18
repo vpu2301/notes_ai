@@ -52,6 +52,11 @@ def test_a_processor_that_moved_region_is_a_new_processor() -> None:
     )
 
 
+def test_a_personal_workspace_routes_where_its_owner_chose() -> None:
+    row = _row(provider="anthropic", tier="premium", personal=True)
+    assert rules.effective(row, [ANTHROPIC, HETZNER]) == ("anthropic", "premium", [])
+
+
 def test_routing_that_gains_a_processor_falls_back_to_platform_standard() -> None:
     """The safety valve: `config/models.yaml` cannot put a new company in
     somebody's data path by being edited."""
@@ -267,8 +272,10 @@ def test_a_new_processor_in_the_routing_shows_up_as_work_for_the_admin(harness) 
 class _Conn:
     """Just enough asyncpg to answer `check_allowed`."""
 
-    def __init__(self, *, enabled: bool = True, budget: int | None = None, spent: int = 0) -> None:
-        self.enabled, self.budget, self.spent = enabled, budget, spent
+    def __init__(
+        self, *, enabled: bool = True, budget: int | None = None, spent: int = 0, kind: str = "team"
+    ) -> None:
+        self.enabled, self.budget, self.spent, self.kind = enabled, budget, spent, kind
 
     async def fetchrow(self, sql: str, *args):  # noqa: ANN002, ANN201
         if "workspace_model_settings" in sql:
@@ -280,6 +287,7 @@ class _Conn:
                 "acknowledged_processors": [],
                 "monthly_budget_cents": self.budget,
                 "updated_at": None,
+                "kind": self.kind,
             }
         return {"plan_limits": {}}
 
@@ -305,6 +313,17 @@ async def test_generation_turned_off_is_refused_before_anything_is_written() -> 
 
     with pytest.raises(gen.GenerationDisabledError):
         await gen.check_allowed(_Conn(enabled=False), tenant_id=TENANT)
+
+
+@pytest.mark.anyio
+async def test_a_personal_workspace_needs_nobody_to_agree_for_its_owner() -> None:
+    from note_service.domain import generation_service as gen
+
+    await gen.check_allowed(
+        _Conn(kind="personal"), tenant_id=TENANT, required_processors=[ANTHROPIC]
+    )
+    with pytest.raises(gen.ProcessorUnacknowledgedError):
+        await gen.check_allowed(_Conn(), tenant_id=TENANT, required_processors=[ANTHROPIC])
 
 
 def test_a_person_waiting_on_the_screen_outranks_a_background_upload() -> None:

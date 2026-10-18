@@ -37,6 +37,7 @@ from .routers import (
     notes_items,
     notes_lifecycle,
     notes_meeting,
+    notes_move,
     notes_pdf,
     notes_presence,
     notes_search,
@@ -192,6 +193,7 @@ def create_app() -> FastAPI:
     app.include_router(notes_versions.router)
     app.include_router(notes_pdf.router)
     app.include_router(notes_sharing.router)
+    app.include_router(notes_move.router)
     app.include_router(notes_items.router)
     app.include_router(notes_ask.router)
     app.include_router(notes_comments.router)

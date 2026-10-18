@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
@@ -16,7 +16,7 @@ from note_models import NoteContent, ReadPurpose
 
 from .. import audit_kinds
 from ..deps import get_state, requires
-from ..domain import access, code_sequence
+from ..domain import access, code_sequence, relocation
 from ..domain import notes_repository as repo
 from ..domain import visibility as visibility_defaults
 from ._content_guard import ensure_valid_field_metadata
@@ -35,6 +35,8 @@ class CreateNoteRequest(BaseModel):
     content: NoteContent
     co_author_ids: list[UUID] = Field(default_factory=list)
     source_session_id: UUID | None = None
+    # W5: only an explicit author choice; omitted → the workspace's default.
+    visibility: Literal["private", "workspace"] | None = None
 
 
 class NoteCreatedResponse(BaseModel):
@@ -96,6 +98,9 @@ class NoteEnvelope(BaseModel):
     can_read_transcript: bool = False
     # Only filled for an oversight read, so the client can name whose note it shows.
     primary_author_name: str | None = None
+    # W5: ready | rehoming ("Transcript on its way") | failed; a copy's source note.
+    media_state: str = "ready"
+    copied_from_note_id: UUID | None = None
     content: NoteContent | None = None
     section_labels: list[SectionLabel] | None = None
 
@@ -131,6 +136,8 @@ def _envelope(
         my_level=access.level(row, claims) if claims is not None else None,
         can_read_transcript=transcript,
         primary_author_name=primary_author_name,
+        media_state=row.media_state,
+        copied_from_note_id=row.copied_from_note_id,
         content=content,
         section_labels=section_labels,
     )
@@ -209,6 +216,10 @@ async def create_note(
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         await ensure_valid_field_metadata(conn, content=body.content)
 
+        if body.visibility is not None:
+            await visibility_defaults.require_allowed(
+                conn, tenant_id=claims.tid, visibility=body.visibility
+            )
         code = await code_sequence.next_code(conn, tenant_id=claims.tid)
         note_id, version_id = await repo.create_note_with_v1(
             conn,
@@ -220,9 +231,11 @@ async def create_note(
             template_schema_version=body.content.template_schema_version,
             source_session_id=body.source_session_id,
             content=body.content,
-            visibility=await visibility_defaults.default_for_new_note(
+            visibility=body.visibility
+            or await visibility_defaults.default_for_new_note(
                 conn, tenant_id=claims.tid, template_id=body.content.template_id
             ),
+            visibility_source="author" if body.visibility is not None else "default",
         )
 
     await state.audit_writer.write_event(
@@ -258,7 +271,11 @@ async def get_note(
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         # A private note the caller was not given is a 404, not a 403.
-        row = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
+        found = await repo.fetch_note(conn, note_id=note_id)
+        if found is None:
+            # W5: an old deep link to a note that moved answers where it went.
+            await relocation.raise_if_moved(conn, note_id=note_id, claims=claims)
+        row = access.require_view(found, claims)
 
         # An oversight reader must say why they are reading; author team and sharees never do.
         is_author = access.require_read_purpose(row, claims, purpose)

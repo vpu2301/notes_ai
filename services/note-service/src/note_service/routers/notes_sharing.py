@@ -37,11 +37,13 @@ from notification_events import Category
 
 from .. import audit_kinds
 from ..adapters import share_mail_copy
+from ..collaboration_metrics import visibility_changed
 from ..config import settings
 from ..deps import get_state, requires
 from ..domain import access, recipient_mail, share_email, share_links, sharing_policy
 from ..domain import action_items_repository as items_repo
 from ..domain import notes_repository as repo
+from ..domain import visibility as visibility_defaults
 from ..domain.branding import load_tenant_branding
 from ..domain.share_tokens import hash_token, token_for
 from ..notifications import emit_note_access_changed, emit_note_event
@@ -131,6 +133,15 @@ class PendingNoteInvite(BaseModel):
     expires_at: str
 
 
+class CopiedFrom(BaseModel):
+    """Where a copy came from (W5); the client names the workspace only if it is in its list."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    note_id: UUID
+    workspace_id: UUID
+
+
 class SharingView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -152,6 +163,10 @@ class SharingView(BaseModel):
     pending: list[PendingNoteInvite] = Field(default_factory=list)
     transcript_shared: bool = False
     workspace_kind: str = "team"
+    # W5: who chose the visibility (default | author | backfill), whether the media is on its way.
+    visibility_source: str = "default"
+    media_state: str = "ready"
+    copied_from: CopiedFrom | None = None
 
 
 class VisibilityRequest(BaseModel):
@@ -398,6 +413,13 @@ async def _sharing_view(conn: object, note: repo.NoteRow, claims: Claims) -> Sha
         pending=await _pending(conn, note.id) if manage else [],
         transcript_shared=note.transcript_shared,
         workspace_kind=await sharing_policy.tenant_kind(conn, tenant_id=claims.tid),  # type: ignore[arg-type]
+        visibility_source=note.visibility_source,
+        media_state=note.media_state,
+        copied_from=(
+            CopiedFrom(note_id=note.copied_from_note_id, workspace_id=note.copied_from_tenant_id)
+            if note.copied_from_note_id and note.copied_from_tenant_id
+            else None
+        ),
     )
 
 
@@ -572,28 +594,24 @@ async def set_visibility(
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         note = access.require_manage(await repo.fetch_note(conn, note_id=note_id), claims)
-        if (
-            body.visibility == access.VISIBILITY_WORKSPACE
-            and await sharing_policy.tenant_kind(conn, tenant_id=claims.tid) == "personal"
-        ):
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "personal_workspace",
-                    "detail": "a personal workspace has nobody to share with",
-                },
-            )
+        await visibility_defaults.require_allowed(
+            conn, tenant_id=claims.tid, visibility=body.visibility
+        )
         previous = note.visibility
         if previous != body.visibility:
-            await repo.set_visibility(conn, note_id=note_id, visibility=body.visibility)
+            # W5: the author's choice — no default, backfill or move overrides it.
+            await repo.set_visibility(
+                conn, note_id=note_id, visibility=body.visibility, source="author"
+            )
             note = await repo.fetch_note(conn, note_id=note_id) or note
         view = await _sharing_view(conn, note, claims)
     if previous != body.visibility:
+        visibility_changed.add(1, {"source": "author", "to": body.visibility})
         await _audit(
             claims,
             audit_kinds.NOTE_VISIBILITY_CHANGED,
             note_id,
-            {"from": previous, "to": body.visibility},
+            {"from": previous, "to": body.visibility, "reason": "author", "source": "author"},
         )
     return view
 

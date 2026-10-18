@@ -241,6 +241,21 @@ def locate_quote(quote: str, window: Window, cited_line: int) -> Turn | None:
     return None
 
 
+def quote_span(quote: str, turn: Turn) -> tuple[int, int]:
+    """Where in the line the quote was said, estimated by its share of the
+    characters (as ``windows`` times a split turn), so a replay plays the
+    quote and not the whole line; the line's own span when it cannot be placed."""
+    said = normalise_quote(turn.text)
+    needle = normalise_quote(strip_turn_header(quote))
+    at = said.find(needle) if needle else -1
+    if at < 0:
+        return turn.start_ms, turn.end_ms
+    span = max(0, turn.end_ms - turn.start_ms)
+    start = turn.start_ms + span * at // len(said)
+    end = turn.start_ms + span * (at + len(needle)) // len(said)
+    return start, max(end, start + 1)
+
+
 # ── Owners ──────────────────────────────────────────────────────────
 
 # The speaker taking it on. Deliberately narrow: a false positive misassigns a task.
@@ -850,6 +865,7 @@ def verify_facts(
         if not by_payload and support.pronoun_initial(text, language):
             flags.append(SUBJECT_UNRESOLVED)
             stats.subject_unresolved += 1
+        start_ms, end_ms = quote_span(fact.quote, turn)
         out.append(
             VerifiedFact(
                 kind=kind,
@@ -860,8 +876,8 @@ def verify_facts(
                 mentions=tuple(
                     date_mentions(fact.quote, meeting_date=meeting_date, language=language)
                 ),
-                start_ms=turn.start_ms,
-                end_ms=turn.end_ms,
+                start_ms=start_ms,
+                end_ms=end_ms,
                 speaker_label=turn.speaker_label,
                 speaker_name=turn.speaker_name,
                 owner_label=owner,

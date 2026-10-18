@@ -89,7 +89,7 @@ struct CommentsView: View {
     private func commentRow(_ comment: NoteComment) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 7) {
-                DSAvatar(name: comment.author.displayName, size: 20)
+                DSAvatar(name: comment.author.displayName, size: 20, collaborator: true)
                 Text(comment.author.displayName)
                     .font(.ds(12.5, .medium))
                     .foregroundStyle(DS.text1)
@@ -222,7 +222,7 @@ struct PresenceAvatars: View {
         if !viewers.isEmpty {
             HStack(spacing: -6) {
                 ForEach(viewers.prefix(3)) { viewer in
-                    DSAvatar(name: viewer.displayName, size: 22)
+                    DSAvatar(name: viewer.displayName, size: 22, collaborator: true)
                         .overlay(Circle().strokeBorder(DS.bg, lineWidth: 1.5))
                 }
                 if viewers.count > 3 {

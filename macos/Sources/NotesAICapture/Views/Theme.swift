@@ -85,6 +85,17 @@ enum DS {
         return speakerTints[h]
     }
 
+    /// Collaborator avatars (the web's `--collab-N`): brighter than speakers, white initials in both themes. No orange.
+    static let collabTints: [Color] = [
+        Color.ds("3f9a63", "3f9a63"), Color.ds("16928e", "16928e"), Color.ds("2f84c9", "2f84c9"), Color.ds("5468d8", "5468d8"),
+        Color.ds("8255cc", "8255cc"), Color.ds("b04aa8", "b04aa8"), Color.ds("d04a72", "d04a72"), Color.ds("b08a14", "b08a14"),
+    ]
+
+    static func collabTint(_ name: String) -> Color {
+        let h = name.unicodeScalars.reduce(0) { ($0 + Int($1.value)) % collabTints.count }
+        return collabTints[h]
+    }
+
     // Layout
     /// The note document's column (the web's `--doc-w`).
     static let docWidth: CGFloat = 720
@@ -553,6 +564,79 @@ struct DSSegmentedPill<T: Hashable>: View {
     }
 }
 
+/// The note's views (`.doc-tabs`): ink labels on a hairline, a moss bar under the open one.
+struct DSUnderlineTabs<T: Hashable>: View {
+    let options: [DSSegmentedPill<T>.Option]
+    @Binding var selection: T
+    @Namespace private var bar
+
+    var body: some View {
+        HStack(spacing: 22) {
+            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                let on = option.value == selection
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) { selection = option.value }
+                } label: {
+                    Text(option.label ?? "")
+                        .font(.ds(14, .medium))
+                        .fixedSize()
+                        .foregroundStyle(on ? DS.text1 : DS.text3)
+                        .frame(height: 36)
+                        .overlay(alignment: .bottom) {
+                            if on {
+                                Capsule().fill(DS.accent)
+                                    .frame(height: 2)
+                                    .matchedGeometryEffect(id: "bar", in: bar)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(option.help ?? option.label ?? "")
+                .accessibilityLabel(option.label ?? "")
+                .accessibilityHint(option.help ?? "")
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(DS.line).frame(height: DS.hairline)
+        }
+    }
+}
+
+/// A small choice (`.detail-toggle`): an outlined pill, the chosen option filled with soft moss.
+struct DSPillChoice<T: Hashable>: View {
+    let options: [DSSegmentedPill<T>.Option]
+    @Binding var selection: T
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                let on = option.value == selection
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { selection = option.value }
+                } label: {
+                    Text(option.label ?? "")
+                        .font(.ds(12.5, .medium))
+                        .fixedSize()
+                        .foregroundStyle(on ? DS.accentText : DS.text3)
+                        .padding(.horizontal, 12)
+                        .frame(height: 24)
+                        .background(Capsule().fill(on ? DS.accentSoft : .clear))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .help(option.help ?? option.label ?? "")
+                .accessibilityLabel(option.label ?? "")
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .overlay(Capsule().strokeBorder(DS.line, lineWidth: DS.hairline))
+    }
+}
+
 // MARK: - Small pieces
 
 /// Uppercase tracked section label (`.sb-section-h`, `.field-label`).
@@ -632,16 +716,29 @@ struct DSChip: View {
 }
 
 /// Initials avatar (`.avatar`): a quiet neutral disc with ink initials.
+/// A collaborator (`.collab-avatar`) gets a bright gradient disc in their own tint with white initials.
 struct DSAvatar: View {
     let name: String
     var size: CGFloat = 30
+    var collaborator = false
 
     var body: some View {
         Text(initials)
-            .font(.ds(size * 0.41, .medium))
-            .foregroundStyle(DS.text1)
+            .font(.ds(size * 0.41, collaborator ? .semibold : .medium))
+            .foregroundStyle(collaborator ? Color.white : DS.text1)
             .frame(width: size, height: size)
-            .background(Circle().fill(DS.sidebarPress))
+            .background(disc)
+    }
+
+    @ViewBuilder
+    private var disc: some View {
+        if collaborator {
+            Circle().fill(DS.collabTint(name))
+                .overlay(Circle().fill(LinearGradient(colors: [.white.opacity(0.3), .clear],
+                                                      startPoint: .topLeading, endPoint: .bottomTrailing)))
+        } else {
+            Circle().fill(DS.sidebarPress)
+        }
     }
 
     private var initials: String {

@@ -111,7 +111,8 @@ def test_a_quote_on_the_wrong_line_takes_the_timestamps_of_the_piece_that_has_it
         turn=4,
     )
     [kept] = verify.verify_facts([fact], window=window, meeting_date=DAY)
-    assert (kept.line, kept.start_ms, kept.end_ms) == (5, 20_000, 40_000)
+    assert kept.line == 5
+    assert 20_000 <= kept.start_ms < kept.end_ms <= 40_000
 
 
 # ── noise policy in code ────────────────────────────────────────

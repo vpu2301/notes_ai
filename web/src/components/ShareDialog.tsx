@@ -27,7 +27,7 @@ import type {
 import { levelLabel } from "../lib/noteLevel";
 import { useToast } from "./Toaster";
 import { AlertIcon, CheckIcon, CloseIcon, CopyIcon, GlobeIcon, LockIcon, MailIcon, UsersIcon } from "./icons";
-import { speakerInitials, speakerTint } from "../lib/speakers";
+import { collabTint, speakerInitials } from "../lib/speakers";
 import { PUBLIC_EXPIRY_OPTIONS, PublicLinkDialog, publicLinkUrl } from "./PublicLinkDialog";
 import { Select } from "./Select";
 import { Segmented } from "./Segmented";
@@ -101,7 +101,7 @@ export interface ShareOwner {
 
 function Avatar({ name }: { name: string }) {
   return (
-    <span className="speaker-avatar share-avatar" style={{ "--tint": speakerTint(name) } as React.CSSProperties} aria-hidden="true">
+    <span className="speaker-avatar share-avatar collab-avatar" style={{ "--tint": collabTint(name) } as React.CSSProperties} aria-hidden="true">
       {speakerInitials(name)}
     </span>
   );

@@ -84,6 +84,16 @@
   --speaker-5: #7a5a8c;
   --speaker-6: #3f7f7a;
 
+  /* Collaborator avatars: brighter than speakers, white initials, same in both themes; nothing orange. */
+  --collab-1: #3f9a63;
+  --collab-2: #16928e;
+  --collab-3: #2f84c9;
+  --collab-4: #5468d8;
+  --collab-5: #8255cc;
+  --collab-6: #b04aa8;
+  --collab-7: #d04a72;
+  --collab-8: #b08a14;
+
   /* Shadows: floating things only */
   --shadow-1: none;
   --shadow-2: 0 6px 20px -6px rgba(26, 24, 22, 0.14), 0 1px 3px rgba(26, 24, 22, 0.06);

@@ -22,7 +22,7 @@ NOTE_PDF_RENDERED: Final = "note.pdf_rendered"  # GET /notes/{id}/pdf
 
 # Delete, visibility, sharing.
 NOTE_DELETED: Final = "note.deleted"  # soft delete (bin); links revoked
-NOTE_VISIBILITY_CHANGED: Final = "note.visibility_changed"  # private ↔ workspace
+NOTE_VISIBILITY_CHANGED: Final = "note.visibility_changed"  # from, to, reason, source
 NOTE_SHARED: Final = "note.shared"  # a member was given read access
 NOTE_UNSHARED: Final = "note.unshared"
 # W3: "Include transcript" turned on/off for view/comment collaborators and guests.
@@ -40,6 +40,12 @@ NOTE_ITEM_STATUS_CHANGED: Final = "note.item_status_changed"  # item_key, from, 
 NOTE_RESPONSE_CLEARED: Final = "note.response_cleared"  # kind
 # Payload: link_id, resend, outcome (sent|failed). Never the address.
 NOTE_LINK_SENT: Final = "note.link_sent"
+# W5: between workspaces. Ids, counts and closed vocabularies only.
+NOTE_MOVED: Final = "note.moved"  # source chain: to_workspace_id, media
+NOTE_MOVED_IN: Final = "note.moved_in"  # target chain: from_workspace_id
+NOTE_MEDIA_REHOMED: Final = "note.media_rehomed"  # target chain: keys, bytes
+NOTE_MEDIA_REHOME_FAILED: Final = "note.media_rehome_failed"  # target chain: error_kind
+NOTE_COPIED_OUT: Final = "note.copied_out"  # source chain: to_workspace_id, copy_id
 # W3: payload anchor_kind only; never the body, never the anchor key.
 NOTE_COMMENTED: Final = "note.commented"
 # The recipient opted out of mail from every workspace. Payload: link_id.

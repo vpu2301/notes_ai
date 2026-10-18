@@ -924,6 +924,165 @@
         "title": "CloneResponse",
         "type": "object"
       },
+      "CollaboratorRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "enum": [
+              "view",
+              "comment",
+              "edit"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "CollaboratorRequest",
+        "type": "object"
+      },
+      "CommentAuthor": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "sub": {
+            "format": "uuid",
+            "title": "Sub",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sub",
+          "display_name"
+        ],
+        "title": "CommentAuthor",
+        "type": "object"
+      },
+      "CommentList": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CommentView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CommentList",
+        "type": "object"
+      },
+      "CommentView": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor_key": {
+            "title": "Anchor Key",
+            "type": "string"
+          },
+          "anchor_kind": {
+            "enum": [
+              "note",
+              "section",
+              "item"
+            ],
+            "title": "Anchor Kind",
+            "type": "string"
+          },
+          "anchor_present": {
+            "title": "Anchor Present",
+            "type": "boolean"
+          },
+          "author": {
+            "$ref": "#/components/schemas/CommentAuthor"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "can_delete": {
+            "title": "Can Delete",
+            "type": "boolean"
+          },
+          "can_edit": {
+            "title": "Can Edit",
+            "type": "boolean"
+          },
+          "can_resolve": {
+            "title": "Can Resolve",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "edited_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edited At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolved_by_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By Display"
+          }
+        },
+        "required": [
+          "id",
+          "author",
+          "anchor_kind",
+          "anchor_key",
+          "anchor_present",
+          "body",
+          "created_at",
+          "edited_at",
+          "resolved_at",
+          "resolved_by_display",
+          "can_edit",
+          "can_resolve",
+          "can_delete"
+        ],
+        "title": "CommentView",
+        "type": "object"
+      },
       "ConnectRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1095,6 +1254,54 @@
         "title": "Constraints",
         "type": "object"
       },
+      "CopiedFrom": {
+        "additionalProperties": false,
+        "description": "Where a copy came from (W5); the client names the workspace only if it is in its list.",
+        "properties": {
+          "note_id": {
+            "format": "uuid",
+            "title": "Note Id",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note_id",
+          "workspace_id"
+        ],
+        "title": "CopiedFrom",
+        "type": "object"
+      },
+      "CopiedView": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "note_id": {
+            "format": "uuid",
+            "title": "Note Id",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note_id",
+          "workspace_id",
+          "code"
+        ],
+        "title": "CopiedView",
+        "type": "object"
+      },
       "CorrectionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1213,6 +1420,38 @@
           "expires_at_unix"
         ],
         "title": "CreateClipResponse",
+        "type": "object"
+      },
+      "CreateCommentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor_key": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Anchor Key",
+            "type": "string"
+          },
+          "anchor_kind": {
+            "default": "note",
+            "enum": [
+              "note",
+              "section",
+              "item"
+            ],
+            "title": "Anchor Kind",
+            "type": "string"
+          },
+          "body": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "title": "CreateCommentRequest",
         "type": "object"
       },
       "CreateFromTranscriptRequest": {
@@ -1348,6 +1587,21 @@
               }
             ],
             "title": "Source Session Id"
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "enum": [
+                  "private",
+                  "workspace"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility"
           }
         },
         "required": [
@@ -1389,6 +1643,46 @@
           "deleted_at"
         ],
         "title": "DeletedResponse",
+        "type": "object"
+      },
+      "DestinationsView": {
+        "additionalProperties": false,
+        "properties": {
+          "blockers": {
+            "items": {
+              "enum": [
+                "media_shared",
+                "generation_in_progress",
+                "media_in_progress",
+                "custom_template"
+              ],
+              "type": "string"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "can_copy": {
+            "title": "Can Copy",
+            "type": "boolean"
+          },
+          "can_move": {
+            "title": "Can Move",
+            "type": "boolean"
+          },
+          "eligible_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Eligible Roles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "can_move",
+          "can_copy",
+          "eligible_roles"
+        ],
+        "title": "DestinationsView",
         "type": "object"
       },
       "DiffResponse": {
@@ -1539,6 +1833,22 @@
           "reason"
         ],
         "title": "DismissRequest",
+        "type": "object"
+      },
+      "EditCommentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "title": "EditCommentRequest",
         "type": "object"
       },
       "EventView": {
@@ -2932,6 +3242,42 @@
         "title": "MetadataDiff",
         "type": "object"
       },
+      "MovedView": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "media_state": {
+            "title": "Media State",
+            "type": "string"
+          },
+          "note_id": {
+            "format": "uuid",
+            "title": "Note Id",
+            "type": "string"
+          },
+          "visibility": {
+            "title": "Visibility",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note_id",
+          "workspace_id",
+          "code",
+          "visibility",
+          "media_state"
+        ],
+        "title": "MovedView",
+        "type": "object"
+      },
       "NoteAmendmentType": {
         "enum": [
           "correction",
@@ -3014,6 +3360,11 @@
       "NoteEnvelope": {
         "additionalProperties": false,
         "properties": {
+          "can_read_transcript": {
+            "default": false,
+            "title": "Can Read Transcript",
+            "type": "boolean"
+          },
           "cancelled_at": {
             "anyOf": [
               {
@@ -3047,6 +3398,18 @@
               }
             ]
           },
+          "copied_from_note_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Copied From Note Id"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -3075,6 +3438,22 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "media_state": {
+            "default": "ready",
+            "title": "Media State",
+            "type": "string"
+          },
+          "my_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "My Level"
           },
           "primary_author_id": {
             "format": "uuid",
@@ -3243,6 +3622,17 @@
             "title": "Created By",
             "type": "string"
           },
+          "created_by_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Display"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -3320,6 +3710,17 @@
             "format": "uuid",
             "title": "Created By",
             "type": "string"
+          },
+          "created_by_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Display"
           },
           "id": {
             "format": "uuid",
@@ -3475,6 +3876,104 @@
         "title": "PatchItemRequest",
         "type": "object"
       },
+      "PendingNoteInvite": {
+        "additionalProperties": false,
+        "properties": {
+          "email_masked": {
+            "title": "Email Masked",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "invitation_id": {
+            "format": "uuid",
+            "title": "Invitation Id",
+            "type": "string"
+          },
+          "note_role": {
+            "enum": [
+              "view",
+              "comment",
+              "edit"
+            ],
+            "title": "Note Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invitation_id",
+          "email_masked",
+          "note_role",
+          "expires_at"
+        ],
+        "title": "PendingNoteInvite",
+        "type": "object"
+      },
+      "Person": {
+        "additionalProperties": false,
+        "description": "Someone with access and why (W3).",
+        "properties": {
+          "can_change": {
+            "default": false,
+            "title": "Can Change",
+            "type": "boolean"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "manage",
+              "edit",
+              "comment",
+              "view"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "membership_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Membership Role"
+          },
+          "source": {
+            "enum": [
+              "author",
+              "collaborator",
+              "workspace_role"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "sub": {
+            "format": "uuid",
+            "title": "Sub",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sub",
+          "email",
+          "display_name",
+          "level",
+          "source"
+        ],
+        "title": "Person",
+        "type": "object"
+      },
       "PlanView": {
         "properties": {
           "code": {
@@ -3553,6 +4052,23 @@
           "self_serve"
         ],
         "title": "PlanView",
+        "type": "object"
+      },
+      "PresenceView": {
+        "additionalProperties": false,
+        "properties": {
+          "viewers": {
+            "items": {
+              "$ref": "#/components/schemas/Viewer"
+            },
+            "title": "Viewers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "viewers"
+        ],
+        "title": "PresenceView",
         "type": "object"
       },
       "PreviousNoteRequest": {
@@ -3755,6 +4271,27 @@
         "title": "RedeemRequest",
         "type": "object"
       },
+      "RelocateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "client_mutation_id": {
+            "format": "uuid",
+            "title": "Client Mutation Id",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "client_mutation_id"
+        ],
+        "title": "RelocateRequest",
+        "type": "object"
+      },
       "ReportRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3913,6 +4450,11 @@
       "SearchHitDTO": {
         "additionalProperties": false,
         "properties": {
+          "author_display": {
+            "default": "",
+            "title": "Author Display",
+            "type": "string"
+          },
           "co_author_ids": {
             "items": {
               "format": "uuid",
@@ -3925,6 +4467,17 @@
             "title": "Code",
             "type": "string"
           },
+          "collaborator_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collaborator Count"
+          },
           "has_public_link": {
             "anyOf": [
               {
@@ -3935,6 +4488,17 @@
               }
             ],
             "title": "Has Public Link"
+          },
+          "my_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "My Level"
           },
           "note_id": {
             "format": "uuid",
@@ -3993,6 +4557,17 @@
               }
             ],
             "title": "Visibility"
+          },
+          "visibility_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility Source"
           }
         },
         "required": [
@@ -4332,6 +4907,15 @@
             "title": "Message",
             "type": "string"
           },
+          "mode": {
+            "default": "link",
+            "enum": [
+              "invite",
+              "link"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
           "recipients": {
             "items": {
               "type": "string"
@@ -4339,6 +4923,16 @@
             "minItems": 1,
             "title": "Recipients",
             "type": "array"
+          },
+          "role": {
+            "default": "edit",
+            "enum": [
+              "view",
+              "comment",
+              "edit"
+            ],
+            "title": "Role",
+            "type": "string"
           }
         },
         "required": [
@@ -4350,6 +4944,13 @@
       "ShareEmailResponse": {
         "additionalProperties": false,
         "properties": {
+          "invite_needed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Invite Needed",
+            "type": "array"
+          },
           "public_link_created": {
             "default": false,
             "title": "Public Link Created",
@@ -4373,6 +4974,25 @@
         "title": "ShareEmailResponse",
         "type": "object"
       },
+      "ShareGrant": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "granted",
+            "default": "granted",
+            "title": "Kind",
+            "type": "string"
+          },
+          "sharing": {
+            "$ref": "#/components/schemas/SharingView"
+          }
+        },
+        "required": [
+          "sharing"
+        ],
+        "title": "ShareGrant",
+        "type": "object"
+      },
       "ShareRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4381,6 +5001,22 @@
             "minLength": 3,
             "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
             "title": "Email",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Message",
+            "type": "string"
+          },
+          "role": {
+            "default": "edit",
+            "enum": [
+              "view",
+              "comment",
+              "edit"
+            ],
+            "title": "Role",
             "type": "string"
           }
         },
@@ -4876,6 +5512,16 @@
           "constraints": {
             "$ref": "#/components/schemas/Constraints"
           },
+          "copied_from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CopiedFrom"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "links": {
             "items": {
               "$ref": "#/components/schemas/LinkView"
@@ -4883,10 +5529,46 @@
             "title": "Links",
             "type": "array"
           },
+          "media_state": {
+            "default": "ready",
+            "title": "Media State",
+            "type": "string"
+          },
+          "my_level": {
+            "anyOf": [
+              {
+                "enum": [
+                  "manage",
+                  "edit",
+                  "comment",
+                  "view"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "My Level"
+          },
           "note_id": {
             "format": "uuid",
             "title": "Note Id",
             "type": "string"
+          },
+          "pending": {
+            "items": {
+              "$ref": "#/components/schemas/PendingNoteInvite"
+            },
+            "title": "Pending",
+            "type": "array"
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/Person"
+            },
+            "title": "People",
+            "type": "array"
           },
           "public_link": {
             "anyOf": [
@@ -4905,12 +5587,27 @@
             "title": "Shared With",
             "type": "array"
           },
+          "transcript_shared": {
+            "default": false,
+            "title": "Transcript Shared",
+            "type": "boolean"
+          },
           "visibility": {
             "enum": [
               "private",
               "workspace"
             ],
             "title": "Visibility",
+            "type": "string"
+          },
+          "visibility_source": {
+            "default": "default",
+            "title": "Visibility Source",
+            "type": "string"
+          },
+          "workspace_kind": {
+            "default": "team",
+            "title": "Workspace Kind",
             "type": "string"
           }
         },
@@ -5726,6 +6423,20 @@
         "title": "TopSender",
         "type": "object"
       },
+      "TranscriptSharingRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "shared": {
+            "title": "Shared",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "shared"
+        ],
+        "title": "TranscriptSharingRequest",
+        "type": "object"
+      },
       "UpdateDraftRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5977,6 +6688,26 @@
           "code"
         ],
         "title": "VerifyRequest",
+        "type": "object"
+      },
+      "Viewer": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "sub": {
+            "format": "uuid",
+            "title": "Sub",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sub",
+          "display_name"
+        ],
+        "title": "Viewer",
         "type": "object"
       },
       "VisibilityRequest": {
@@ -8477,6 +9208,38 @@
             }
           },
           {
+            "description": "W3: all | mine (you are an author) | shared_with_me (visible to you, not yours)",
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "W3: all | mine (you are an author) | shared_with_me (visible to you, not yours)",
+              "pattern": "^(all|mine|shared_with_me)$",
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "description": "W5: `backfill` \u2014 your notes the W5 backfill made visible to the workspace",
+            "in": "query",
+            "name": "changed_by",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^backfill$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "W5: `backfill` \u2014 your notes the W5 backfill made visible to the workspace",
+              "title": "Changed By"
+            }
+          },
+          {
             "in": "header",
             "name": "Authorization",
             "required": false,
@@ -9148,6 +9911,619 @@
         ]
       }
     },
+    "/v1/notes/{note_id}/collaborators/{user_sub}": {
+      "delete": {
+        "description": "Revoke one person's grant. A guest left with no grants is removed by the sweeper (24 h).",
+        "operationId": "remove_collaborator_v1_notes__note_id__collaborators__user_sub__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_sub",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Sub",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Collaborator",
+        "tags": [
+          "notes"
+        ]
+      },
+      "put": {
+        "description": "Grant or change one person's role. They must hold an active membership here (guests too).",
+        "operationId": "set_collaborator_v1_notes__note_id__collaborators__user_sub__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_sub",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Sub",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollaboratorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Collaborator",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/comments": {
+      "get": {
+        "operationId": "list_comments_v1_notes__note_id__comments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Comments",
+        "tags": [
+          "notes"
+        ]
+      },
+      "post": {
+        "operationId": "create_comment_v1_notes__note_id__comments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCommentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Comment",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/comments/{comment_id}": {
+      "delete": {
+        "operationId": "delete_comment_v1_notes__note_id__comments__comment_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "comment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Comment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Comment",
+        "tags": [
+          "notes"
+        ]
+      },
+      "patch": {
+        "operationId": "edit_comment_v1_notes__note_id__comments__comment_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "comment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Comment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditCommentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Comment",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/comments/{comment_id}/resolve": {
+      "post": {
+        "operationId": "resolve_comment_v1_notes__note_id__comments__comment_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "comment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Comment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Comment",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/comments/{comment_id}/unresolve": {
+      "post": {
+        "operationId": "unresolve_comment_v1_notes__note_id__comments__comment_id__unresolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "comment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Comment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unresolve Comment",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/copy": {
+      "post": {
+        "operationId": "copy_note_v1_notes__note_id__copy_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelocateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CopiedView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Copy Note",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
     "/v1/notes/{note_id}/dates/{item_key}.ics": {
       "get": {
         "operationId": "date_ics_v1_notes__note_id__dates__item_key__ics_get",
@@ -9225,6 +10601,65 @@
           }
         },
         "summary": "Date Ics",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/destinations": {
+      "get": {
+        "operationId": "get_destinations_v1_notes__note_id__destinations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestinationsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Destinations",
         "tags": [
           "notes"
         ]
@@ -10579,6 +12014,75 @@
         ]
       }
     },
+    "/v1/notes/{note_id}/move": {
+      "post": {
+        "operationId": "move_note_v1_notes__note_id__move_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelocateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MovedView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Move Note",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
     "/v1/notes/{note_id}/my-notes/timing": {
       "put": {
         "description": "When each typed line was first touched, relative to the recording.\n\nFirst report wins: the line was typed once, and a later flush of the\nsame key is the same line being edited, not heard again.",
@@ -10752,6 +12256,115 @@
           }
         },
         "summary": "Render the current version as a PDF (draft watermark for draft notes; 409 only for cancelled).",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/presence": {
+      "get": {
+        "operationId": "list_presence_v1_notes__note_id__presence_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresenceView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Presence",
+        "tags": [
+          "notes"
+        ]
+      },
+      "post": {
+        "operationId": "heartbeat_v1_notes__note_id__presence_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Heartbeat",
         "tags": [
           "notes"
         ]
@@ -11142,6 +12755,7 @@
     },
     "/v1/notes/{note_id}/share": {
       "post": {
+        "description": "Give a workspace member a role on the note. A non-member answers 404 ``not_a_member``\nwith ``can_invite``: the client invites them as a guest through auth-service (W2 entity),\nbecause note-service never mails people who are not members.",
         "operationId": "share_with_member_v1_notes__note_id__share_post",
         "parameters": [
           {
@@ -11182,11 +12796,11 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SharingView"
+                  "$ref": "#/components/schemas/ShareGrant"
                 }
               }
             },
@@ -11524,6 +13138,76 @@
           }
         },
         "summary": "Attach Transcript",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/transcript-sharing": {
+      "put": {
+        "description": "\"Include transcript\" for view/comment collaborators and guests (editors always see it).",
+        "operationId": "set_transcript_sharing_v1_notes__note_id__transcript_sharing_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranscriptSharingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Transcript Sharing",
         "tags": [
           "notes"
         ]

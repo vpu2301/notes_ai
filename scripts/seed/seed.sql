@@ -11,6 +11,10 @@ INSERT INTO tenants (id, name, display_name, locale, timezone, status) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- ── Users (sub = Keycloak user id from realm-export.json) ───────────────────
+-- Accounts this run actually created; only they get a membership below.
+CREATE TEMP TABLE seeded_new_users (sub UUID PRIMARY KEY) ON COMMIT DROP;
+
+WITH upserted AS (
 INSERT INTO users (sub, tenant_id, email, display_name, role, status) VALUES
     ('0a000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-00000000000a', 'admin@tenant-a.example',   'Dev Admin A',   'tenant_admin', 'active'),
     -- The only seeded account with tenant_admin and nothing else (the pure admin view).
@@ -26,7 +30,10 @@ INSERT INTO users (sub, tenant_id, email, display_name, role, status) VALUES
 ON CONFLICT (tenant_id, email) DO UPDATE
     SET display_name = EXCLUDED.display_name,
         role         = EXCLUDED.role,
-        status       = EXCLUDED.status;
+        status       = EXCLUDED.status
+RETURNING sub, (xmax = 0) AS inserted
+)
+INSERT INTO seeded_new_users SELECT sub FROM upserted WHERE inserted;
 
 -- ── Tenant branding (idempotent, dev-cosmetic) ──────────────────────────────
 UPDATE tenants SET
@@ -54,6 +61,8 @@ UPDATE tenants SET
 WHERE id = '00000000-0000-0000-0000-00000000000b';
 
 -- ── Tenant memberships (platform role → management role) ───────────────────
+-- Only for accounts created above: the seed runs on every `docker compose up`,
+-- and a member removed from the workspace (row deleted) must stay removed.
 INSERT INTO tenant_memberships (tenant_id, user_sub, role, status)
 SELECT
     u.tenant_id,
@@ -66,6 +75,7 @@ SELECT
     END,
     'active'
 FROM users u
+JOIN seeded_new_users n ON n.sub = u.sub
 ON CONFLICT (tenant_id, user_sub) DO NOTHING;
 
 -- Dev Admin A also administers tenant-B (multi-tenant data for the switcher).
