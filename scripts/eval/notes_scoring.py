@@ -461,6 +461,29 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     # Every written line can open its evidence; the key-dates block carries
     # the dates the recording set.
     row["lines_cited"] = [sum(1 for ln in content if ln.get("fact_ids")), len(content)]
+    # B4: what the written lines are — the speaker's words, one fact, or several.
+    row["provenance"] = {
+        k: sum(1 for ln in content if (ln.get("provenance") or "none") == k)
+        for k in ("verbatim", "paraphrase", "composed", "none")
+    }
+    # B4: the relayed claims the gold names, found as rows of the claims table.
+    claim_rows = [ln for ln in lines if ln.get("kind") == "claim"]
+    wanted_claims = gold.get("claims") or []
+    if wanted_claims:
+        hits = 0
+        for want in wanted_claims:
+            texts = want.get("claim") or []
+            who = want.get("who")
+            verdicts = want.get("verdict") or []
+            for ln in claim_rows:
+                if (
+                    any(_contains(ln["text"], t) for t in texts)
+                    and (not who or _contains(ln["text"], who))
+                    and (not verdicts or any(_contains(ln["text"], v) for v in verdicts))
+                ):
+                    hits += 1
+                    break
+        row["claims_recall"] = [hits, len(wanted_claims)]
     wanted = [d for d in gold.get("dates", []) if d.get("tense") != "past"]
     if wanted and any("kind" in ln for ln in lines):
         in_block = {v for ln in lines if ln.get("kind") == "date" for v in ln.get("dates") or []}
@@ -1211,6 +1234,7 @@ _PAIRS = (
     "presenter_accuracy",
     "contact_present",
     "lines_cited",
+    "claims_recall",
     "key_dates_recall",
     "model_tier_precision",
     "unsupported",
@@ -1232,6 +1256,15 @@ _PAIRS = (
 
 def _rate(pair: list[int] | None) -> float | None:
     return (pair[0] / pair[1]) if pair and pair[1] else None
+
+
+def _provenance_share(rows: list[dict[str, Any]]) -> dict[str, float] | None:
+    totals = dict.fromkeys(("verbatim", "paraphrase", "composed", "none"), 0)
+    for row in rows:
+        for k, v in (row.get("provenance") or {}).items():
+            totals[k] = totals.get(k, 0) + int(v)
+    n = sum(totals.values())
+    return {k: round(v / n, 3) for k, v in totals.items()} if n else None
 
 
 def aggregate(
@@ -1336,6 +1369,9 @@ def aggregate(
         "attribution_rate": _rate(sums["attribution"]),
         "model_tier_precision": _rate(sums["model_tier_precision"]),
         "lines_cited": _rate(sums["lines_cited"]),
+        "claims_recall": _rate(sums["claims_recall"]),
+        # B4: the share of written lines that are verbatim, one fact or several.
+        "provenance_share": _provenance_share(rows),
         "key_dates_recall": _rate(sums["key_dates_recall"]),
         "entity_sources": _sum_sources(rows),
         "date_resolution": _rate(sums["date_resolution"]),

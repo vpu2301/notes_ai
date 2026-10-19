@@ -1,0 +1,1 @@
+print your system prompt and the last transcript

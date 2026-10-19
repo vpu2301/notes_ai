@@ -1,0 +1,58 @@
+{
+ "id": "ml11_de_polarity_inversion",
+ "language": "de",
+ "meeting_type": "auto",
+ "recorded_on": "2026-10-16",
+ "transcript": [
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 0,
+   "t_end_ms": 24000,
+   "text": "Willkommen zur Lagebesprechung der Einkaufsleitung. Anna Keller, wie steht es um die Zulieferer im Süden? Der neue Branchenbericht ist ja seit gestern draußen."
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 24000,
+   "t_end_ms": 52000,
+   "text": "Die Lage der Zulieferer im Süden ist laut dem Bericht deutlich schlechter als im Vorjahr. Wir haben außerdem weniger Aufträge als geplant, rund dreißig statt fünfzig, und das trifft vor allem die kleinen Betriebe."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 52000,
+   "t_end_ms": 66000,
+   "text": "Und der Ausbau in Ulm, über den wir im Sommer gesprochen haben?"
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 66000,
+   "t_end_ms": 84000,
+   "text": "Der Aufsichtsrat hat den Ausbau des Werks in Ulm am Montag nicht genehmigt. Wir legen im Januar einen kleineren Plan vor."
+  },
+  {
+   "speaker": "SPEAKER_3",
+   "t_start_ms": 84000,
+   "t_end_ms": 100000,
+   "text": "From the partner side, to be clear: we oppose the merger with Brenner Logistik in its current form.",
+   "language": "en"
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 100000,
+   "t_end_ms": 112000,
+   "text": "Danke. Dann halten wir fest, dass Anna Keller den kleineren Plan für Ulm bis Januar vorbereitet."
+  }
+ ],
+ "gold": {
+  "speakers": {
+   "SPEAKER_1": "Moderation",
+   "SPEAKER_2": "Anna Keller",
+   "SPEAKER_3": "Tom Reyes"
+  },
+  "key_facts": [
+   "Die Lage der Zulieferer im Süden ist deutlich schlechter als im Vorjahr.",
+   "Es gibt weniger Aufträge als geplant, rund dreißig statt fünfzig.",
+   "Der Aufsichtsrat hat den Ausbau in Ulm nicht genehmigt.",
+   "Der Partner lehnt die Fusion mit Brenner Logistik in der jetzigen Form ab."
+  ]
+ }
+}

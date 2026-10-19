@@ -60,6 +60,15 @@
   "decisions": [
    "Make the offer to candidate B",
    "A November start date is acceptable"
+  ],
+  "claims": [
+   {
+    "who": "B",
+    "claim": [
+     "November"
+    ],
+    "verdict": []
+   }
   ]
  }
 }

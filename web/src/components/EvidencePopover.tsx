@@ -4,6 +4,7 @@ import { ApiError } from "../api/http";
 import { messageFor } from "../lib/errorCopy";
 import type { GeneratedItem } from "../api/types";
 import { mmss } from "../lib/generation";
+import { provenanceLabel } from "../i18n/note";
 
 /** Certainty chip label; a plain fact has no chip. */
 export const CERTAINTY_LABELS: Record<string, string> = {
@@ -12,6 +13,9 @@ export const CERTAINTY_LABELS: Record<string, string> = {
   opinion: "Opinion",
   proposal: "Proposal",
   allegation: "Allegation",
+  reported: "Claim",
+  unproven: "Claim — unsubstantiated",
+  refuted: "Claim — refuted",
 };
 
 /** Seconds of recording played either side of the quote. */
@@ -34,10 +38,13 @@ export function LineEvidence({
   noteId,
   row,
   rowsByKey,
+  language,
 }: {
   noteId: string;
   row: GeneratedItem;
   rowsByKey?: Map<string, GeneratedItem>;
+  /** The note's language (B4): the provenance chip is written in it. */
+  language?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -46,6 +53,8 @@ export function LineEvidence({
   const chip = chipLabel(row);
   const corrected = (row.corrections ?? []).filter((c) => c.canonical !== c.surface);
   const others = (row.cites ?? []).slice(1);
+  // B4: "Wörtlich" / "Paraphrase" / "Aus 2 Aussagen" — what the line is, never a judgement.
+  const provenance = provenanceLabel(language, row.provenance, (row.cites ?? []).length);
 
   useEffect(() => {
     if (!open) return;
@@ -125,8 +134,11 @@ export function LineEvidence({
           }}
         >
           {chip && <span className="certainty-chip">{chip}</span>}
+          {provenance && <span className="provenance-chip muted">{provenance}</span>}
+          {row.verdict && <span className="verdict-line">{row.verdict}</span>}
           <q className="evidence-quote">{row.quote}</q>
           <span className="evidence-meta muted">
+            {provenance ? `${provenance} · ` : ""}
             {mmss(row.start_ms)}
             {row.speaker_name ? ` · ${row.speaker_name}` : ""}
           </span>

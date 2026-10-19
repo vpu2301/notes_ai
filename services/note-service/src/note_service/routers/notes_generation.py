@@ -30,6 +30,7 @@ from ..domain import access, generation_service
 from ..domain import generation_repository as gen_repo
 from ..domain import glossary_repository as glossary_repo
 from ..domain import notes_repository as repo
+from ..domain.meeting_doc import entities
 from ..notifications import emit_budget_reached
 from . import ai_settings as ai_settings_router
 from .notes_from_transcript import _fetch_transcript
@@ -62,6 +63,81 @@ class Coverage(BaseModel):
     facts_by_third: list[int]
     speech_ms: int
     excluded_ms: int
+
+
+class StageModel(BaseModel):
+    """Which backend and model actually answered one stage's calls, and how many failed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage: str
+    backend: str | None
+    model_id: str | None
+    calls: int
+    failed: int
+    """sha256 of every distinct system text this stage sent."""
+    system_hashes: list[str] = []
+
+
+class PromptCall(BaseModel):
+    """One call the resolver says this run makes, and whether a request with exactly
+    that system text was sent (a retry with a suffix is a different text)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    call: str
+    sha: str
+    sent: bool
+
+
+class ModelFallback(BaseModel):
+    """A model override that landed on its fallback in the worker, and why."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    backend: str
+    primary: str
+    reason: str | None
+
+
+class InstructionsRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    """`workspace`, a meeting family (`client`, …) or `note` (N4)."""
+    scope: str
+    version: int
+    """`stale`: the type's text was being updated, so the workspace's wrote the note."""
+    fallback: str | None = None
+
+
+class Provenance(BaseModel):
+    """F1-01 — what produced this run, so two results can be told apart: the code, the
+    prompt and profile versions, both flags as the run EXECUTED them and where they came
+    from (``snapshot``: pinned at enqueue; ``deployment``: a row from before snapshots),
+    the output language and its source, the transcript revision, and the models that
+    answered. While queued or running it is the pinned snapshot; null fields are unknown."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_kind: str
+    build_sha: str | None = None
+    pinned_build_sha: str | None = None
+    prompt_version: str
+    profile_version_id: str | None = None
+    algorithm_version: str | None = None
+    flags_source: Literal["snapshot", "deployment"] | None = None
+    multilingual_evidence: bool | None = None
+    fidelity: bool | None = None
+    final_check: bool | None = None
+    """Flags the worker's deployment has set differently from what the job was pinned with."""
+    flags_differ: list[str] = []
+    output_language: str | None = None
+    output_language_source: str | None = None
+    transcript_rev: int | None = None
+    stages: list[StageModel] = []
+    fallbacks: list[ModelFallback] = []
+    prompt_calls: list[PromptCall] = []
 
 
 class GenerationView(BaseModel):
@@ -112,6 +188,14 @@ class GenerationView(BaseModel):
     """The spoken language the run wrote in (``en``/``de``/``uk``), so the
     client labels exclusions in it. Null before Q3."""
     language: str | None = None
+    provenance: Provenance | None = None
+    """N2 — the workspace's note instructions this run was written under; null: none."""
+    instructions: InstructionsRef | None = None
+    """N0 — the version of the workspace's model settings (style and parameters) that
+    wrote it; 0: the defaults; null: a run from before N0."""
+    model_settings_version: int | None = None
+    """N0 — the writing style that wrote it (`business`, …); null before N0."""
+    writing_style: str | None = None
 
     @property
     def live(self) -> bool:
@@ -159,6 +243,11 @@ class GeneratedItemView(BaseModel):
     figure: dict[str, str] | None = None
     corrections: list[dict[str, str]] = []
     mentions: list[dict[str, str | None]] = []
+    """B4 — what the line is: the speaker's words, one fact, or several. Null for rows
+    written before the column existed."""
+    provenance: Literal["verbatim", "paraphrase", "composed"] | None = None
+    """B4 — a claim row's verdict cell (the label and the speaker's clause)."""
+    verdict: str | None = None
 
 
 def _excluded(stats: dict) -> list[ExcludedRange]:
@@ -187,6 +276,55 @@ def _coverage(stats: dict) -> Coverage | None:
         facts_by_third=[int(n) for n in thirds],
         speech_ms=int(stats.get("speech_ms") or 0),
         excluded_ms=int(stats.get("excluded_ms") or 0),
+    )
+
+
+def _provenance(row: gen_repo.GenerationRow) -> Provenance:
+    stats = row.stats or {}
+    sent = {str(h) for c in stats.get("calls") or [] for h in c.get("system_hashes") or []}
+    pinned = getattr(row, "config_snapshot", None) or {}
+    runtime = stats.get("runtime") or {}
+    flags = runtime.get("flags") or {}
+    final = (stats.get("final_check") or {}).get("ran")
+    return Provenance(
+        run_kind=str(runtime.get("run_kind") or pinned.get("run_kind") or "generation"),
+        build_sha=runtime.get("build_sha"),
+        pinned_build_sha=runtime.get("pinned_build_sha") or pinned.get("build_sha"),
+        prompt_version=row.prompt_version,
+        profile_version_id=stats.get("profile_version_id") or pinned.get("profile_version_id"),
+        algorithm_version=runtime.get("algorithm_version") or pinned.get("algorithm_version"),
+        flags_source=runtime.get("flags_source") or ("snapshot" if pinned else None),
+        multilingual_evidence=flags.get("multilingual", pinned.get("multilingual")),
+        fidelity=flags.get("fidelity", pinned.get("fidelity")),
+        final_check=final if final is not None else runtime.get("final_check"),
+        flags_differ=[str(f) for f in runtime.get("flags_differ") or []],
+        output_language=stats.get("output_language") or pinned.get("output_language"),
+        output_language_source=stats.get("output_language_source"),
+        transcript_rev=getattr(row, "transcript_rev", None),
+        stages=[
+            StageModel(
+                stage=str(c.get("stage")),
+                backend=c.get("backend"),
+                model_id=c.get("model_id"),
+                calls=int(c.get("calls") or 0),
+                failed=int(c.get("failed") or 0),
+                system_hashes=[str(h) for h in c.get("system_hashes") or []],
+            )
+            for c in stats.get("calls") or []
+        ],
+        prompt_calls=[
+            PromptCall(call=str(call), sha=str(sha), sent=str(sha) in sent)
+            for call, sha in (stats.get("prompt_hashes") or {}).items()
+        ],
+        fallbacks=[
+            ModelFallback(
+                kind=str(f.get("kind")),
+                backend=str(f.get("backend")),
+                primary=str(f.get("primary")),
+                reason=f.get("reason"),
+            )
+            for f in runtime.get("fallbacks") or []
+        ],
     )
 
 
@@ -219,6 +357,26 @@ def _view(row: gen_repo.GenerationRow) -> GenerationView:
         recording_type=stats.get("recording_type"),
         recording_type_source=stats.get("recording_type_source"),
         language=stats.get("language"),
+        provenance=_provenance(row),
+        instructions=_instructions_ref(stats),
+        model_settings_version=_model_settings_version(stats),
+        writing_style=str(stats["writing_style"]) if stats.get("writing_style") else None,
+    )
+
+
+def _model_settings_version(stats: dict[str, object]) -> int | None:
+    ref = stats.get("model_params")
+    return int(ref["version"]) if isinstance(ref, dict) and "version" in ref else None
+
+
+def _instructions_ref(stats: dict[str, object]) -> InstructionsRef | None:
+    ref = stats.get("instructions")
+    if not isinstance(ref, dict) or "version" not in ref:
+        return None
+    return InstructionsRef(
+        scope=str(ref.get("scope") or "workspace"),
+        version=int(ref["version"]),
+        fallback=str(ref["fallback"]) if ref.get("fallback") else None,
     )
 
 
@@ -409,9 +567,29 @@ async def generated_items(
             figure=_figure(_get(r, "payload")) if r["kind"] == "figure" else None,
             corrections=_undecided(_json_list(_get(r, "corrections")), reviewed),
             mentions=_json_list(_get(r, "mentions")),
+            provenance=_line_provenance(_get(r, "provenance")),
+            verdict=_verdict(_get(r, "payload")) if r["kind"] == "claim" else None,
         )
         for r in rows
     ]
+
+
+def _line_provenance(value: object) -> Literal["verbatim", "paraphrase", "composed"] | None:
+    return value if value in ("verbatim", "paraphrase", "composed") else None  # type: ignore[return-value]
+
+
+def _verdict(value: object) -> str | None:
+    """B4 — a claim row's verdict from its payload."""
+    import json
+
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    if isinstance(value, dict) and isinstance(value.get("verdict"), str):
+        return value["verdict"] or None
+    return None
 
 
 def _get(row: object, key: str) -> object:
@@ -423,15 +601,20 @@ def _get(row: object, key: str) -> object:
 
 
 def _undecided(corrections: list[object], reviewed: set[str]) -> list[object]:
-    """The respellings still waiting for the author; one decided anywhere in the note is not offered again."""
-    if not reviewed:
-        return corrections
+    """The respellings still waiting for the author; one decided anywhere in the note is not
+    offered again, and grammar is never offered (F2-02: an article, an ending or capitals,
+    as rows stored before the guard may still carry)."""
     return [
         c
         for c in corrections
         if not isinstance(c, dict)
-        or glossary_repo.name_review_tag(str(c.get("surface", "")), str(c.get("canonical", "")))
-        not in reviewed
+        or (
+            entities.is_correction(str(c.get("surface", "")), str(c.get("canonical", "")))
+            and glossary_repo.name_review_tag(
+                str(c.get("surface", "")), str(c.get("canonical", ""))
+            )
+            not in reviewed
+        )
     ]
 
 

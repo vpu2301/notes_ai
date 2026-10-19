@@ -939,6 +939,53 @@ actor APIClient {
         return try decode(AISettings.self, from: data)
     }
 
+    /// How the workspace wants its notes written. Nil while the server has the feature
+    /// off (404 `not_available`); every member may read it, editing is on the web.
+    func aiInstructions() async throws -> AIInstructions? {
+        do {
+            let data = try await send(base: \.noteBaseURL, path: "/v1/ai/instructions", method: "GET",
+                                      authorized: true)
+            return try decode(AIInstructions.self, from: data)
+        } catch APIError.http(status: 404, let problem) where problem?.code == "not_available" {
+            return nil
+        }
+    }
+
+    // MARK: - Note instructions (N4)
+
+    /// This note's own instructions, added to the workspace's. Nil while the server has
+    /// the feature off (404 `not_available`); version 0 when the note has none.
+    func noteInstructions(noteId: String) async throws -> AIInstructions? {
+        do {
+            let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/instructions",
+                                      method: "GET", authorized: true)
+            return try decode(AIInstructions.self, from: data)
+        } catch APIError.http(status: 404, let problem) where problem?.code == "not_available" {
+            return nil
+        }
+    }
+
+    /// Empty text removes them. 409 `note_cancelled`/`no_transcript`, 413 `text_too_long`.
+    func putNoteInstructions(noteId: String, text: String) async throws -> AIInstructions {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/instructions",
+                                  method: "PUT", jsonBody: try JSONEncoder().encode(["text": text]),
+                                  authorized: true)
+        return try decode(AIInstructions.self, from: data)
+    }
+
+    /// What saving `text` would do; nothing is written.
+    func previewNoteInstructions(noteId: String, text: String) async throws -> AIInstructions {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/instructions/preview",
+                                  method: "POST", jsonBody: try JSONEncoder().encode(["text": text]),
+                                  authorized: true)
+        return try decode(AIInstructions.self, from: data)
+    }
+
+    func deleteNoteInstructions(noteId: String) async throws {
+        _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/instructions",
+                           method: "DELETE", authorized: true)
+    }
+
     // MARK: - Notes (note-service): open, edit, export
 
     // MARK: - Generation (Sprint 33)

@@ -1,0 +1,15 @@
+{
+ "length": "short",
+ "bullets_per_section": [
+  2,
+  4
+ ],
+ "figure_tables": false,
+ "heading_style": "short",
+ "terminology": [
+  {
+   "use": "реліз",
+   "instead_of": "випуск"
+  }
+ ]
+}

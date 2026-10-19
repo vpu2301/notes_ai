@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -163,6 +164,16 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(mod.repo, "fetch_note", _fetch_note)
     monkeypatch.setattr(mod.repo, "fetch_version", _fetch_version)
 
+    # N0: the workspace's settings row (no row: the defaults).
+    settings_row: dict[str, Any] = {"model_params": {}}
+
+    async def _fetch_settings(conn, *, tenant_id):  # noqa: ANN001
+        from note_service.domain.ai_settings import SettingsRow
+
+        return SettingsRow(tenant_id=tenant_id, model_params=settings_row["model_params"])
+
+    monkeypatch.setattr(mod.ai_settings, "fetch", _fetch_settings)
+
     transcript_calls: list[UUID] = []
 
     async def _fetch_transcript(job_id, *, auth_header):  # noqa: ANN001
@@ -192,6 +203,7 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         notes=notes,
         source_job=source_job,
         module=mod,
+        settings_row=settings_row,
     )
 
 
@@ -305,3 +317,13 @@ def test_build_prompt_clips_transcript_not_note() -> None:
     assert TRUNCATED_MARK in prompt
     assert len(prompt) < 900
     assert "# Conversation so far" not in prompt  # blank history turns are dropped
+
+
+def test_ask_uses_the_workspaces_temperature_and_answer_length(rig: SimpleNamespace) -> None:
+    body = {"question": "Where did they go?", "history": []}
+    rig.client.post(f"/v1/notes/{NOTE_ID}/ask", json=body)
+    assert rig.provider.calls[-1]["temperature"] == 0.2  # no row: today's values
+    rig.settings_row["model_params"] = {"ask_temperature": 0.6, "ask_max_tokens": 1200}
+    rig.client.post(f"/v1/notes/{NOTE_ID}/ask", json=body)
+    assert rig.provider.calls[-1]["temperature"] == 0.6
+    assert rig.provider.calls[-1]["max_tokens"] == 1200

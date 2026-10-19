@@ -558,6 +558,9 @@
           "second_pass": {
             "$ref": "#/components/schemas/SecondPass"
           },
+          "segment_language": {
+            "$ref": "#/components/schemas/SegmentLanguage"
+          },
           "segments": {
             "items": {
               "$ref": "#/components/schemas/SegmentDiagnostics"
@@ -1442,6 +1445,67 @@
           "end_ms"
         ],
         "title": "SegmentDiagnostics",
+        "type": "object"
+      },
+      "SegmentLanguage": {
+        "description": "Segment-level language check (Sprint B3 T2): segments looked at, those\nsuspected of another language (by the lexical test or a low ``avg_logprob``),\nthose decoded again in that language and kept because the decoder was surer,\nthose the backend gave no ``avg_logprob`` for, and those skipped at the deadline.",
+        "properties": {
+          "gaps": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Gaps",
+            "type": "integer"
+          },
+          "lexical": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Lexical",
+            "type": "integer"
+          },
+          "logprob": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Logprob",
+            "type": "integer"
+          },
+          "relabelled": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Relabelled",
+            "type": "integer"
+          },
+          "segments": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Segments",
+            "type": "integer"
+          },
+          "skipped": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "suspects": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Suspects",
+            "type": "integer"
+          },
+          "switched": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Switched",
+            "type": "integer"
+          },
+          "unavailable": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Unavailable",
+            "type": "integer"
+          }
+        },
+        "title": "SegmentLanguage",
         "type": "object"
       },
       "ShadowDiagnostics": {

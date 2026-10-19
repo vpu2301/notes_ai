@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   activateVersion,
   activationHistory,
+  aiRuntime,
   createProfile,
   getVersion,
   listExperiments,
@@ -11,6 +12,7 @@ import {
 import { ApiError } from "../../api/http";
 import type {
   ActivationRecord,
+  AiRuntime,
   ExperimentSummary,
   ModelCapabilities,
   ProfileConfig,
@@ -66,6 +68,7 @@ export function AINotesSettingsPage() {
   const [view, setViewRaw] = useSettingsView(VIEWS);
   const [profiles, setProfiles] = useState<PromptProfilesView | null>(null);
   const [capabilities, setCapabilities] = useState<ModelCapabilities | null>(null);
+  const [runtime, setRuntime] = useState<AiRuntime | null>(null);
   const [experiments, setExperiments] = useState<ExperimentSummary[]>([]);
   const [history, setHistory] = useState<ActivationRecord[] | null>(null);
   const [historyFailed, setHistoryFailed] = useState(false);
@@ -94,6 +97,12 @@ export function AINotesSettingsPage() {
       );
     } catch (err) {
       setError(messageFor(err));
+    }
+    try {
+      setRuntime(await aiRuntime());
+    } catch {
+      // An older server: say nothing about the engine rather than guess.
+      setRuntime(null);
     }
     try {
       setHistory(await activationHistory());
@@ -179,9 +188,25 @@ export function AINotesSettingsPage() {
           <dt>Output language</dt>
           <dd>
             {LANGUAGES.find((l) => l.value === activeConfig.output_language)?.label ?? activeConfig.output_language}
-            {activeConfig.output_language === "auto" ? " (the language most of the recording is in)" : ""} —
-            every spoken language is used as evidence
+            {activeConfig.output_language === "auto" ? " (the language most of the recording is in)" : ""}
+            {runtime?.multilingual_evidence ? " — every spoken language is used as evidence" : ""}
           </dd>
+          {runtime && (
+            <>
+              <dt>Checks</dt>
+              <dd data-testid="ai-runtime">
+                {runtime.fidelity
+                  ? "Every point and every written line is checked against what was said before the note is saved."
+                  : runtime.multilingual_evidence
+                    ? "Points are checked against what was said; written lines are not checked again."
+                    : "The previous engine: speech in another language than the recording's may be left out."}{" "}
+                <span className="muted">
+                  Prompts {runtime.prompt_version}
+                  {runtime.build_sha ? ` · build ${runtime.build_sha}` : ""}
+                </span>
+              </dd>
+            </>
+          )}
           <dt>Models</dt>
           <dd>
             {STAGES.map((s) => (
@@ -218,6 +243,12 @@ export function AINotesSettingsPage() {
           profile to one, regenerate it — your own edits in it are kept. Who processes the data, and
           spend, are under <a href="/settings/data">Data & AI</a>.
         </p>
+        {runtime && !runtime.profile_instructions_apply && (
+          <p className="help" data-testid="ai-instructions-unused">
+            Instructions in these profiles are not used for new notes here yet: this environment still
+            runs the previous engine. Test runs use them, so you can compare before it is switched on.
+          </p>
+        )}
         {!canEdit && <p className="help">Only a workspace admin can change these settings.</p>}
       </section>
 
@@ -379,6 +410,12 @@ export function AINotesSettingsPage() {
           <p className="help">Choose “Edit” on a version under Profiles, or create a profile.</p>
         ))}
 
+      {view === "test" && runtime && !runtime.fidelity && (
+        <p className="help" data-testid="ai-test-path">
+          Test runs always use every spoken language as evidence and check every line before
+          writing. New notes here do not do that yet, so a test can differ from a regenerated note.
+        </p>
+      )}
       {view === "test" && (
         <TestPanel
           view={profiles}

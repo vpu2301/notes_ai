@@ -152,3 +152,22 @@ groups:
           description: |
             The linter could not repair them; they were written in their fallback form. Break it down by code with mdx_note_generation_lint_total{outcome="unresolved_note"}.
             Runbook: docs/runbooks/notes.md#document-lint
+
+      - alert: NoteInstructionsCompileFailures
+        # Note instructions (N1): a failed compile is saved with the empty profile, so
+        # the workspace silently gets plain notes. A fifth failing means the writing
+        # model is not answering the compiler.
+        expr: |
+          (sum(increase(mdx_note_instructions_compiles_total{outcome="failed"}[1h])) or vector(0))
+          /
+          clamp_min(sum(increase(mdx_note_instructions_compiles_total[1h])) or vector(0), 1)
+          > 0.2
+        for: 15m
+        labels:
+          severity: warn
+          team: notes
+        annotations:
+          summary: "More than a fifth of note-instruction compiles failed in the last hour"
+          description: |
+            Saved instructions are falling back to plain notes. Check note-service logs for note_instructions.compile_failed (error_kind) and whether the writing model is degraded.
+            Runbook: docs/runbooks/notes.md#note-instructions

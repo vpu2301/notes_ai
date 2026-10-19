@@ -4,6 +4,7 @@ import { api } from "./http";
 import type {
   ActivationRecord,
   ActiveProfile,
+  AiRuntime,
   ExperimentEstimate,
   ExperimentRequest,
   ExperimentSummary,
@@ -15,6 +16,7 @@ import type {
   ProfileVersionView,
   PromptProfile,
   PromptProfilesView,
+  PreviewMode,
   ReviewRequest,
   RunArtifact,
 } from "./types";
@@ -46,10 +48,14 @@ export function getVersion(profileId: string, versionId: string, language: strin
 }
 
 /** Validates and resolves an unsaved draft; saves nothing. */
-export function previewDraft(config: ProfileConfig, language: string): Promise<ProfilePreview> {
+export function previewDraft(
+  config: ProfileConfig,
+  language: string,
+  mode: PreviewMode = "test",
+): Promise<ProfilePreview> {
   return api<ProfilePreview>("note", "/v1/ai/prompt-profiles/preview", {
     method: "POST",
-    json: { config, language },
+    json: { config, language, mode },
   });
 }
 
@@ -66,6 +72,11 @@ export function activateVersion(
 
 export function activationHistory(): Promise<ActivationRecord[]> {
   return api<ActivationRecord[]>("note", "/v1/ai/prompt-profiles/history");
+}
+
+/** The flags and versions new notes are pinned with in this deployment. */
+export function aiRuntime(): Promise<AiRuntime> {
+  return api<AiRuntime>("note", "/v1/ai/runtime");
 }
 
 export function modelCapabilities(): Promise<ModelCapabilities> {

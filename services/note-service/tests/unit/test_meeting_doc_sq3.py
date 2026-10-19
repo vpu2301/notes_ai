@@ -105,7 +105,7 @@ def test_render_writes_no_presenter_paragraph() -> None:
                       standing="guest"),
     )  # fmt: skip
     sections = render.render_sections(
-        [intro], role_by_key={}, language="de", framing="Podcast-Folge.", presenter_lines=True
+        [intro], role_by_key={}, language="de", framing="Sendung.", presenter_lines=True
     )
     assert all(not ln.text.startswith(("Gast:", "Präsentiert von:", "Vorgestellt:"))
                for s in sections for ln in s.lines)  # fmt: skip
@@ -201,8 +201,8 @@ def test_a_subset_line_is_removed_and_the_specific_one_stays() -> None:
 
 
 def _with_ladder(facts: list[VerifiedFact]) -> RenderedSection:
-    first, middle, last = overview.CONNECTIVES["de"]
-    leads = [first, middle, last]
+    # A ladder as an older run wrote it (B1: new ladders carry no connectives).
+    leads = [lead for lead in doclint._CONNECTIVE_LEADS if lead.startswith(("Zun", "Ans", "Sch"))]
     lines = tuple(
         Line(f"{leads[n]} {f.text}.", "summary", (f.item_key,)) for n, f in enumerate(facts)
     )
@@ -251,13 +251,13 @@ def test_the_introduction_comes_before_the_description() -> None:
 
 
 def test_a_type_word_title_is_rejected() -> None:
-    assert doclint.type_words_only("Podcast-Folge")
+    assert doclint.type_words_only("Sendung")
     assert doclint.type_words_only("Episode eines Podcasts über eine Besprechung")
     assert not doclint.type_words_only("Handala: Irans Hacker und die Kindergärten")
-    ctx = LintContext(language="de", speech_ms=0, title="Podcast-Folge")
+    ctx = LintContext(language="de", speech_ms=0, title="Sendung")
     assert "title.generic" in {f.rule for f in doclint.check([], ctx)}
     result = {"language": "de", "text": "Podcast Folge über eine Besprechung " * 10}
-    assert note_title.unsupported("Podcast-Folge über eine Besprechung", result) == "lint"
+    assert note_title.unsupported("Sendung über eine Besprechung", result) == "lint"
 
 
 def test_thirds_sampling_on_6000_words() -> None:

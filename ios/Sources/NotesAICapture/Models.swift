@@ -858,6 +858,27 @@ struct GenerationView: Decodable, Sendable {
     let excludedRanges: [ExcludedRange]?
     /// The spoken language the run wrote in (`en`/`de`/`uk`).
     let language: String?
+    /// The workspace's note instructions the run was written under; nil when none.
+    var instructions: InstructionsRef? = nil
+    /// N0 — the workspace's model settings version that wrote it (0: the defaults).
+    var modelSettingsVersion: Int? = nil
+    /// N3 — the writing style the run used (`business` is today's notes).
+    var writingStyle: String? = nil
+
+    /// The recording type line, with the style and the instructions version the run followed:
+    /// "Interview · Academic style · workspace instructions v3". Nil when there is none of them.
+    var statusLabel: String? {
+        var suffixes = writingStyle.flatMap { $0 == "business" ? nil : ["\($0.capitalized) style"] } ?? []
+        if let instructions { suffixes.append(instructions.statusText) }
+        if let v = modelSettingsVersion, v > 0 { suffixes.append("model settings v\(v)") }
+        let suffix = suffixes.isEmpty ? nil : suffixes.joined(separator: " · ")
+        switch (recordingTypeLabel, suffix) {
+        case let (label?, suffix?): return "\(label) · \(suffix)"
+        case let (label?, nil): return label
+        case let (nil, suffix?): return suffix.prefix(1).uppercased() + suffix.dropFirst()
+        default: return nil
+        }
+    }
 
     var isLive: Bool { status == "queued" || status == "running" }
     var isFinished: Bool { status == "complete" || status == "partial" }
@@ -898,7 +919,39 @@ struct GenerationView: Decodable, Sendable {
         case recordingType = "recording_type"
         case recordingTypeSource = "recording_type_source"
         case excludedRanges = "excluded_ranges"
-        case language
+        case language, instructions
+        case modelSettingsVersion = "model_settings_version"
+        case writingStyle = "writing_style"
+    }
+}
+
+/// Which version of the workspace's note instructions a run followed.
+/// `scope` is "workspace", a meeting type ("client", …) or "note".
+struct InstructionsRef: Decodable, Equatable, Sendable {
+    let scope: String
+    let version: Int
+    /// "stale": the meeting type's text was being recompiled, so the workspace's was used.
+    var fallback: String? = nil
+
+    /// A meeting type's name in the status line.
+    static let scopeLabels = [
+        "client": "client-call", "team": "team-meeting", "sales": "sales-call",
+        "one_on_one": "1:1", "interview": "interview", "broadcast": "broadcast", "memo": "memo",
+    ]
+
+    /// "client-call instructions v2", "this note's instructions", …
+    var statusText: String {
+        let label = Self.scopeLabels[scope] ?? scope
+        let text: String
+        switch scope {
+        case "workspace": text = "workspace instructions v\(version)"
+        case "note": text = "this note's instructions"
+        default: text = "\(label) instructions v\(version)"
+        }
+        guard fallback == "stale" else { return text }
+        // The worker records the workspace's scope when it fell back; it does not say which type.
+        let skipped = scope == "workspace" ? "meeting type's" : label
+        return text + " (workspace instructions used — the \(skipped) text is being updated)"
     }
 }
 
@@ -2496,6 +2549,33 @@ struct AISettings: Decodable, Equatable, Sendable {
     let budgetCents: Int
     let mayChoosePremium: Bool
     let canEdit: Bool
+    /// N0 — how notes are worded, and the model parameters as they run (capped). Older
+    /// servers send neither.
+    var writingStyle: String? = nil
+    var modelParamsVersion: Int? = nil
+    var modelParamsEffective: ModelParams? = nil
+
+    /// The parameters the engine reads; nil = the model's own value.
+    struct ModelParams: Decodable, Equatable, Sendable {
+        let temperature: Double
+        let contextWindowTokens: Int?
+        let maxOutputTokens: Int?
+        let maxConcurrency: Int
+        let factsPerWindow: Int
+        let retries: String
+        let askTemperature: Double
+        let askMaxTokens: Int
+
+        enum CodingKeys: String, CodingKey {
+            case temperature, retries
+            case contextWindowTokens = "context_window_tokens"
+            case maxOutputTokens = "max_output_tokens"
+            case maxConcurrency = "max_concurrency"
+            case factsPerWindow = "facts_per_window"
+            case askTemperature = "ask_temperature"
+            case askMaxTokens = "ask_max_tokens"
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
         case provider, tier, processors
@@ -2507,6 +2587,82 @@ struct AISettings: Decodable, Equatable, Sendable {
         case budgetCents = "budget_cents"
         case mayChoosePremium = "may_choose_premium"
         case canEdit = "can_edit"
+        case writingStyle = "writing_style"
+        case modelParamsVersion = "model_params_version"
+        case modelParamsEffective = "model_params_effective"
+    }
+}
+
+// MARK: - Note instructions (GET /v1/ai/instructions)
+
+/// How the workspace wants its notes written: the admin's text and what the writer
+/// understood, rendered by the server. Read-only here; editing is on the web.
+struct AIInstructions: Decodable, Equatable, Sendable {
+    /// 0: no instructions; notes are written as usual.
+    let version: Int
+    let text: String
+    let understood: [String]
+    let guidance: [String]
+    let notApplied: [NotApplied]
+    let canEdit: Bool
+    /// "compiled" or "failed" (saved, but the model could not read it yet).
+    let compileStatus: String
+    let updatedAt: String?
+    /// N4 — the longest text the server takes.
+    let maxChars: Int?
+    /// The scopes that have a text (workspace GET only).
+    let scopes: [ScopeState]?
+    /// The versions a note's instructions were added to, e.g. ["workspace": 3, "client": 1].
+    let baseVersions: [String: Int]?
+    /// The scope these instructions are added to; nil for the workspace.
+    let extends: InstructionsRef?
+    /// What the text compiled to; only the style is read here.
+    let profile: Profile?
+
+    struct Profile: Decodable, Equatable, Sendable {
+        let style: String?
+    }
+
+    /// The writing style the text asks for (it overrides the workspace's); nil when none.
+    var profileStyle: String? { profile?.style }
+
+    struct ScopeState: Decodable, Equatable, Sendable {
+        let scope: String
+        let version: Int
+        let stale: Bool
+    }
+
+    /// The meeting types with their own text, as "Client calls, Sales calls"; nil when none.
+    var alsoSetFor: String? {
+        let names = (scopes ?? []).filter { $0.scope != "workspace" }
+            .map { Self.meetingTypeNames[$0.scope] ?? $0.scope }
+        return names.isEmpty ? nil : names.joined(separator: ", ")
+    }
+
+    static let meetingTypeNames = [
+        "client": "Client calls", "team": "Team meetings", "sales": "Sales calls",
+        "one_on_one": "1:1s", "interview": "Interviews", "broadcast": "Broadcasts", "memo": "Memos",
+    ]
+
+    /// A request the writer will not follow; `message` is the server's sentence, shown as sent.
+    struct NotApplied: Decodable, Equatable, Sendable {
+        let text: String
+        let reason: String
+        let message: String
+    }
+
+    static let failedText =
+        "Your text was saved but could not be read right now (the model was unavailable). Notes are written as usual until you press Check again."
+
+    enum CodingKeys: String, CodingKey {
+        case version, text, understood, guidance
+        case notApplied = "not_applied"
+        case canEdit = "can_edit"
+        case compileStatus = "compile_status"
+        case updatedAt = "updated_at"
+        case maxChars = "max_chars"
+        case scopes, extends, profile
+        case baseVersions = "base_versions"
     }
 }
 
@@ -2695,6 +2851,8 @@ struct GeneratedItem: Decodable, Sendable, Identifiable, Equatable {
         let surface: String
         let canonical: String
         let source: String?
+        /// "person" only with evidence of a person; nil or "term" otherwise (F2-02).
+        var entity: String? = nil
     }
 
     let itemKey: String
@@ -2716,11 +2874,21 @@ struct GeneratedItem: Decodable, Sendable, Identifiable, Equatable {
     let attributedTo: String?
     let parentKey: String?
     let corrections: [Correction]?
+    /// B4 — what the line is: verbatim | paraphrase | composed. Nil before B4.
+    var provenance: String? = nil
+    /// B4 — a claim row's verdict cell (the label and the speaker's clause).
+    var verdict: String? = nil
 
     var id: String { itemKey }
 
+    /// B4 — "Wörtlich" / "Paraphrase" / "Aus 2 Aussagen", in the note's language; nil before B4.
+    func provenanceLabel(language: String?) -> String? {
+        NoteLabels.provenance(language: language, provenance: provenance, count: (cites ?? []).count)
+    }
+
     enum CodingKeys: String, CodingKey {
         case kind, text, quote, placement, cites, certainty, corrections
+        case provenance, verdict
         case itemKey = "item_key"
         case sectionKey = "section_key"
         case ownerLabel = "owner_label"
@@ -2761,6 +2929,9 @@ struct GeneratedItem: Decodable, Sendable, Identifiable, Equatable {
         "opinion": "Opinion",
         "proposal": "Proposal",
         "allegation": "Allegation",
+        "reported": "Claim",
+        "unproven": "Claim — unsubstantiated",
+        "refuted": "Claim — refuted",
     ]
 
     /// "Forecast · Reinbold" — or nil for a plain fact.

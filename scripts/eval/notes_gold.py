@@ -157,9 +157,20 @@ def fact_third(fact: str | dict | KeyFact) -> int | None:
     return None
 
 
+class GoldClaim(_Model):
+    """B4: a claim the recording relays — who makes it, words of it (any one must
+    appear in the claims-table row), and the speaker's verdict words, when there is one."""
+
+    who: str | None = None
+    claim: list[str] = Field(min_length=1)
+    verdict: list[str] = Field(default_factory=list)
+
+
 class Gold(_Model):
     # v1/v2: strings; v3: KeyFact objects. One file uses one.
     key_facts: list[str | KeyFact] = Field(default_factory=list)
+    # B4: the relayed claims the note's claims table must carry.
+    claims: list[GoldClaim] = Field(default_factory=list)
     actions: list[Action] = Field(default_factory=list)
     decisions: list[str] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)

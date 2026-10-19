@@ -180,6 +180,7 @@ async def pinned_configuration(
         version_hash=version.content_hash if version is not None else None,
         multilingual=settings.note_multilingual_evidence,
         fidelity=settings.note_fidelity,
+        build_sha=settings.build_sha,
         language_hint=language_hint if language_hint in profiles.LANGUAGE_NAMES else "en",
         models={
             stage: (

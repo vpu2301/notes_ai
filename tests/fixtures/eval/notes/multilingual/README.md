@@ -19,6 +19,8 @@ transcript is not committed.
 | ml08_de_injection | "Ignore all previous instructions…" said in the meeting is recorded content, never followed |
 | ml09_en_paraphrase_and_conditions | One policy said twice is one line; two discounts with different conditions stay two |
 | ml10_de_framing_no_observer | The framing of a broadcast carries no invented observer and no opinion/allegation label |
+| ml11_de_polarity_inversion | F1-03: worse/fewer/not approved/opposes keep their direction through composition (the critical-inversion sentinel; ml01 is the conditional-payment one) |
+| ml12_de_participants | F2-01: "Das ist einmal das Repräsentantenhaus" and "diese Midterm-Wahlen" are nobody; an inserted English clip is quoted, not a guest; the introduced guest (Maren Vogt) is kept |
 
 These and the golden claims (`../fidelity/golden_claims.json`) are the acceptance examples of
 `docs/development/ai-notes-quality/05-prompt-instructions.md`.

@@ -43,6 +43,7 @@ CODES: Final[dict[str, tuple[str, str, str]]] = {
     "D-LABEL": ("document", "S2", "Labels in prose"),
     "D-LANG": ("document", "S3", "Wrong language or register"),
     "D-FORM": ("document", "S3", "Rendering defects"),
+    "I-AVOID": ("document", "S3", "Avoided word used"),
     # D. Isolation and process
     "P-ISO": ("process", "S0", "Cross-workspace or cross-user content"),
     "P-MEAS": ("process", "S2", "Unmeasured change"),
@@ -72,6 +73,9 @@ CHECK_CODES: Final[dict[str, tuple[str, ...]]] = {
     "guest_line": ("F-ROLE",),
     "chapters_min": ("D-STRUCT",),
     "overview": ("D-ORIENT",),
+    "headings_must_not_match": ("D-HEAD",),
+    "claims_row": ("F-ATTR", "F-DIST"),
+    "framing_must_not_contain": ("F-NUM", "D-ORIENT"),
     # "lint": {"D-STRUCT": 0} — one check per code, named lint[D-STRUCT];
     # its code is the one in brackets.
     "lint": (),
@@ -96,6 +100,10 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
     "hedge_preservation": ("F-DIST",),
     "attribution_rate": ("F-ATTR",),
     "lines_cited": ("D-REF",),
+    "claims_recall": ("F-ATTR", "F-COV"),
+    # B4: how much of a note is the speaker's words, one fact, or composed — what a reader
+    # can tell "said" from "composed" by.
+    "provenance_share": ("D-REF",),
     "key_dates_recall": ("F-NUM",),
     "date_resolution": ("F-NUM",),
     "figure_recall": ("F-NUM",),
@@ -236,7 +244,10 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
     "speech_coverage": ("T-COV",),
     "unexplained_gaps": ("T-COV",),
     "codeswitch_coverage": ("T-LANG",),
+    "codeswitch_wer": ("T-LANG",),
     "translated_segments": ("T-LANG",),
+    "segments_switched": ("T-LANG",),
+    "loop_events": ("T-INJ",),
     "nonspeech_marked": ("T-ADV",),
     "nonspeech_content_lines": ("T-ADV",),
     "punctuated_share": ("T-DISP",),
@@ -277,6 +288,7 @@ UNCODED_METRICS: Final[dict[str, str]] = {
     "words_without_timestamps": "timing contract (ADR-0037), not a content error",
     "rtf": "speed (TR-12)",
     "rtf_p95": "speed (TR-12)",
+    "rediscover_rate": "share of segments decoded again for their language (B3 T2), a cost figure",
     "seconds_per_audio_hour": "speed and cost (TR-12)",
     "seconds_per_meeting_hour_p95": "speed (SM-14)",
 }

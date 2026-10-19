@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import re
 from datetime import date
 from typing import Any
 
@@ -179,7 +180,9 @@ def test_sections_are_reordered_by_time_and_a_long_one_split_at_its_gap() -> Non
     topics = [s for s in repaired if s.role == roles.TOPICS]
     assert topics[0].title == "Gründung von Palantir"
     assert len(topics) == 4 and all(2 <= doclint._points(s) <= 6 for s in topics)
-    assert (topics[3].title or "").startswith("50:00")  # split at the 10-minute gap
+    # Split at the 10-minute gap; B1 T2: the new part is headed by its claim, not a stamp.
+    assert not re.match(r"^\d\d:\d\d", topics[3].title or "")
+    assert len({(s.title or "").casefold() for s in topics}) == 4
 
 
 def test_volume_below_the_floor_renders_more_specific_facts() -> None:
@@ -235,7 +238,9 @@ def test_diskussion_fails_generic_and_caps_and_takes_the_fallback() -> None:
     found = _rules(doclint.check([generic], ctx))
     assert "generic" in found["heading.generic"]
     [fixed] = [s for s in doclint.repair([generic], ctx)[0] if s.role == roles.TOPICS]
-    assert (fixed.title or "").startswith("03:00 — ")
+    # B1 T2: the fallback heading is the section's claim, not "03:00 — Name".
+    assert not re.match(r"^\d\d:\d\d", fixed.title or "")
+    assert (fixed.title or "").casefold() != "diskussion" and len((fixed.title or "").split()) >= 3
     caps = _topic("DISKUSSION ÜBER DIE GRÜNDUNG", facts)
     assert "caps" in _rules(doclint.check([caps], ctx))["heading.form"]
     [recased] = [s for s in doclint.repair([caps], ctx)[0] if s.role == roles.TOPICS]
@@ -371,7 +376,7 @@ def test_a_compliant_first_paragraph_passes() -> None:
         },
     )
     text = (
-        "Podcast-Folge über Palantir und die Anfänge der Datenanalyse nach 2001. Es sprechen "
+        "Sendung über Palantir und die Anfänge der Datenanalyse nach 2001. Es sprechen "
         "Erzähler/in und als Gast Felix Holtermann (Handelsblatt). Themen sind der 11. September, "
         "die Gründung von Palantir, Alex Karp und Überwachung."
     )
@@ -381,14 +386,14 @@ def test_a_compliant_first_paragraph_passes() -> None:
 def test_the_type_word_is_mapped_to_the_classified_type() -> None:
     ctx = _ctx([], recording_type="podcast_broadcast")
     assert doclint.type_word_fault("Vortrag über Palantir.", ctx)
-    assert doclint._map_type_word("Vortrag über Palantir.", ctx) == "Podcast-Folge über Palantir."
+    assert doclint._map_type_word("Vortrag über Palantir.", ctx) == "Sendung über Palantir."
     assert doclint.type_word_fault("podcast_broadcast über Palantir.", ctx)
-    assert not doclint.type_word_fault("Podcast-Folge über Palantir.", ctx)
+    assert not doclint.type_word_fault("Sendung über Palantir.", ctx)
 
 
 def test_a_missing_second_paragraph_takes_the_composed_rung() -> None:
     facts = [_specific(n, n * MIN) for n in range(8)]
-    framing = Line("Podcast-Folge über Palantir.", "framing", (facts[0].item_key,))
+    framing = Line("Sendung über Palantir.", "framing", (facts[0].item_key,))
     top = RenderedSection(roles.OVERVIEW_KEY, roles.SUMMARY, framing.text, lines=(framing,))
     ctx = _ctx(facts, minutes=3, known=frozenset({"Peter", "Thiel", "Alex", "Karp", "Palantir"}))
     repaired, done = doclint.repair([top], ctx)
@@ -467,7 +472,7 @@ def test_an_orientation_sentence_may_name_a_fact_but_not_repeat_its_bullet() -> 
     carry too. §7 / SQ3 T3: not in the same words — a sentence that says
     what a bullet says is redundancy, and the repair keeps one of them."""
     facts = [_specific(n, n * MIN) for n in range(4)]
-    framing = Line("Podcast-Folge über Palantir.", "framing", (facts[0].item_key,))
+    framing = Line("Sendung über Palantir.", "framing", (facts[0].item_key,))
     named = Line("Palantir entsteht 1990 aus einer kleinen Gründung.", "summary",
                  (facts[0].item_key,))  # fmt: skip
     top = RenderedSection(roles.OVERVIEW_KEY, roles.SUMMARY, "", lines=(framing, named))

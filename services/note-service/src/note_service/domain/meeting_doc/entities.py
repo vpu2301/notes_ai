@@ -34,6 +34,57 @@ class Correction:
     surface: str
     canonical: str
     source: str
+    """F2-02: ``person`` only with entity evidence (a known person, a person term in the
+    glossary); anything else is ``term`` — never offered to be saved as a name."""
+    entity: str = "term"
+
+
+# F2-02 — what changed between what was heard and the proposed spelling. Only a spelling
+# change is an ASR correction; an article, an ending or capitals are grammar and format.
+SPELLING: Final = "spelling"
+ARTICLE: Final = "article"
+INFLECTION: Final = "inflection"
+CAPITALISATION: Final = "capitalisation"
+_ARTICLES: Final = frozenset(
+    {"der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer",
+     "eines", "the", "a", "an"}
+)  # fmt: skip
+# Grammatical endings ("Menschen", "Hauses", "Trumps", "України"/"Україні"). Any other
+# difference at the end is spelling: "Sonnenfeld" → "Sonnenfeldt" is a misheard name.
+_ENDINGS: Final = frozenset(
+    {"e", "en", "er", "es", "em", "ern", "n", "s", "ns", "nen", "'s", "’s",
+     "а", "я", "у", "ю", "і", "и", "ї", "ові", "еві", "ом", "ем", "ою", "ею", "ам", "ям",
+     "ами", "ями", "ах", "ях", "ів", "їв", "ей"}
+)  # fmt: skip
+
+
+def change_kind(surface: str, canonical: str) -> str:
+    """``spelling``, ``article``, ``inflection`` or ``capitalisation``: "Das
+    Repräsentantenhaus" → "Repräsentantenhaus" is an article, "Menschen" → "Mensch" an
+    ending, "trump" → "Trump" capitals; "Reinbolt" → "Reinbold" is spelling."""
+    a, b = " ".join(surface.split()), " ".join(canonical.split())
+    if a == b or a.casefold() == b.casefold():
+        return CAPITALISATION
+    words_a, words_b = a.split(), b.split()
+    while words_a and words_a[0].casefold() in _ARTICLES:
+        words_a = words_a[1:]
+    while words_b and words_b[0].casefold() in _ARTICLES:
+        words_b = words_b[1:]
+    bare_a, bare_b = " ".join(words_a).casefold(), " ".join(words_b).casefold()
+    if bare_a == bare_b:
+        return ARTICLE
+    stem = 0
+    while stem < min(len(bare_a), len(bare_b)) and bare_a[stem] == bare_b[stem]:
+        stem += 1
+    tail_a, tail_b = bare_a[stem:], bare_b[stem:]
+    if stem >= MIN_TOKEN_CHARS and all(t == "" or t in _ENDINGS for t in (tail_a, tail_b)):
+        return INFLECTION
+    return SPELLING
+
+
+def is_correction(surface: str, canonical: str) -> bool:
+    """A misheard spelling put right — never grammar or formatting (F2-02)."""
+    return change_kind(surface, canonical) == SPELLING
 
 
 def _norm(text: str) -> str:
@@ -51,14 +102,23 @@ def similarity(a: str, b: str) -> float:
 def candidates_in(text: str) -> list[str]:
     """Capitalised tokens of ``text``, and each two-token capitalised span
     ("Fabian Reinbolt"), longest first, once each. Sentence-initial words
-    are included: a name opens sentences too."""
+    are included: a name opens sentences too; a span never opens with an
+    article ("Das Repräsentantenhaus" is not a name)."""
     tokens = [(m.group(1), m.start(), m.end()) for m in CAPITALISED.finditer(text)]
     out: list[str] = []
     for (a, _sa, ea), (b, sb, _eb) in zip(tokens, tokens[1:], strict=False):
-        if text[ea:sb] == " ":
+        if text[ea:sb] == " " and a.casefold() not in _ARTICLES:
             out.append(f"{a} {b}")
     out.extend(token for token, _s, _e in tokens)
     return list(dict.fromkeys(out))
+
+
+def _people(glossary: tuple[Term, ...], known_people: frozenset[str]) -> frozenset[str]:
+    """Spellings with entity evidence of a person, whole and word by word."""
+    names = {t.term for t in glossary if t.kind == "person"} | set(known_people)
+    return frozenset(
+        {n.casefold() for n in names} | {w.casefold() for n in names for w in n.split()}
+    )
 
 
 def _pool(
@@ -102,8 +162,15 @@ def resolve(
     marked: German capitalises its nouns, and "Sommer" is not a misheard
     "Sommerfeld".
     """
-    heard = {h.casefold(): t.term for t in glossary for h in t.heard_as}
+    # A heard_as that is only an article or an ending of its term (saved before F2-02)
+    # teaches nothing: it is never applied.
+    heard = {h.casefold(): t.term for t in glossary for h in t.heard_as if is_correction(h, t.term)}
     pool = _pool(glossary, known_people, recording_names)
+    people = _people(glossary, known_people)
+
+    def entity_of(spelling: str) -> str:
+        return "person" if spelling.casefold() in people else "term"
+
     exact = {spelling.casefold() for spelling in pool}
     out: dict[str, Correction] = {}
     marked: set[str] = set()
@@ -111,7 +178,9 @@ def resolve(
         folded = surface.casefold()
         if folded in heard:
             if heard[folded] != surface:
-                out[surface] = Correction(surface, heard[folded], SOURCE_GLOSSARY)
+                out[surface] = Correction(
+                    surface, heard[folded], SOURCE_GLOSSARY, entity_of(heard[folded])
+                )
             continue
         if folded in exact or len(surface) < MIN_TOKEN_CHARS:
             continue
@@ -130,10 +199,12 @@ def resolve(
             and _one_substitution(surface, spelling)
             and best - runner_up > AMBIGUITY_MARGIN
         ):
-            out[surface] = Correction(surface, spelling, SOURCE_RECORDING)
+            out[surface] = Correction(surface, spelling, SOURCE_RECORDING, entity_of(spelling))
             continue
+        if not is_correction(surface, spelling):
+            continue  # "Die Behauptung" / "Behauptung": grammar, never a correction
         if best >= threshold and best - runner_up > AMBIGUITY_MARGIN:
-            out[surface] = Correction(surface, spelling, pool[spelling])
+            out[surface] = Correction(surface, spelling, pool[spelling], entity_of(spelling))
         elif MODEL_THRESHOLD <= best < threshold and _aligned(surface, spelling):
             marked.add(surface)
     # A span corrected — or doubted — as a whole wins over its parts: half a

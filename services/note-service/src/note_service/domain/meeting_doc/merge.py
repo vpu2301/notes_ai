@@ -99,6 +99,8 @@ def merge_facts(facts: list[VerifiedFact]) -> list[VerifiedFact]:
 
 # Below SAME_FACT_JACCARD but this close: a candidate for the meaning-equivalence check.
 CANDIDATE_JACCARD: Final = 0.45
+# Two quotes of the same passage: this share of the shorter one's words in common.
+SAME_SOURCE_QUOTE: Final = 0.6
 _DIGITS: Final = re.compile(r"\d[\d.,]*")
 
 
@@ -185,17 +187,33 @@ def merge_with_sources(
     return kept, sources
 
 
+def same_source(a: VerifiedFact, b: VerifiedFact) -> bool:
+    """Both restate the same spoken passage: the same line, and one quote's words mostly
+    the other's. Two paraphrases of one promise share few words but this."""
+    if a.start_ms != b.start_ms:
+        return False
+    qa, qb = _tokens(a.quote), _tokens(b.quote)
+    return bool(qa and qb) and len(qa & qb) / min(len(qa), len(qb)) >= SAME_SOURCE_QUOTE
+
+
 def candidates(facts: list[VerifiedFact]) -> list[tuple[int, int]]:
-    """Index pairs close in words but under the merge bar, :func:`compatible`: what the
-    meaning-equivalence check decides. Nearest first, so a cap keeps the likeliest."""
+    """Index pairs close in words but under the merge bar, or restating the same spoken
+    passage (:func:`same_source`), that :func:`compatible` allows: what the
+    meaning-equivalence check decides. Same passage first, then nearest, so a cap keeps
+    the likeliest."""
     tokens = [_tokens(f.text) for f in facts]
-    scored = [
-        (_jaccard(tokens[i], tokens[j]), i, j)
-        for i in range(len(facts))
-        for j in range(i + 1, len(facts))
-        if compatible(facts[i], facts[j])
-        and CANDIDATE_JACCARD <= _jaccard(tokens[i], tokens[j]) < SAME_FACT_JACCARD
-    ]
+    scored = []
+    for i in range(len(facts)):
+        for j in range(i + 1, len(facts)):
+            if not compatible(facts[i], facts[j]):
+                continue
+            score = _jaccard(tokens[i], tokens[j])
+            if score >= SAME_FACT_JACCARD:
+                continue
+            if same_source(facts[i], facts[j]):
+                scored.append((1.0 + score, i, j))
+            elif score >= CANDIDATE_JACCARD:
+                scored.append((score, i, j))
     return [(i, j) for _score, i, j in sorted(scored, reverse=True)]
 
 

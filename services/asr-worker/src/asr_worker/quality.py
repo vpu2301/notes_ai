@@ -55,6 +55,8 @@ def summarize(output: TranscriptionOutput, *, audio_seconds: float) -> dict[str,
             {k: _r(v / total_ms) for k, v in sorted(by_language.items())} if total_ms else {}
         ),
         "other_language_chunks": d.other_language_chunks,
+        "segment_lid_suspects": d.segment_language.suspects,
+        "segment_lid_switched": d.segment_language.switched,
         "segments": len(output.segments),
         "words": len(words),
         "avg_confidence": _r(weighted_conf),

@@ -15,11 +15,22 @@ struct EvidenceSheet: View {
                         if let chip = row.chipLabel {
                             DSChip(text: chip, tint: DS.text3, soft: DS.surface2)
                         }
+                        // B4: "Wörtlich" / "Paraphrase" / "Aus 2 Aussagen", in the note's language.
+                        if let mark = row.provenanceLabel(language: model.generation?.language) {
+                            DSChip(text: mark, tint: DS.text3, soft: DS.surface2)
+                        }
                         ForEach(row.correctedNames, id: \.self) { name in
                             DSChip(text: name, tint: DS.accentText, soft: DS.accentSoft)
                         }
                     }
                     VStack(alignment: .leading, spacing: 8) {
+                        // B4: the claim row's verdict, the presenter's own words.
+                        if let verdict = row.verdict, !verdict.isEmpty {
+                            Text(verdict)
+                                .font(.ds(15, .semibold))
+                                .foregroundStyle(DS.text2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         Text("“\(row.quote)”")
                             .font(.ds(17))
                             .foregroundStyle(DS.text1)
@@ -69,7 +80,9 @@ struct EvidenceSheet: View {
     }
 
     private var meta: String {
-        var parts = [formatElapsed(ms: row.startMs)]
+        var parts: [String] = []
+        if let mark = row.provenanceLabel(language: model.generation?.language) { parts.append(mark) }
+        parts.append(formatElapsed(ms: row.startMs))
         if let speaker = row.speakerName, !speaker.isEmpty { parts.append(speaker) }
         return parts.joined(separator: " · ")
     }

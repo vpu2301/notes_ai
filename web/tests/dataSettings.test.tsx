@@ -1,11 +1,12 @@
 import "@testing-library/jest-dom/vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setAccessToken, setSessionListener } from "../src/api/http";
 import { ToasterProvider } from "../src/components/Toaster";
 import { DataSettingsPage } from "../src/pages/settings/DataSettingsPage";
+import { NoteWritingSettingsPage } from "../src/pages/settings/NoteWritingSettingsPage";
 
 const HETZNER = {
   name: "Hetzner",
@@ -40,7 +41,14 @@ function server(settings: Record<string, unknown> = SETTINGS) {
   const calls: { method: string; body: Record<string, unknown> | null }[] = [];
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (_url: unknown, init?: RequestInit) => {
+    vi.fn(async (url: unknown, init?: RequestInit) => {
+      // Note instructions are off here: their card stays out of these tests.
+      if (String(url).includes("/v1/ai/instructions")) {
+        return new Response(JSON.stringify({ code: "not_available", detail: "off" }), {
+          status: 404,
+          headers: { "Content-Type": "application/problem+json" },
+        });
+      }
       const method = (init?.method ?? "GET").toUpperCase();
       const body = init?.body && typeof init.body === "string" ? JSON.parse(init.body) : null;
       calls.push({ method, body });
@@ -54,15 +62,22 @@ function server(settings: Record<string, unknown> = SETTINGS) {
   return calls;
 }
 
-// Each section of the page is its own view (?view=); the default is Processing.
-const page = (view?: "writing" | "spend") =>
+// Each section of the page is its own view (?view=); the default is Processing. Note writing
+// has its own page (`/settings/writing`); `?view=writing` lands there.
+const at = (url: string) =>
   render(
-    <MemoryRouter initialEntries={[view ? `/settings/data?view=${view}` : "/settings/data"]}>
+    <MemoryRouter initialEntries={[url]}>
       <ToasterProvider>
-        <DataSettingsPage />
+        <Routes>
+          <Route path="/settings/data" element={<DataSettingsPage />} />
+          <Route path="/settings/writing" element={<NoteWritingSettingsPage />} />
+        </Routes>
       </ToasterProvider>
     </MemoryRouter>,
   );
+const page = (view?: "spend") => at(view ? `/settings/data?view=${view}` : "/settings/data");
+// The tier sits in Advanced: open it.
+const writingPage = () => at("/settings/writing?advanced=1");
 
 beforeEach(() => {
   setSessionListener({});
@@ -82,7 +97,7 @@ describe("Settings › Data & AI", () => {
 
   it("makes the admin agree to the new processor before switching tier", async () => {
     const calls = server();
-    page("writing");
+    writingPage();
     await userEvent.click(await screen.findByRole("button", { name: "Premium" }));
 
     // The dialog names exactly what the change lets in.
@@ -101,10 +116,35 @@ describe("Settings › Data & AI", () => {
 
   it("is read-only for a member", async () => {
     server({ ...SETTINGS, can_edit: false });
-    page("writing");
+    writingPage();
     expect(await screen.findByRole("button", { name: "Premium" })).toBeDisabled();
     expect(screen.getByRole("checkbox")).toBeDisabled();
-    expect(screen.getByText(/only a workspace admin/i)).toBeInTheDocument();
+    expect(screen.getByText("Only a workspace admin can change these.")).toBeInTheDocument();
+  });
+
+  it("Note writing reads top-down: style, automatic writing, then advanced (with the tier)", async () => {
+    server(SETTINGS);
+    const { container } = writingPage();
+    await screen.findByRole("button", { name: "Premium" });
+    const order = [...container.querySelectorAll(".settings-card")].map(
+      (el) => el.getAttribute("aria-label") ?? el.className,
+    );
+    const where = (label: string) => order.findIndex((o) => o.includes(label));
+    expect(where("Writing style")).toBeLessThan(where("Automatic note writing"));
+    expect(where("Automatic note writing")).toBeLessThan(where("model-behaviour"));
+    expect(container.querySelector(".model-behaviour [aria-label='Model tier']")).not.toBeNull();
+  });
+
+  it("sends old Note writing links to the new page, and Data & AI no longer has the tier", async () => {
+    server(SETTINGS);
+    const redirected = at("/settings/data?view=writing");
+    expect(await screen.findByRole("group", { name: "Writing style" })).toBeInTheDocument();
+    redirected.unmount();
+    server(SETTINGS);
+    page();
+    await screen.findByText(/Who processes your meetings/);
+    expect(screen.queryByRole("group", { name: "Model tier" })).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
 
   it("says plainly when the month's budget is spent", async () => {

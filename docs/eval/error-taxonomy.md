@@ -47,6 +47,7 @@ Severity: **S1** the reader is misled (false content); **S2** the reader cannot 
 | D-LABEL | Labels in prose | "Speaker 1", "Unknown speaker", "Erzähler/in" as actors in sentences; wrong label ("Vortrag"). S2. | r03 note 2 | label-token scan | D2 T3; D1 lint |
 | D-LANG | Wrong language or register | Note not in the recording's language; first person; "we"; chat tone. S3. | r01 "heute" → date grammar; r02 first person | `first_person_lines`; language check | F2 T3; Q3 T6 |
 | D-FORM | Rendering defects | Glyphs in text, tables where none belong, speaker-avatar false positives. S3. | r01 "HTHinweis"; r02 ❝; r03 "Technische Daten" | render lint; snapshot tests | Q3 T5; F2 T5; amendment §2.4 |
+| I-AVOID | Avoided word used | A composed line uses a word the workspace's note instructions ask to avoid. Reported, never repaired. S3. | — | doclint `style.avoid` | N2 T3 |
 
 ## D. Isolation and process
 

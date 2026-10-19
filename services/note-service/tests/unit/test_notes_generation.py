@@ -360,3 +360,22 @@ def test_an_unknown_date_or_another_workspaces_note_is_not_found(
     assert rig.client.get(f"/v1/notes/{NOTE_ID}/dates/a1b2c3d4e5f60718.ics").status_code == 404
     rig.store.note = None  # under RLS, another workspace's note reads as absent
     assert rig.client.get(f"/v1/notes/{NOTE_ID}/dates/a1b2c3d4e5f60718.ics").status_code == 404
+
+
+def test_the_generation_names_its_style_instructions_and_model_settings(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stats = {
+        "writing_style": "academic",
+        "instructions": {"scope": "workspace", "version": 1, "profile_hash": "h" * 64},
+        "model_params": {"version": 2, "hash": "m" * 64},
+    }
+    _serve_generation(rig, monkeypatch, _generation_row(stats))
+    body = rig.client.get(f"/v1/notes/{NOTE_ID}/generation").json()
+    assert body["writing_style"] == "academic"
+    assert body["instructions"] == {"scope": "workspace", "version": 1, "fallback": None}
+    assert body["model_settings_version"] == 2
+    # A run from before N0 names none of them.
+    _serve_generation(rig, monkeypatch, _generation_row({}))
+    old = rig.client.get(f"/v1/notes/{NOTE_ID}/generation").json()
+    assert old["writing_style"] is None and old["instructions"] is None

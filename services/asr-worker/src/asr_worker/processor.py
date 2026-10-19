@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -49,7 +50,7 @@ from messaging import Message, RedisStreamsConsumer
 from models import ProviderError, TranscriptionCancelledError
 from storage import ObjectNotFoundError
 
-from . import audit_kinds, chunks, guards, quality, shadow, vad
+from . import audit_kinds, chunks, guards, quality, segment_lid, shadow, vad
 from . import coverage as cov
 from .audio_io import AudioDecodeError, decode_to_pcm, mixdown
 from .config import settings
@@ -503,9 +504,14 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             diar_t0 = time.monotonic()
             try:
                 if diarization_error is None:
-                    diar, layout = await _diarize_capture(
-                        state, pcm, stereo, _hints(payload), job_id=job_id
+                    # Diarization can run for minutes on CPU: a cancel stops the wait.
+                    diar, layout = await _unless_cancelled(
+                        _diarize_capture(state, pcm, stereo, _hints(payload), job_id=job_id),
+                        should_cancel,
                     )
+            except TranscriptionCancelledError:
+                await _mark_cancelled(state, tenant_id, job_id)
+                return
             except Exception as exc:  # noqa: BLE001 — model choked on these samples
                 if not _remote(state.diarizer):
                     raise await die(JobErrorKind.DIARIZATION_FAILED, str(exc)) from exc
@@ -676,8 +682,8 @@ async def decode_recording(
     """The one audio→transcript path, shared by the job and the eval harness.
 
     VAD → chunk plan → backend decode → guards → prompt-echo guard → coverage
-    second pass → non-speech markers. Raises what the engine raises; ``deadline``
-    bounds both decodes together.
+    second pass → segment language check → non-speech markers. Raises what the
+    engine raises; ``deadline`` bounds every decode together.
     """
     provider = state.engine
     heard = await asyncio.to_thread(
@@ -757,6 +763,17 @@ async def decode_recording(
     )
     if heard.stub:
         return output
+    # Segments the chunk plan could not see as another language (B3 T2).
+    if settings.asr_segment_lid_enabled:
+        output = await segment_lid.rediscover(
+            provider,
+            pcm,
+            output,
+            speech=heard.runs,
+            deadline=deadline,
+            should_cancel=should_cancel,
+            job_id=job_id,
+        )
     return output.model_copy(update={"noise": chunks.nonspeech_regions(pcm, heard.runs)})
 
 
@@ -1020,6 +1037,7 @@ def _apply_diarization(
     segments: list[Segment] = []
     for seg in output.segments:
         segments.extend(_split_segment_by_speaker(seg, diar))
+    segments = clips_as_turns(segments, recording=output.language)
     roster: list[str] = []
     for seg in segments:
         if seg.speaker and seg.speaker not in roster:
@@ -1233,6 +1251,67 @@ async def _run_shadow(
             "seconds_shadow": round(seconds, 3),
         },
     )
+
+
+# A clip is a turn (B3 T4): consecutive other-language segments closer than this are one
+# clip; a stretch longer than the cap is a participant speaking, not a quoted clip.
+CLIP_GAP_MS = 2_000
+CLIP_MAX_MS = 120_000
+_SPEAKER_LABEL = re.compile(r"^SPEAKER_(\d+)$")
+
+
+def clips_as_turns(segments: list[Segment], *, recording: str) -> list[Segment]:
+    """A run of segments in another language never stays under the surrounding speaker.
+
+    When the diariser gave the clip no label of its own (none, or the neighbours'),
+    the clip takes the next free ``SPEAKER_N``, marked uncertain since no voice
+    decided it; a label the diariser did give it (different from both neighbours)
+    is kept for the whole clip.
+    """
+    labels = {seg.speaker for seg in segments if seg.speaker}
+    numbers = [int(m.group(1)) for lab in labels if (m := _SPEAKER_LABEL.match(lab))]
+    next_free = (max(numbers) if numbers else len(labels)) + 1
+
+    def foreign(seg: Segment) -> bool:
+        return bool(seg.language) and seg.language != recording
+
+    out = list(segments)
+    n = len(out)
+    i = 0
+    while i < n:
+        if not foreign(out[i]):
+            i += 1
+            continue
+        j = i
+        while (
+            j + 1 < n
+            and foreign(out[j + 1])
+            and out[j + 1].language == out[i].language
+            and out[j + 1].start_ms - out[j].end_ms <= CLIP_GAP_MS
+        ):
+            j += 1
+        clip = out[i : j + 1]
+        if clip[-1].end_ms - clip[0].start_ms > CLIP_MAX_MS:
+            i = j + 1
+            continue
+        before = next((s.speaker for s in reversed(out[:i]) if not foreign(s)), None)
+        after = next((s.speaker for s in out[j + 1 :] if not foreign(s)), None)
+        own = [s.speaker for s in clip if s.speaker and s.speaker not in (before, after)]
+        if own:
+            label, uncertain = own[0], False
+        else:
+            label, uncertain = f"SPEAKER_{next_free}", True
+            next_free += 1
+        for k in range(i, j + 1):
+            if out[k].speaker != label or (uncertain and not out[k].speaker_uncertain):
+                out[k] = out[k].model_copy(
+                    update={
+                        "speaker": label,
+                        "speaker_uncertain": uncertain or out[k].speaker_uncertain,
+                    }
+                )
+        i = j + 1
+    return out
 
 
 def _split_segment_by_speaker(seg: Segment, diar: OfflineDiarization) -> list[Segment]:
@@ -1675,6 +1754,25 @@ def _cancel_poller(
         return answer
 
     return poll
+
+
+async def _unless_cancelled[T](
+    work: Awaitable[T], should_cancel: Callable[[], Awaitable[bool]]
+) -> T:
+    """``work``'s result, unless a cancel is requested first: then the task is cancelled
+    and ``TranscriptionCancelledError`` raised. A step with no checkpoints of its own (the
+    diarizer) is otherwise deaf to Cancel until it finishes."""
+    task = asyncio.ensure_future(work)
+    try:
+        while True:
+            done, _pending = await asyncio.wait({task}, timeout=_CANCEL_POLL_SECONDS)
+            if done:
+                return task.result()
+            if await should_cancel():
+                raise TranscriptionCancelledError("cancel requested during diarization")
+    finally:
+        if not task.done():
+            task.cancel()
 
 
 async def _is_cancelled(state: WorkerState, tenant_id: UUID, job_id: UUID) -> bool:

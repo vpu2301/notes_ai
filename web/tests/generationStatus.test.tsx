@@ -147,6 +147,50 @@ describe("generation status", () => {
     expect(screen.queryByText(/could not be read/i)).toBeNull();
   });
 
+  it("says which code, versions, flags and models produced the run, collapsed", async () => {
+    server({
+      ...BASE,
+      status: "partial",
+      incomplete_reasons: ["final_unverified"],
+      finished_at: "x",
+      provenance: {
+        run_kind: "generation",
+        build_sha: "def5678",
+        pinned_build_sha: "abc1234",
+        prompt_version: "2026-10-18.3",
+        profile_version_id: null,
+        flags_source: "snapshot",
+        multilingual_evidence: true,
+        fidelity: false,
+        final_check: false,
+        flags_differ: ["fidelity"],
+        output_language: "de",
+        output_language_source: "dominant",
+        transcript_rev: 3,
+        stages: [{ stage: "verification", backend: "mistral_eu", model_id: "mistral-large-2512", calls: 3, failed: 1 }],
+        fallbacks: [{ kind: "summarize", backend: "mistral_eu_small", primary: "mistral_eu", reason: "probe_failed" }],
+      },
+    });
+    strip({ canRegenerate: true });
+    const details = await screen.findByTestId("run-details");
+    expect(details).not.toHaveAttribute("open");
+    expect(details).toHaveTextContent("def5678 (queued by abc1234)");
+    expect(details).toHaveTextContent(/meaning checks off · final check off — pinned when the run was queued/);
+    expect(details).toHaveTextContent(/set differently for fidelity; this run used what was pinned/);
+    expect(details).toHaveTextContent("de (dominant) · transcript revision 3");
+    expect(details).toHaveTextContent("verification: mistral-large-2512 (3 calls, 1 failed)");
+    expect(details).toHaveTextContent("mistral_eu_small instead of mistral_eu (probe failed)");
+    // The final check's reason reads like any unverified point: neutral, not "unreadable".
+    expect(screen.getByText(/could not be fully verified/i)).toBeInTheDocument();
+  });
+
+  it("shows no run details for a run from an older server", async () => {
+    server({ ...BASE, status: "complete", finished_at: "x", sections_written: 4 });
+    strip();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId("run-details")).toBeNull();
+  });
+
   it("says why when the workspace turned generation off, without polling", async () => {
     server(404);
     strip({ blocked: "generation_disabled" });

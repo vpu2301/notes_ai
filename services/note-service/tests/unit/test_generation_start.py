@@ -75,7 +75,16 @@ async def test_snapshot_aad_row_id_and_job_payload_agree(monkeypatch: pytest.Mon
     pinned = created[0]["config_snapshot"]
     assert pinned["profile_version_id"] is None
     assert pinned["prompt_version"] == created[0]["prompt_version"]
-    assert set(pinned["prompt_hashes"]) == set(profiles.STAGES)
+    # Every call the run makes, for the flags it was pinned with (P1-01).
+    assert set(pinned["prompt_hashes"]) == {
+        c.call
+        for c in profiles.resolve(
+            profiles.BUNDLED,
+            language="en",
+            multilingual=pinned["multilingual"],
+            fidelity=pinned["fidelity"],
+        )
+    }
     assert all(m == {"routed": True} for m in pinned["models"].values())
 
 

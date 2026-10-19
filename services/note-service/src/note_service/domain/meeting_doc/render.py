@@ -7,6 +7,7 @@ empty section is left blank, never filled. `user_notes` belongs to the author.
 from __future__ import annotations
 
 import re
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, time
 from typing import Final
@@ -54,6 +55,7 @@ FALLBACK_KEYS: Final[dict[str, str]] = {
     roles.KEY_DATES: "key_dates",
     roles.SPECIFICATIONS: "specifications",
     roles.CONTACT: "call_to_action",
+    roles.CLAIMS: "claims",
 }
 ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
     "en": {
@@ -65,6 +67,7 @@ ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
         roles.KEY_DATES: "Key dates",
         roles.SPECIFICATIONS: "Specifications",
         roles.CONTACT: "Contact",
+        roles.CLAIMS: "Claims",
     },
     "de": {
         roles.DECISIONS: "Entscheidungen",
@@ -75,6 +78,7 @@ ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
         roles.KEY_DATES: "Termine & Fristen",
         roles.SPECIFICATIONS: "Technische Daten",
         roles.CONTACT: "Kontakt",
+        roles.CLAIMS: "Behauptungen",
     },
     "uk": {
         roles.DECISIONS: "Рішення",
@@ -85,6 +89,7 @@ ROLE_LABELS: Final[dict[str, dict[str, str]]] = {
         roles.KEY_DATES: "Дати та терміни",
         roles.SPECIFICATIONS: "Характеристики",
         roles.CONTACT: "Контакт",
+        roles.CLAIMS: "Твердження",
     },
 }
 
@@ -173,6 +178,13 @@ class Line:
     dates: tuple[DateMention, ...] = ()
     """F2 — for a sub-point, the text of the bullet it sits under."""
     parent: str | None = None
+    """N2 — row flags this line adds to its facts' (``term_replaced``)."""
+    flags: tuple[str, ...] = ()
+    """B4 — ``verbatim`` (the speaker's words), ``paraphrase`` (one fact) or ``composed``
+    (several facts); None for a line that rests on nothing (a heading, a table head)."""
+    provenance: str | None = None
+    """B4 — a claim row's verdict cell (the label and the speaker's clause)."""
+    verdict: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +201,106 @@ class RenderedSection:
     """Every non-blank line of ``text``, in order, with its kind and the
     fact ids behind it."""
     lines: tuple[Line, ...] = field(default=())
+
+
+PROVENANCES: Final[tuple[str, ...]] = ("verbatim", "paraphrase", "composed")
+
+
+def provenance_of(line: Line, by_id: dict[str, VerifiedFact]) -> str | None:
+    """What a written line is, from data the engine already has (B4): the speaker's words
+    (``verbatim``: its one fact is a copy or the line equals its quote), one fact written
+    anew (``paraphrase``), or several facts in one sentence (``composed``)."""
+    cited = [by_id[i] for i in line.fact_ids if i in by_id]
+    if not cited or line.kind == "heading":
+        return None
+    if len(cited) >= 2:
+        return "composed"
+    fact = cited[0]
+    body = strip_inline_ids(line.text)[0]
+    body = re.sub(r"^\s*(?:[-–—•*·]+|\d{1,2}[.)])\s*", "", body).strip()
+    if fact.copied or is_copied(body, fact.quote):
+        return "verbatim"
+    return "paraphrase"
+
+
+def with_provenance(
+    sections: list[RenderedSection], by_id: dict[str, VerifiedFact]
+) -> list[RenderedSection]:
+    return [
+        replace(
+            section,
+            lines=tuple(
+                ln
+                if ln.provenance is not None
+                else replace(ln, provenance=provenance_of(ln, by_id))
+                for ln in section.lines
+            ),
+        )
+        for section in sections
+    ]
+
+
+# ── B4: the claims table ─────────────────────────────────────────────
+
+# A meeting family writes the table from two rows; a narrated one from one.
+CLAIMS_MIN_ROWS_MEETING: Final = 2
+
+
+def claim_facts(
+    facts: Sequence[VerifiedFact], *, routed_kinds: Collection[str] = ()
+) -> list[VerifiedFact]:
+    """The facts the claims table shows, in time order: a relayed claim with the speaker's
+    verdict (``reported``, ``unproven``, ``refuted``) or a hedged position somebody holds —
+    never a kind the family already routes to a section of its own (``objection``,
+    ``client_request``, …)."""
+    out = []
+    for fact in facts:
+        if fact.evidence_only or fact.kind in routed_kinds or fact.figure is not None:
+            continue
+        relayed = fact.certainty in support.VERDICT_CERTAINTIES or fact.certainty == "reported"
+        held = bool(fact.attributed_to) and fact.certainty in support.UNSURE_CERTAINTIES
+        if relayed or held:
+            out.append(fact)
+    return sorted(out, key=lambda f: (f.start_ms, f.item_key))
+
+
+def verdict_cell(fact: VerifiedFact, language: str) -> str:
+    """The certainty's label plus the presenter's own clause about the claim, when the
+    quote has one (:func:`support.verdict_clause`); the label alone otherwise."""
+    lang = language if language in support.VERDICT_LABELS else "en"
+    label = support.VERDICT_LABELS[lang].get(fact.certainty or "") or support.CERTAINTY_PHRASES[
+        lang
+    ].get(fact.certainty or "", "")
+    clause = support.verdict_clause(fact.quote, lang)
+    if clause and clause.casefold() != label.casefold():
+        return f"{label} — {clause}" if label else clause
+    return label
+
+
+def claim_who(fact: VerifiedFact, language: str) -> str:
+    who = support.display_actor(fact.attributed_to, language) if fact.attributed_to else None
+    return who or fact.speaker_name or support.real_name(fact.speaker_name) or "—"
+
+
+def _claims_block(claims: Sequence[VerifiedFact], language: str) -> tuple[str, list[Line]]:
+    head = support.CLAIMS_HEAD.get(language, support.CLAIMS_HEAD["en"])
+    lines = [
+        Line("| " + " | ".join(head) + " |", "heading"),
+        Line("|---|---|---|---|", "heading"),
+    ]
+    for fact in claims:
+        claim = _cell(editorial(support.strip_certainty_prefix(fact.text)))
+        verdict = verdict_cell(fact, language)
+        lines.append(
+            Line(
+                f"| {_cell(claim_who(fact, language))} | {claim} | "
+                f"{_cell(verdict)} | {mmss(fact.start_ms)} |",
+                "claim",
+                (fact.item_key,),
+                verdict=verdict or None,
+            )
+        )
+    return "\n".join(line.text for line in lines), lines
 
 
 def fact_line(fact: VerifiedFact, text: str) -> Line:
@@ -238,20 +350,25 @@ def patch_claim(
     on every client, so it gets the dash form; bullets keep the colon.
     """
     unsure = [f for f in facts if f.certainty in support.UNSURE_CERTAINTIES]
-    if not unsure:
+    verdicts = [f for f in facts if f.certainty in support.VERDICT_CERTAINTIES]
+    if not unsure and not verdicts:
         return text
-    fact = unsure[0]
     lang = language if language in support.CERTAINTY_PHRASES else "en"
-    phrases = support.CERTAINTY_PHRASES[lang]
-    actor = support.display_actor(fact.attributed_to, lang)
-    if actor and not support.names_actor(text, actor):
-        if fact.certainty == "proposal":
-            text = f"{text} ({phrases['proposal']}: {actor})"
-        else:
-            text = f"{text} — {support.ACCORDING_TO[lang]} {actor}"
-    if not support.has_marker(text, lang):
-        joiner = " —" if paragraph else ":"
-        text = f"{phrases[fact.certainty]}{joiner} {text}"
+    if unsure:
+        fact = unsure[0]
+        phrases = support.CERTAINTY_PHRASES[lang]
+        actor = support.display_actor(fact.attributed_to, lang)
+        if actor and not support.names_actor(text, actor):
+            if fact.certainty == "proposal":
+                text = f"{text} ({phrases['proposal']}: {actor})"
+            else:
+                text = f"{text} — {support.according_to(actor, lang)}"
+        if not support.has_marker(text, lang):
+            joiner = " —" if paragraph else ":"
+            text = f"{phrases[fact.certainty]}{joiner} {text}"
+    # B2 T4: the speaker's verdict on a relayed claim stays on the line.
+    for fact in verdicts:
+        text = support.with_verdict(text, fact.certainty, lang)
     return text
 
 
@@ -270,8 +387,11 @@ def render_sections(
     meeting_date: date | None = None,
     presenter_lines: bool = False,
     subject: str = "",
+    family_type: str | None = None,
     figure_tables: bool = True,
     recording_names: frozenset[str] = frozenset(),
+    sections_off: frozenset[str] = frozenset(),
+    tables_off: bool = False,
 ) -> list[RenderedSection]:
     """The document, as the sections the conversation had.
 
@@ -281,18 +401,25 @@ def render_sections(
 
     ``topics`` is ``[(title, [(bullet text, fact ids)], fact ids)]`` (bare bullet
     strings accepted); ``summary`` is ``[(sentence, fact ids)]`` or bare strings;
-    ``counters`` receives ``redundant_lines``.
+    ``counters`` receives ``redundant_lines``. ``family_type`` (B1 T3): on a narrated
+    family (``broadcast``, ``memo``) a figure is evidence unless a line wrote it, a holder
+    carries it or it has a unit; the figures block is "Zahlen", not "Technische Daten";
+    key dates need two dated items or a deadline.
     """
     keys_by_role: dict[str, list[str]] = {}
     for key, role in role_by_key.items():
         keys_by_role.setdefault(role, []).append(key)
-    labels = ROLE_LABELS.get(language, ROLE_LABELS["en"])
+    narrated = family_type in NARRATED_FAMILIES
+    labels = dict(ROLE_LABELS.get(language, ROLE_LABELS["en"]))
+    if narrated:
+        labels[roles.SPECIFICATIONS] = FIGURE_LABELS.get(language, FIGURE_LABELS["en"])
 
     out: list[RenderedSection] = []
 
     def emit(role: str, text: str, used: list[VerifiedFact], lines: list[Line]) -> None:
-        """Into the template's section for the role, else a section of its own."""
-        if not text.strip():
+        """Into the template's section for the role, else a section of its own. A role a
+        writing profile leaves out (N2) is not written; its facts stay facts."""
+        if not text.strip() or role in sections_off:
             return
         key = (keys_by_role.get(role) or [None])[0]
         title: str | None = None
@@ -407,6 +534,8 @@ def render_sections(
 
     # ── Key dates, from the dates the facts' quotes named ───────────
     dated = key_dates([f for f in facts if not f.evidence_only], meeting_date=meeting_date)
+    if narrated and len(dated) < 2 and not any(f.due_date for _w, _c, f, _m in dated):
+        dated = []  # one date in a narrated piece is a fact, not a calendar
     if dated:
         date_lines = [
             Line(
@@ -458,7 +587,8 @@ def render_sections(
             sentences.append((written, own))
 
     # Figures are written by code from their fields; a bullet that only restates them is dropped.
-    figures = _merged_figures([f for f in facts if f.figure is not None])
+    # N2: a writing profile without figure tables keeps every figure in its statements.
+    figures = [] if tables_off else _merged_figures([f for f in facts if f.figure is not None])
     figure_ids = {i for group in figures for i in group.ids}
     figure_topic: dict[str, str] = {}
     for title, bullets, fact_ids in topics or []:
@@ -472,6 +602,15 @@ def render_sections(
         for fact_id in cited_here:
             if fact_id in figure_ids:
                 figure_topic.setdefault(fact_id, title.strip())
+    if narrated and figures:
+        # B1 T3: a figure is evidence unless a line wrote it, somebody holds it or it has a
+        # unit; a hedged figure whose name drops the hedge is not written at all.
+        written = set(figure_topic) | {i for _s, own in sentences for i in own}
+        kept_figures = [g for g in figures if _figure_written(g, written, language)]
+        if counters is not None:
+            counters["figures_evidence_only"] = len(figures) - len(kept_figures)
+        figures = kept_figures
+        figure_ids = {i for group in figures for i in group.ids}
 
     # A topic's figures count towards it being a topic.
     figures_by_title: dict[str, int] = {}
@@ -600,8 +739,9 @@ def render_sections(
             del placed[i]
         homeless = sorted(pooled, key=lambda g: g.facts[0].start_ms)
     # Figures form a block only in a demo/lecture or when measured; else they stay in statements.
-    placed = {i: g for i, g in placed.items() if figure_tables or _measured(g)}
-    if not (figure_tables or _measured(homeless)):
+    # A narrated family's figures already passed the written rule.
+    placed = {i: g for i, g in placed.items() if figure_tables or narrated or _measured(g)}
+    if not (figure_tables or narrated or _measured(homeless)):
         homeless = []
     for index, groups in placed.items():
         section = topic_sections[index]
@@ -615,6 +755,14 @@ def render_sections(
     if homeless:
         text, figure_lines = _figure_block(homeless, language)
         emit(roles.SPECIFICATIONS, text, [f for g in homeless for f in g.facts], figure_lines)
+
+    # ── Claims (B4): who claims what, the speaker's verdict, the seconds behind it ──
+    # Only a kind the family routes to a section of its own (objection, client_request, …)
+    # keeps its facts out of the table; the generic kinds are eligible.
+    claims = claim_facts(facts, routed_kinds=frozenset(extra))
+    if claims and (narrated or len(claims) >= CLAIMS_MIN_ROWS_MEETING):
+        text, claim_lines = _claims_block(claims, language)
+        emit(roles.CLAIMS, text, list(claims), claim_lines)
 
     # ── The opening block: no heading, two paragraphs of prose, never a list ──
     overview: list[tuple[str, list[Line]]] = []
@@ -652,7 +800,8 @@ def render_sections(
             ),
         )
     out.extend(topic_sections)
-    return [_with_dates(section, by_id) for section in out]
+    # B4: what each written line is, from the facts it rests on.
+    return with_provenance([_with_dates(section, by_id) for section in out], by_id)
 
 
 def _bullet_text(
@@ -755,6 +904,30 @@ def _merged_figures(facts: list[VerifiedFact]) -> list[_FigureGroup]:
                     if FIGURE_CONFLICT not in fact.flags:
                         fact.flags.append(FIGURE_CONFLICT)
     return groups
+
+
+# Families whose figures are evidence unless written (B1 T3).
+NARRATED_FAMILIES: Final = frozenset({"broadcast", "memo"})
+FIGURE_LABELS: Final[dict[str, str]] = {"en": "Figures", "de": "Zahlen", "uk": "Цифри"}
+# A promise or an announcement in a figure's name keeps the figure a promise.
+_FIGURE_HEDGE: Final = re.compile(
+    r"(?i)\b(?:versprochen|verspricht|versprechen|angekündigt|geplant|promised?|pledged|"
+    r"announced|planned|обіця\w*|заплановано|анонсовано)\b"
+)
+
+
+def _figure_written(group: _FigureGroup, written: set[str], language: str) -> bool:
+    """A narrated family writes a figure only when a line cites it, somebody holds it or
+    it has a unit — and never with a name that drops the fact's own hedge."""
+    fact = group.facts[0]
+    fig = group.figure
+    if fact.certainty in support.UNSURE_CERTAINTIES and not (
+        support.has_marker(fig.name, language) or _FIGURE_HEDGE.search(fig.name)
+    ):
+        return False
+    cited = any(i in written for i in group.ids)
+    held = any(f.attributed_to or f.owner_label for f in group.facts)
+    return cited or held or bool(fig.unit.strip())
 
 
 def _measured(groups: list[_FigureGroup]) -> bool:

@@ -7,6 +7,7 @@
     POST /v1/ai/prompt-profiles/{id}/activate            admin: move the pointer (expected revision)
     GET  /v1/ai/prompt-profiles/history                  every member: who activated what, when
     GET  /v1/ai/model-capabilities                       every member: what may be bound, and how
+    GET  /v1/ai/runtime                                  every member: what new notes here run on
 
 The same permissions as ``/v1/ai/settings`` (``ai_settings.read`` to look, an admin
 with ``ai_settings.write`` to change), checked here, not in a client. Ids of another
@@ -17,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import asyncpg
@@ -29,11 +30,13 @@ from auth import Claims
 from db import tenant_connection
 
 from .. import audit_kinds
+from ..config import settings as app_settings
 from ..deps import get_state, requires
+from ..domain import acceptance, experiments
 from ..domain import ai_settings as settings_rules
-from ..domain import experiments
 from ..domain import prompt_profile_repository as repo
 from ..domain import prompt_profiles as rules
+from ..domain.meeting_doc import prompts
 from . import ai_settings as ai_settings_router
 
 logger = logging.getLogger(__name__)
@@ -130,10 +133,12 @@ class VersionView(BaseModel):
     created_at: datetime
     compatible: bool
     incompatible_reason: str | None = None
-    """``{stage: the full system text it sends}`` for ``language``: the platform contract
-    and the resolved stage text, exactly what a generation would send."""
+    """``{stage: its first call's full system text}`` on the path a test run takes."""
     effective: dict[str, str]
     language: str
+    """Every call a run makes, resolved exactly (``mode``, flags, model profile in ``flags``)."""
+    calls: list[ResolvedCallView] = []
+    flags: dict[str, Any] = {}
 
 
 class ActivateRequest(BaseModel):
@@ -353,11 +358,71 @@ async def save_version(
     return _summary(version)
 
 
+class ResolvedCallView(BaseModel):
+    """One call a run makes and its exact system text: where the text comes from
+    (``profile``, ``bundled``, ``not_applied`` — the flags send no profile text — or
+    ``code``, read-only here), and its sha256 (what the run's request hash must equal)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    call: str
+    stage: str
+    source: str
+    sha: str
+    system: str
+
+
+# "production": what a note generated now runs with in this deployment; "test": the path
+# an experiment run always takes (multilingual evidence and fidelity on).
+PreviewMode = Literal["production", "test"]
+VersionView.model_rebuild()
+
+
+def _mode_flags(mode: str) -> tuple[bool, bool]:
+    if mode == "test":
+        return True, True
+    multilingual = app_settings.note_multilingual_evidence
+    return multilingual, multilingual and app_settings.note_fidelity
+
+
+def _resolved(
+    config: rules.ProfileConfig,
+    *,
+    language: str,
+    mode: str,
+    available: list[rules.Capability],
+) -> tuple[list[ResolvedCallView], dict[str, Any]]:
+    """The calls for ``mode`` — the resolver a generation and an experiment use — with
+    the small-model profile of the model bound to extraction (else the routed writer's)."""
+    multilingual, fidelity = _mode_flags(mode)
+    bound = config.models.get("extraction")
+    capability = next((c for c in available if c.backend == bound), None) if bound else None
+    small = bool(capability.small_model) if capability is not None else False
+    calls = rules.resolve(
+        config, language=language, multilingual=multilingual, fidelity=fidelity, small=small
+    )
+    views = [
+        ResolvedCallView(call=c.call, stage=c.stage, source=c.source, sha=c.sha, system=c.system)
+        for c in calls
+    ]
+    flags = {
+        "mode": mode,
+        "multilingual_evidence": multilingual,
+        "fidelity": fidelity,
+        "final_check": fidelity,
+        "small_model": small,
+        "bullets": rules.DEFAULT_BULLETS,
+        "profile_instructions_apply": multilingual,
+    }
+    return views, flags
+
+
 class PreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     config: rules.ProfileConfig
     language: str = Field(default="en", pattern=r"^(en|de|uk)$")
+    mode: PreviewMode = "test"
 
 
 class PreviewView(BaseModel):
@@ -371,6 +436,11 @@ class PreviewView(BaseModel):
     language: str
     """Each stage's bundled task text for ``language``: where an edit starts."""
     bundled: dict[str, str]
+    """Every call, resolved exactly for ``flags`` (empty while the draft has problems)."""
+    calls: list[ResolvedCallView] = []
+    flags: dict[str, Any] = {}
+    """Variables each editable stage must keep (its bundled text uses them)."""
+    required_variables: dict[str, list[str]] = {}
 
 
 @router.post("/prompt-profiles/preview", response_model=PreviewView)
@@ -388,11 +458,19 @@ async def preview(
         for stage in rules.STAGES
         if not any(p.field == f"stages.{stage}" for p in problems)
     }
+    calls, flags = (
+        _resolved(body.config, language=body.language, mode=body.mode, available=available)
+        if not problems
+        else ([], {"mode": body.mode})
+    )
     return PreviewView(
         problems=[p.as_dict() for p in problems],
         effective=effective,
         language=body.language,
         bundled={stage: rules.bundled_text(stage, body.language) for stage in rules.STAGES},
+        calls=calls,
+        flags=flags,
+        required_variables={s: sorted(rules.required_variables(s)) for s in rules.STAGES},
     )
 
 
@@ -402,14 +480,17 @@ async def get_version(
     version_id: UUID,
     claims: Annotated[Claims, Depends(requires("ai_settings.read", "tenant"))],
     language: Annotated[str, Query(pattern=r"^(en|de|uk)$")] = "en",
+    mode: Annotated[PreviewMode, Query()] = "test",
 ) -> VersionView:
     """The configuration and its effective instructions — the same function a
     generation uses — with no secret in it (bindings are backend names)."""
     async with tenant_connection(get_state().app_pool, claims.tid) as conn:
         version = await repo.fetch_version(conn, version_id=version_id)
+        available = await _capabilities(conn, claims.tid)
     if version is None or version.profile_id != profile_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="version not found")
     why = _compatibility(version)
+    calls, flags = _resolved(version.config, language=language, mode=mode, available=available)
     return VersionView(
         id=version.id,
         profile_id=version.profile_id,
@@ -428,6 +509,8 @@ async def get_version(
             for stage in rules.STAGES
         },
         language=language,
+        calls=calls,
+        flags=flags,
     )
 
 
@@ -484,6 +567,16 @@ async def activate(
                         status.HTTP_409_CONFLICT,
                         detail={"code": "evaluation_required", "detail": why_not},
                     )
+                # P1-04: and the critical cases, passed on this code — preference or cost
+                # alone never activates a version that inverts a claim or invents a guest.
+                why_critical = await experiments.acceptance_problem(
+                    conn, version_id=body.version_id, suite_version=acceptance.suite_version()
+                )
+                if why_critical is not None:
+                    raise HTTPException(
+                        status.HTTP_409_CONFLICT,
+                        detail={"code": "acceptance_required", "detail": why_critical},
+                    )
         previous = await repo.binding(conn, tenant_id=claims.tid)
         try:
             moved = await repo.activate(
@@ -530,6 +623,37 @@ async def history(
 ) -> list[dict[str, Any]]:
     async with tenant_connection(get_state().app_pool, claims.tid) as conn:
         return await repo.history(conn)
+
+
+class RuntimeView(BaseModel):
+    """F1-01 — what a note generated now is pinned with in this deployment: the code, the
+    flags (``fidelity`` includes the final check), the prompt and algorithm versions. Profile
+    instructions apply only with ``multilingual_evidence`` on; a test run always uses it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    build_sha: str | None
+    multilingual_evidence: bool
+    fidelity: bool
+    prompt_version: str
+    algorithm_version: str
+    profile_instructions_apply: bool
+
+
+@router.get("/runtime", response_model=RuntimeView)
+async def runtime(
+    claims: Annotated[Claims, Depends(requires("ai_settings.read", "tenant"))],
+) -> RuntimeView:
+    multilingual = app_settings.note_multilingual_evidence
+    fidelity = multilingual and app_settings.note_fidelity
+    return RuntimeView(
+        build_sha=app_settings.build_sha or None,
+        multilingual_evidence=multilingual,
+        fidelity=fidelity,
+        prompt_version=prompts.effective_version(multilingual=multilingual),
+        algorithm_version=rules.ALGORITHM_VERSION,
+        profile_instructions_apply=multilingual,
+    )
 
 
 @router.get("/model-capabilities", response_model=CapabilitiesView)

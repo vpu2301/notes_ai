@@ -230,3 +230,58 @@ def test_g3_is_skipped_when_the_backend_gave_no_word_probabilities() -> None:
     result = guards.apply(out, [SpeechSegment(0, 4000)]).output
     # No no_speech_prob either: G1 rests on VAD alone and drops it, G3 did not run.
     assert [d.reason for d in result.diagnostics.dropped_segments] == ["no_speech"]
+
+
+# ── G2 near-repeats (Sprint B3 T3) ───────────────────────────────────
+
+
+def test_g2_a_drifting_loop_is_cut_after_two_repetitions() -> None:
+    # Articles and endings drift, as Whisper's loops do; no 2–6-gram repeats exactly 4 times.
+    units = [
+        "das ist der US -Präsident,",
+        "das ist die US -Präsident,",
+        "das ist der US -Präsidentin,",
+    ]
+    drift = "Das ist einmal das US -Präsident, " + " ".join(units * 3)
+    seg = _seg(0, drift)
+    assert guards.loop_cut([w.text for w in seg.words], 4, fuzzy_ratio=1.0) is None
+    result = guards.apply(_out([seg]), _speech_over(seg))
+    (kept,) = result.output.segments
+    assert kept.text.lower().count("das ist") == 1 + 4, kept.text
+    assert result.loop_ranges == [(seg.start_ms, seg.end_ms)]
+
+
+def test_g2_near_repeat_grams_match_at_the_fuzzy_ratio_and_not_above_it() -> None:
+    tokens = [
+        "wir",
+        "sehen",
+        "uns",
+        "dann",
+        "morgen",
+        "früh",
+        "wir",
+        "sehen",
+        "uns",
+        "dann",
+        "morgen",
+        "spät",
+        "wir",
+        "sehen",
+        "uns",
+        "dann",
+        "morgen",
+        "früh",
+        "wir",
+        "sehen",
+        "uns",
+        "dann",
+        "morgen",
+        "spät",
+    ]
+    assert guards.loop_cut(tokens, 4, fuzzy_ratio=0.8) == 12
+    assert guards.loop_cut(tokens, 4, fuzzy_ratio=1.0) is None
+
+
+def test_g2_exact_loops_are_cut_as_before() -> None:
+    seg = _seg(0, "vielen dank " * 6)
+    assert guards.loop_cut([w.text for w in seg.words], 4, fuzzy_ratio=1.0) == 4

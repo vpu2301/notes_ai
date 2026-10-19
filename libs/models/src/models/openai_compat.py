@@ -68,6 +68,8 @@ class OpenAICompatibleChatProvider:
         self._cold_start_seconds = cold_start_seconds
         self._timeout_s = timeout_s
         self._sleep: SleepFn = sleep or asyncio.sleep
+        # Read by the note worker as the cap on a workspace's parallel calls (N0).
+        self.max_concurrency = max_concurrency
         self._sem = asyncio.Semaphore(max_concurrency)
         register_secret(auth_token)
         headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}

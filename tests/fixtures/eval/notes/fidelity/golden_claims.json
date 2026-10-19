@@ -1,5 +1,5 @@
 {
- "about": "S2-01 golden claims for the meaning check: each case is the cited line(s) as the engine renders them, one quote, and claims a faithful note may or may not make. Synthetic people; g2/g3 wording follows the NOTE-2026-00002 broadcast.",
+ "about": "S2-01 golden claims for the meaning check: each case is the cited line(s) as the engine renders them, one quote, and claims a faithful note may or may not make. Synthetic people; g2/g3 wording follows the NOTE-2026-00002 broadcast. F1-03: g9–g15 are polarity pairs checked in both directions (worse/better, fewer/more, approved/rejected, opposes/supports) and a changed recipient.",
  "cases": [
   {
    "id": "g1_conditional_payment",
@@ -236,6 +236,238 @@
      "text": "Trump räumt ein, dass er zur Übertreibung neigt.",
      "faithful": false,
      "corruption": "host's view attributed to its subject"
+    }
+   ]
+  },
+  {
+   "id": "g9_worse_not_better",
+   "output_language": "de",
+   "recording_language": "de",
+   "lines": [
+    {
+     "speaker": "SPEAKER_1",
+     "name": "Moderation",
+     "language": null,
+     "text": "Zum Schluss ein Blick auf die Wirtschaft im Süden."
+    },
+    {
+     "speaker": "SPEAKER_2",
+     "name": "Anna Keller",
+     "language": null,
+     "text": "Die Lage der Betriebe im Süden ist nach dem neuen Bericht deutlich schlechter als im vergangenen Jahr."
+    },
+    {
+     "speaker": "SPEAKER_1",
+     "name": "Moderation",
+     "language": null,
+     "text": "Die Landesregierung will im Frühjahr reagieren."
+    }
+   ],
+   "cite": 1,
+   "quote": "Die Lage der Betriebe im Süden ist nach dem neuen Bericht deutlich schlechter",
+   "claims": [
+    {
+     "text": "Laut Anna Keller ist die Lage der Betriebe im Süden deutlich schlechter als im Vorjahr.",
+     "faithful": true
+    },
+    {
+     "text": "Die Betriebe im Süden stehen laut Keller schlechter da als vor einem Jahr.",
+     "faithful": true
+    },
+    {
+     "text": "Laut Anna Keller ist die Lage der Betriebe im Süden deutlich besser als im Vorjahr.",
+     "faithful": false,
+     "corruption": "worse → better"
+    }
+   ]
+  },
+  {
+   "id": "g10_better_not_worse",
+   "output_language": "de",
+   "recording_language": "de",
+   "lines": [
+    {
+     "speaker": "SPEAKER_1",
+     "name": "Moderation",
+     "language": null,
+     "text": "Wie laufen die Geschäfte im Norden?"
+    },
+    {
+     "speaker": "SPEAKER_2",
+     "name": "Mark Ellis",
+     "language": "en",
+     "text": "Honestly, sales in the north are much better than last year, about twelve percent up."
+    }
+   ],
+   "cite": 1,
+   "quote": "sales in the north are much better than last year, about twelve percent up",
+   "claims": [
+    {
+     "text": "Mark Ellis zufolge laufen die Verkäufe im Norden deutlich besser als im Vorjahr, etwa zwölf Prozent mehr.",
+     "faithful": true
+    },
+    {
+     "text": "Mark Ellis zufolge laufen die Verkäufe im Norden deutlich schlechter als im Vorjahr.",
+     "faithful": false,
+     "corruption": "better → worse"
+    },
+    {
+     "text": "Mark Ellis zufolge liegen die Verkäufe im Norden etwa zwölf Prozent unter dem Vorjahr.",
+     "faithful": false,
+     "corruption": "up → down"
+    }
+   ]
+  },
+  {
+   "id": "g11_fewer_not_more",
+   "output_language": "en",
+   "recording_language": "en",
+   "lines": [
+    {
+     "speaker": "SPEAKER_1",
+     "name": "Priya Shah",
+     "language": null,
+     "text": "Good news from support: we had fewer complaints this quarter than last, roughly forty instead of sixty."
+    }
+   ],
+   "cite": 0,
+   "quote": "we had fewer complaints this quarter than last, roughly forty instead of sixty",
+   "claims": [
+    {
+     "text": "Complaints fell this quarter to about forty, down from sixty.",
+     "faithful": true
+    },
+    {
+     "text": "There were more complaints this quarter than last, about sixty instead of forty.",
+     "faithful": false,
+     "corruption": "fewer → more"
+    }
+   ],
+   "same_language_claims": [
+    {
+     "text": "Laut Priya Shah gab es in diesem Quartal weniger Beschwerden als im letzten, etwa vierzig statt sechzig.",
+     "faithful": true,
+     "output_language": "de"
+    },
+    {
+     "text": "Laut Priya Shah gab es in diesem Quartal mehr Beschwerden als im letzten.",
+     "faithful": false,
+     "corruption": "fewer → more",
+     "output_language": "de"
+    }
+   ]
+  },
+  {
+   "id": "g12_more_not_fewer",
+   "output_language": "de",
+   "recording_language": "de",
+   "lines": [
+    {
+     "speaker": "SPEAKER_1",
+     "name": "Jonas Weber",
+     "language": null,
+     "text": "Wir brauchen im Lager mehr Personal, nicht weniger, sonst schaffen wir das Weihnachtsgeschäft nicht."
+    }
+   ],
+   "cite": 0,
+   "quote": "Wir brauchen im Lager mehr Personal, nicht weniger",
+   "claims": [
+    {
+     "text": "Laut Jonas Weber braucht das Lager mehr Personal, um das Weihnachtsgeschäft zu schaffen.",
+     "faithful": true
+    },
+    {
+     "text": "Laut Jonas Weber braucht das Lager weniger Personal.",
+     "faithful": false,
+     "corruption": "more → fewer"
+    }
+   ]
+  },
+  {
+   "id": "g13_approved_not_rejected",
+   "output_language": "de",
+   "recording_language": "en",
+   "lines": [
+    {
+     "speaker": "SPEAKER_1",
+     "name": "Ruth Carver",
+     "language": null,
+     "text": "The council approved the new bike lanes on Tuesday by seven votes to two."
+    }
+   ],
+   "cite": 0,
+   "quote": "The council approved the new bike lanes on Tuesday by seven votes to two",
+   "claims": [
+    {
+     "text": "Der Stadtrat hat die neuen Radwege am Dienstag mit sieben zu zwei Stimmen genehmigt.",
+     "faithful": true
+    },
+    {
+     "text": "Der Stadtrat hat die neuen Radwege am Dienstag abgelehnt.",
+     "faithful": false,
+     "corruption": "approved → rejected"
+    },
+    {
+     "text": "Der Stadtrat hat die neuen Radwege am Dienstag mit zwei zu sieben Stimmen abgelehnt.",
+     "faithful": false,
+     "corruption": "vote reversed"
+    }
+   ]
+  },
+  {
+   "id": "g14_recipient_changed",
+   "output_language": "de",
+   "recording_language": "de",
+   "lines": [
+    {
+     "speaker": "SPEAKER_1",
+     "name": "Petra Lang",
+     "language": null,
+     "text": "Die Prämie von dreihundert Euro bekommen nur die Pflegekräfte in den Kliniken, nicht die Verwaltung."
+    }
+   ],
+   "cite": 0,
+   "quote": "Die Prämie von dreihundert Euro bekommen nur die Pflegekräfte in den Kliniken",
+   "claims": [
+    {
+     "text": "Die Prämie von 300 Euro erhalten laut Petra Lang nur die Pflegekräfte in den Kliniken.",
+     "faithful": true
+    },
+    {
+     "text": "Die Prämie von 300 Euro erhalten laut Petra Lang alle Beschäftigten der Kliniken, auch die Verwaltung.",
+     "faithful": false,
+     "corruption": "recipients widened"
+    },
+    {
+     "text": "Die Prämie von 300 Euro erhält laut Petra Lang die Verwaltung der Kliniken.",
+     "faithful": false,
+     "corruption": "recipient swapped"
+    }
+   ]
+  },
+  {
+   "id": "g15_opposes_not_supports",
+   "output_language": "de",
+   "recording_language": "uk",
+   "lines": [
+    {
+     "speaker": "SPEAKER_1",
+     "name": "Олена Коваль",
+     "language": null,
+     "text": "Наша фракція виступає проти цього законопроєкту, бо він скорочує фінансування шкіл."
+    }
+   ],
+   "cite": 0,
+   "quote": "Наша фракція виступає проти цього законопроєкту",
+   "claims": [
+    {
+     "text": "Olena Kowals Fraktion lehnt den Gesetzentwurf ab, weil er die Schulfinanzierung kürzt.",
+     "faithful": true
+    },
+    {
+     "text": "Olena Kowals Fraktion unterstützt den Gesetzentwurf.",
+     "faithful": false,
+     "corruption": "opposes → supports"
     }
    ]
   }

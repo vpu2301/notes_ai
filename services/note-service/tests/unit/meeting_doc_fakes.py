@@ -59,10 +59,13 @@ def step_of(schema: dict[str, Any] | None) -> str:
         "checks",
         "repairs",
         "pairs",
+        "participants",
+        "sections",
     ):
         if key in props:
             return {
                 "facts": "extract",
+                "sections": "outline",
                 "conversation_type": "context",
                 "corrections": "entities",
                 "recording_type": "classify",
@@ -193,6 +196,22 @@ class ScriptedProvider:
 
     def _merge(self, _prompt: str, _facts: list[Any]) -> dict[str, Any]:
         return {"merges": []}
+
+    def _outline(self, _prompt: str, facts: list[tuple[str, str, str]]) -> dict[str, Any]:
+        """B2: four sections over the facts in order, each titled from its first fact."""
+        if not facts:
+            return {"sections": []}
+        size = max(1, -(-len(facts) // 4))
+        parts = [facts[k : k + size] for k in range(0, len(facts), size)][:4]
+        return {
+            "sections": [
+                {
+                    "title": " ".join(part[0][2].split()[:5]),
+                    "fact_ids": [fid for fid, _k, _t in part],
+                }
+                for part in parts
+            ]
+        }
 
     def _figures(self, _prompt: str, _facts: list[Any]) -> dict[str, Any]:
         return {"figures": []}

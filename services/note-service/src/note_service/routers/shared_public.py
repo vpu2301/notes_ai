@@ -104,6 +104,9 @@ class SharedSection(BaseModel):
     name: str
     text: str
     role: SectionRole
+    # B4 — line key → verbatim | paraphrase | composed, for the marker beside each line.
+    # Keys and enum words only; the recipient never sees the evidence itself.
+    line_marks: dict[str, str] = {}
 
 
 class SharedSender(BaseModel):
@@ -253,6 +256,29 @@ async def _template_code(conn: object, note_id: UUID) -> str | None:
     except Exception:  # noqa: BLE001
         logger.warning("shared.template_code_unavailable", extra={"note_id": str(note_id)})
         return None
+
+
+async def _line_marks(conn: object, note_id: UUID) -> dict[str, str]:
+    """B4 — the current generation's provenance per line key. Fail-safe: no marks."""
+    try:
+        return await gen_repo.line_marks(conn, note_id=note_id)  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _marks_for(text: str, marks: dict[str, str]) -> dict[str, str]:
+    """The marks of the lines this section text carries, by line key."""
+    from ..domain import lines as line_rules
+
+    out: dict[str, str] = {}
+    for raw in (text or "").split("\n"):
+        content = line_rules.strip_marker(raw)[1]
+        if not content:
+            continue
+        key = line_rules.key_of(content)
+        if key in marks:
+            out[key] = marks[key]
+    return out
 
 
 async def _internal_keys(conn: object, note_id: UUID) -> frozenset[str]:
@@ -411,6 +437,7 @@ async def _page(token: str) -> SharedNoteView:
         changes = await _changes_since(conn, resolved.link, note, version)
         await repo.mark_link_seen(conn, link_id=link_id, version_id=version.id)
         first_view = await repo.record_share_link_view(conn, link_id=link_id)
+        marks = await _line_marks(conn, note_id)
 
     names = {label.section_key: label.name.en or label.name.uk for label in labels}
     # An external surface renders the CLIENT DOCUMENT only (allow-list by role):
@@ -455,6 +482,7 @@ async def _page(token: str) -> SharedNoteView:
                 name=s.name,
                 text=s.text,
                 role=_role_for(s.section_key, s.text),
+                line_marks=_marks_for(s.text, marks),
             )
             for s in document.sections
         ],
@@ -519,6 +547,7 @@ async def read_shared_note_pdf(token: str) -> Response:
         internal_keys = await _internal_keys(conn, note_id)
         branding = await load_tenant_branding(conn, tenant_id=str(tenant_id))
         first_view = await repo.record_share_link_view(conn, link_id=link_id)
+        marks = await _line_marks(conn, note_id)
 
         lang = await _page_lang(conn, version, tenant_id)
 
@@ -532,6 +561,7 @@ async def read_shared_note_pdf(token: str) -> Response:
         variant="client",
         template_code=template_code,
         internal_keys=internal_keys,
+        line_marks=marks,
     )
     await _audit_view(tenant_id, note_id, resolved.link, fmt="pdf", first_view=first_view)
     return Response(

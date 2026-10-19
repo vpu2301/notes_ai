@@ -72,6 +72,17 @@ def build(case: dict[str, Any], claim: dict[str, Any]) -> tuple[Any, Any, str]:
     return Window(index=0, turns=turns), fact, output
 
 
+# A profile's stage texts (``--profile``), in place of the bundled ones.
+OVERRIDES: dict[str, str] | None = None
+
+
+def load_profile(path: Path) -> dict[str, str]:
+    from note_service.domain import prompt_profiles as profiles
+
+    config = profiles.ProfileConfig.model_validate(json.loads(path.read_text("utf-8"))["config"])
+    return profiles.stage_overrides(config)
+
+
 async def main(backend: str, corpus: Path, runs: int) -> int:
     from models import build_chat_provider
     from note_service.domain.meeting_doc import pipeline, prompts
@@ -87,7 +98,12 @@ async def main(backend: str, corpus: Path, runs: int) -> int:
                     window, fact, language = build(case, claim)
                     tally: Counter[str] = Counter()
                     verdicts = await pipeline._meaning_verdicts(
-                        provider, [fact], window, language, tally, task=prompts.task(language)
+                        provider,
+                        [fact],
+                        window,
+                        language,
+                        tally,
+                        task=prompts.task(language, overrides=OVERRIDES),
                     )
                     found = verdicts.get(id(fact))
                     verdict = found.verdict if found else "undecided"
@@ -123,5 +139,8 @@ if __name__ == "__main__":
     ap.add_argument("--backend", required=True)
     ap.add_argument("--corpus", type=Path, default=DEFAULT)
     ap.add_argument("--runs", type=int, default=3)
+    ap.add_argument("--profile", type=Path, default=None, help="profile JSON: its stage texts")
     args = ap.parse_args()
+    if args.profile is not None:
+        OVERRIDES = load_profile(args.profile)
     sys.exit(asyncio.run(main(args.backend, args.corpus, args.runs)))

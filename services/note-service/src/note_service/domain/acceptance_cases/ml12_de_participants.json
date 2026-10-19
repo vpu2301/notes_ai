@@ -1,0 +1,97 @@
+{
+ "id": "ml12_de_participants",
+ "sentinel": "F2-01: an event or a chamber named near 'das ist' is nobody; the inserted English clip is a quoted voice; the introduced guest is kept",
+ "meeting_type": "auto",
+ "output_language": "auto",
+ "result": {
+  "language": "de",
+  "result_rev": 1,
+  "turns": [
+   {
+    "speaker": "SPEAKER_1",
+    "name": null,
+    "start_ms": 0,
+    "end_ms": 48000,
+    "paragraphs": [
+     "Willkommen zu Politik am Abend. Der Kongress ist in zwei Kammern aufgeteilt. Das ist einmal das Repräsentantenhaus mit 435 Abgeordneten, die zweite Kammer ist der Senat. Und diese Midterm-Wahlen stehen am 3. November an. Bei uns ist heute die Politologin Maren Vogt."
+    ]
+   },
+   {
+    "speaker": "SPEAKER_2",
+    "name": null,
+    "start_ms": 48000,
+    "end_ms": 80000,
+    "paragraphs": [
+     "Danke für die Einladung. Die Midterms entscheiden darüber, ob der Präsident in den letzten zwei Jahren noch Gesetze durchbringt. Verliert seine Partei das Repräsentantenhaus, kann die Opposition den Haushalt blockieren."
+    ]
+   },
+   {
+    "speaker": "SPEAKER_1",
+    "name": null,
+    "start_ms": 80000,
+    "end_ms": 92000,
+    "paragraphs": [
+     "Der Präsident selbst klang auf einer Kundgebung so."
+    ]
+   },
+   {
+    "speaker": "SPEAKER_3",
+    "name": null,
+    "start_ms": 92000,
+    "end_ms": 100000,
+    "paragraphs": [
+     "Pretend that I'm on the ballot. I am on the ballot."
+    ],
+    "language": "en"
+   },
+   {
+    "speaker": "SPEAKER_2",
+    "name": null,
+    "start_ms": 100000,
+    "end_ms": 128000,
+    "paragraphs": [
+     "Das ist eine bewusste Strategie: Er macht die Wahl zu einer Abstimmung über sich selbst, obwohl er gar nicht kandidiert. Das kann ihm nützen, aber auch schaden, weil seine Zustimmungswerte niedrig sind."
+    ]
+   },
+   {
+    "speaker": "SPEAKER_1",
+    "name": null,
+    "start_ms": 128000,
+    "end_ms": 140000,
+    "paragraphs": [
+     "Maren Vogt, vielen Dank für das Gespräch."
+    ]
+   },
+   {
+    "speaker": "SPEAKER_2",
+    "name": null,
+    "start_ms": 140000,
+    "end_ms": 146000,
+    "paragraphs": [
+     "Sehr gern, danke."
+    ]
+   }
+  ]
+ },
+ "assertions": {
+  "must_contain_any": [
+   [
+    "Haushalt"
+   ]
+  ],
+  "framing_must_not_contain": [
+   "Midterm-Wahlen (",
+   "mit Midterm",
+   "Gast Midterm",
+   "Repräsentantenhaus (",
+   "mit dem Repräsentantenhaus",
+   "Gäste sind Midterm"
+  ],
+  "framing_must_contain_any": [
+   [
+    "Maren Vogt",
+    "Vogt"
+   ]
+  ]
+ }
+}

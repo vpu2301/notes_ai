@@ -153,7 +153,7 @@ def test_length_mode_is_a_slot_filled_by_code() -> None:
     assert "Write user-facing note text in Ukrainian." in task.common
     assert (
         profiles.validate(
-            profiles.ProfileConfig(stages={"composition": "Detail: {{length_mode}}."}), [_cap()]
+            profiles.ProfileConfig(stages={"extraction": "Detail: {{length_mode}}."}), [_cap()]
         )
         == []
     )
@@ -203,7 +203,10 @@ def test_the_snapshot_pins_hashes_flags_and_bindings() -> None:
     )
     assert snap["prompt_version"] == prompts.PROMPT_VERSION
     assert snap["fidelity"] is False and snap["length"] == "standard"
-    assert set(snap["prompt_hashes"]) == set(profiles.STAGES)
+    # Fidelity off: no final check, deduplication or participant call is pinned.
+    assert set(snap["prompt_hashes"]) == {
+        "extraction", "context", "composition.topic", "composition.summary", "verification.meaning",
+    }  # fmt: skip
 
 
 # ── Capabilities from the registry ──────────────────────────────────
@@ -282,7 +285,8 @@ def test_a_stage_provider_applies_its_settings_and_a_meter_counts_the_call() -> 
     assert inner.seen == [{"max_tokens": 500, "temperature": 0.4}]
     assert staged.calls == [
         {"stage": "composition", "backend": "mistral_eu", "model_id": "mistral-large-2512",
-         "ok": True, "input_tokens": 100, "output_tokens": 20, "latency_ms": 5}
+         "ok": True, "system_sha": None, "input_tokens": 100, "output_tokens": 20,
+         "latency_ms": 5}
     ]  # fmt: skip
     # Unset settings leave the pipeline's own values; attributes pass through.
     plain = StageProvider(inner, stage="extraction")

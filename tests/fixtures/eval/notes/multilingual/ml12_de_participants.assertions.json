@@ -1,0 +1,30 @@
+{
+ "id": "ml12_de_participants",
+ "sentinel": "F2-01: an event or a chamber named near 'das ist' is nobody; the inserted English clip is a quoted voice; the introduced guest is kept",
+ "framing_must_not_contain": [
+  "Midterm-Wahlen (",
+  "mit Midterm",
+  "Gast Midterm",
+  "Repräsentantenhaus (",
+  "mit dem Repräsentantenhaus",
+  "Gäste sind Midterm"
+ ],
+ "framing_must_contain_any": [
+  [
+   "Maren Vogt",
+   "Vogt"
+  ]
+ ],
+ "must_contain_any": [
+  [
+   "Haushalt"
+  ]
+ ],
+ "excluded_language_ms_max": 0,
+ "must_not_contain": [
+  "5.000",
+  "5000",
+  "Dividende"
+ ],
+ "no_grammar_corrections": true
+}

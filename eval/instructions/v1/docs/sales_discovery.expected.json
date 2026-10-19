@@ -1,0 +1,13 @@
+{
+ "figure_tables": false,
+ "terminology": [
+  {
+   "use": "customer",
+   "instead_of": "client"
+  }
+ ],
+ "avoid": [
+  "synergy",
+  "leverage"
+ ]
+}

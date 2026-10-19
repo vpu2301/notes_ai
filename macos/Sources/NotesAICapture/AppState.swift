@@ -62,7 +62,7 @@ final class AppState: ObservableObject {
     @Published var settingsTab: SettingsTab = .general
 
     enum SettingsTab: Hashable, CaseIterable {
-        case general, vocabulary, connectors, dataAI, billing, account, advanced
+        case general, vocabulary, connectors, dataAI, writing, billing, account, advanced
     }
 
     /// Open Settings on the Connectors tab (menus, the home page's prompt).
@@ -1058,6 +1058,14 @@ final class AppState: ObservableObject {
     func openWebSettingsData() {
         if let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
             .appending(path: "settings/data") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// Settings › Note writing in the web app, where the style, the instructions and the model behaviour are changed.
+    func openWebSettingsWriting() {
+        if let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
+            .appending(path: "settings/writing") {
             NSWorkspace.shared.open(url)
         }
     }

@@ -201,6 +201,31 @@ export function TestPanel({
 
   const jobs = sources.length * 2 * repetitions;
   const done = experiment?.runs.filter((r) => r.state === "done").length ?? 0;
+  const suite = experiment?.sources.some((src) => "case_id" in src) ?? false;
+
+  const startCritical = async () => {
+    if (!candidate) return;
+    setBusy(true);
+    try {
+      const started = await startExperiment({
+        sources: [],
+        suite: "critical",
+        candidate_version_ids: [candidate],
+        repetitions,
+        length,
+        output_language: "auto",
+        budget_cap_cents: Number.isFinite(capCents) && capCents >= 0 ? capCents : 0,
+        idempotency_key: key.current,
+      });
+      setExperiment(started);
+      key.current = newKey();
+      onStarted(started.id);
+    } catch (err) {
+      toast.error(messageFor(err));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="settings-stack">
@@ -359,7 +384,8 @@ export function TestPanel({
           </label>
         </div>
         <p className="help" data-testid="ai-jobs">
-          {jobs} runs ({sources.length} transcript{sources.length === 1 ? "" : "s"} × 2 × {repetitions}).
+          {jobs} runs ({sources.length} transcript{sources.length === 1 ? "" : "s"} × 2 × {repetitions})
+          {estimate?.requests ? `, about ${estimate.requests} model requests` : ""}.
           {estimate
             ? ` Estimated cost: ${moneyOrUnknown(estimate.estimate_cents)}${
                 estimate.cost_known ? "" : " — a model has no price, so the run is limited by tokens instead"
@@ -384,7 +410,32 @@ export function TestPanel({
             Start test
           </button>
         </div>
+        {repetitions === 1 && (
+          <p className="help" role="note" data-testid="ai-single-run">
+            One run is a quick preview: models vary from run to run, so it is not enough to decide
+            on. Use three repetitions before activating.
+          </p>
+        )}
         {!canEdit && <p className="help">Only a workspace admin can run tests.</p>}
+      </section>
+
+      <section className="card pad settings-card" aria-label="Critical cases">
+        <h2 className="settings-h">Critical cases</h2>
+        <p className="help">
+          Before a version can be activated it must pass the critical cases that ship with the
+          service: a conditional payment keeps its condition and recipient, worse/fewer/not
+          approved keep their direction, and nobody is presented as a guest who is not one.
+          They are synthetic transcripts, checked by code, and count only for the code they ran
+          on — after an update they run again.
+        </p>
+        <button
+          className="btn sm"
+          type="button"
+          disabled={!canEdit || busy || !candidate}
+          onClick={() => void startCritical()}
+        >
+          Run critical cases for the candidate
+        </button>
       </section>
 
       {experiment && (
@@ -392,8 +443,28 @@ export function TestPanel({
           <h2 className="settings-h">Status: {experiment.state}</h2>
           <p className="help">
             {done} of {experiment.runs.length} runs done · spent {moneyOrUnknown(experiment.cost_known ? experiment.spent_cents : null)}
-            {experiment.stale ? " · a transcript changed since this test was queued" : ""}
+            {experiment.stale
+              ? suite
+                ? " · the service changed since these ran: run them again"
+                : " · a transcript changed since this test was queued"
+              : ""}
           </p>
+          {suite && (
+            <ul className="ai-acceptance" data-testid="ai-acceptance">
+              {experiment.runs.map((r) => {
+                const result = r.metrics.acceptance as
+                  | { case: string; passed: boolean; failures: string[] }
+                  | undefined;
+                const caseId = (experiment.sources[r.source_index] as { case_id?: string }).case_id;
+                return (
+                  <li key={r.id}>
+                    {caseId} · run {r.repetition}:{" "}
+                    {result ? (result.passed ? "passed" : `failed (${result.failures.join(", ")})`) : r.state}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
           {!FINAL.has(experiment.state) && canEdit && (
             <button className="btn sm" type="button" disabled={busy} onClick={() => setConfirmCancel(true)}>
               Cancel test

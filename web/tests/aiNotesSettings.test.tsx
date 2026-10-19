@@ -129,6 +129,22 @@ const ARTIFACT = {
   ],
 };
 
+const RUNTIME_ON = {
+  build_sha: "abc1234",
+  multilingual_evidence: true,
+  fidelity: true,
+  prompt_version: "2026-10-18.3",
+  algorithm_version: "2026-10-18.final-check",
+  profile_instructions_apply: true,
+};
+const RUNTIME_OFF = {
+  ...RUNTIME_ON,
+  multilingual_evidence: false,
+  fidelity: false,
+  prompt_version: "2026-10-01.3",
+  profile_instructions_apply: false,
+};
+
 type Reply = { status?: number; body: unknown };
 type Handler = (method: string, path: string, body: Record<string, unknown> | null) => Reply | undefined;
 
@@ -145,6 +161,7 @@ function server(over: Handler = () => undefined) {
         over(method, path, body) ??
         ((): Reply => {
           if (path.endsWith("/prompt-profiles") && method === "GET") return { body: PROFILES };
+          if (path.endsWith("/ai/runtime")) return { body: RUNTIME_ON };
           if (path.endsWith("/model-capabilities")) return { body: { models: [MISTRAL, NO_TEMPERATURE], stage_operations: {}, writer: { backend: "mistral_eu", model_id: "mistral-large-2512", primary: "mistral_eu", reason: null } } };
           if (path.endsWith("/experiments") && method === "GET") return { body: [{ id: EXP, state: "completed", candidates: [V1, V2], sources: 1, repetitions: 1, cost_known: false, spent_cents: 0, created_at: NOW }] };
           if (path.endsWith("/history")) return { body: [{ profile_version_id: V1, previous_version_id: null, revision: 1, actor: "u", evaluation_ref: null, created_at: NOW }] };
@@ -199,7 +216,7 @@ afterEach(() => vi.unstubAllGlobals());
 async function openEditor(versionRow = "v1") {
   const row = await screen.findByRole("row", { name: new RegExp(`^${versionRow}\\b`) });
   await userEvent.click(within(row).getByRole("button", { name: "Edit" }));
-  return screen.findByRole("textbox", { name: /extraction instructions/i });
+  return screen.findByRole("textbox", { name: /extract facts instructions/i });
 }
 
 describe("Settings › AI notes", () => {
@@ -208,7 +225,28 @@ describe("Settings › AI notes", () => {
     page();
     expect(await screen.findByTestId("ai-active")).toHaveTextContent("Broadcasts · v1");
     expect(screen.getAllByText(/actually used/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/every spoken language is used as evidence/)).toBeInTheDocument();
+    expect(await screen.findByText(/every spoken language is used as evidence/)).toBeInTheDocument();
+    expect(screen.getByTestId("ai-runtime")).toHaveTextContent(/every written line is checked/i);
+    expect(screen.getByTestId("ai-runtime")).toHaveTextContent("build abc1234");
+    expect(screen.queryByTestId("ai-instructions-unused")).toBeNull();
+  });
+
+  it("never claims the new engine where its flags are off", async () => {
+    server((_m, p) => (p.endsWith("/ai/runtime") ? { body: RUNTIME_OFF } : undefined));
+    page("test");
+    expect(await screen.findByTestId("ai-runtime")).toHaveTextContent(/previous engine/i);
+    expect(screen.queryByText(/every spoken language is used as evidence/)).toBeNull();
+    expect(screen.getByTestId("ai-instructions-unused")).toBeInTheDocument();
+    // A test run takes the new path regardless: the page says so before it is started.
+    expect(screen.getByTestId("ai-test-path")).toHaveTextContent(/can differ from a regenerated note/);
+  });
+
+  it("says nothing about the engine when the server does not report it", async () => {
+    server((_m, p) => (p.endsWith("/ai/runtime") ? { status: 404, body: { status: 404 } } : undefined));
+    page();
+    expect(await screen.findByTestId("ai-active")).toBeInTheDocument();
+    expect(screen.queryByTestId("ai-runtime")).toBeNull();
+    expect(screen.queryByText(/every spoken language is used as evidence/)).toBeNull();
   });
 
   it("is read-only for a member", async () => {
@@ -276,7 +314,7 @@ describe("Settings › AI notes", () => {
     server();
     page();
     await openEditor();
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: /model for extraction/i }), "plain");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: /model for extract facts/i }), "plain");
     expect(screen.getByRole("spinbutton", { name: "Temperature" })).toBeDisabled();
     expect(screen.getByRole("spinbutton", { name: "Timeout (s)" })).toBeEnabled();
     expect(screen.getByText(/not available for this model: seed/i)).toBeInTheDocument();
@@ -288,7 +326,7 @@ describe("Settings › AI notes", () => {
     const row = await screen.findByRole("row", { name: /^v2\b/ });
     await userEvent.click(within(row).getByRole("button", { name: "Activate" }));
     expect(await screen.findByText(/only notes written from now on use it/i)).toBeInTheDocument();
-    expect(screen.getByText(/Compared with what is active now: Instructions: Extraction · Model: Composition/)).toBeInTheDocument();
+    expect(screen.getByText(/Compared with what is active now: Instructions: Extract facts · Model: Write notes/)).toBeInTheDocument();
     const dialogConfirm = screen.getAllByRole("button", { name: "Activate" }).at(-1)!;
     expect(dialogConfirm).toBeDisabled();
   });
@@ -322,6 +360,66 @@ describe("Settings › AI notes", () => {
     expect(await screen.findByText(/multiple variables changed/i)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Estimate" }));
     expect(await screen.findByTestId("ai-jobs")).toHaveTextContent(/Estimated cost: unknown/);
+  });
+
+  it("an emptied stage is saved as the bundled instructions, never as an empty override", async () => {
+    const calls = server((m, p) =>
+      m === "POST" && p.endsWith(`/prompt-profiles/${PROFILE}/versions`) ? { status: 201, body: version("v3", 3) } : undefined,
+    );
+    page();
+    const box = await openEditor();
+    await userEvent.clear(box);
+    expect(screen.getByText(/this stage is empty, so it will use the bundled instructions/i)).toBeInTheDocument();
+    await userEvent.type(box, " ");
+    await userEvent.click(screen.getByRole("button", { name: /save as new version/i }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "POST" && c.path.endsWith("/versions"))?.body).toMatchObject({
+        config: { stages: { extraction: null } },
+      }),
+    );
+  });
+
+  it("previews every call exactly, with where its text comes from, and the flags it runs with", async () => {
+    server((_m, p) =>
+      p.endsWith("/preview")
+        ? {
+            body: {
+              problems: [], effective: { extraction: "E" }, language: "en",
+              bundled: { extraction: "BUNDLED EXTRACTION", composition: "C", verification: "V" },
+              calls: [
+                { call: "extraction", stage: "extraction", source: "not_applied", sha: "abcdef1234567890", system: "EXTRACT SYSTEM" },
+                { call: "context", stage: "context", source: "code", sha: "1234567890abcdef", system: "CONTEXT SYSTEM" },
+              ],
+              flags: { mode: "production", multilingual_evidence: false, fidelity: false, final_check: false, profile_instructions_apply: false },
+              required_variables: { composition: ["output_language"] },
+            },
+          }
+        : undefined,
+    );
+    page();
+    await openEditor();
+    expect(await screen.findByTestId("ai-preview-flags")).toHaveTextContent(/previous engine: this version's instructions are not sent/);
+    expect(screen.getByLabelText("Extract facts instructions", { selector: "pre" })).toHaveTextContent("EXTRACT SYSTEM");
+    expect(screen.getByText(/edited, but not sent here · sha abcdef123456/)).toBeInTheDocument();
+    expect(screen.getByText(/code-owned, read-only · sha 1234567890ab/)).toBeInTheDocument();
+  });
+
+  it("runs the critical cases for the candidate and warns that one run is not enough", async () => {
+    const calls = server((m, p) =>
+      p.endsWith("/experiments") && m === "POST"
+        ? { status: 202, body: { ...EXPERIMENT, state: "queued", sources: [{ case_id: "ml01_de_host_en_promise", transcript_rev: 1, readable: true }], runs: [] } }
+        : undefined,
+    );
+    page("test");
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: /repetitions/i }), "1");
+    expect(screen.getByTestId("ai-single-run")).toHaveTextContent(/not enough to decide on/);
+    await userEvent.click(screen.getByRole("button", { name: /run critical cases for the candidate/i }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "POST" && c.path.endsWith("/experiments"))?.body).toMatchObject({
+        suite: "critical",
+        sources: [],
+      }),
+    );
   });
 
   it("explains that cancelling lets an in-flight run finish", async () => {

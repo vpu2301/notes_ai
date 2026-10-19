@@ -69,6 +69,11 @@ CERTAINTIES: Final[tuple[str, ...]] = (
     "opinion",
     "proposal",
     "allegation",
+    # Sprint B2 T4 — a claim the speaker relays: only relayed, called unsubstantiated,
+    # or called disproven. The note keeps the speaker's verdict on it.
+    "reported",
+    "unproven",
+    "refuted",
 )
 # Closed vocabulary: the transcript note is rendered from it in code, never from model prose.
 NOISE_REASONS: Final[tuple[str, ...]] = (
@@ -388,6 +393,16 @@ REDUCE_SUMMARY_SCHEMA: Final[dict[str, Any]] = {
     },
 }
 
+
+def summary_schema(cap: int) -> dict[str, Any]:
+    """``REDUCE_SUMMARY_SCHEMA`` with at most ``cap`` sentences (N2: a profile's cap)."""
+    import copy
+
+    out = copy.deepcopy(REDUCE_SUMMARY_SCHEMA)
+    out["properties"]["summary"]["maxItems"] = cap
+    return out
+
+
 REDUCE_CONTEXT_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "additionalProperties": False,
@@ -550,6 +565,68 @@ def meaning_check_schema(count: int) -> dict[str, Any]:
     }
 
 
+# F2-01 — the participant check: what a proposed introduction's name denotes, kept apart
+# from how that person takes part, and which shown line (if any) is theirs.
+ENTITY_TYPES: Final[tuple[str, ...]] = ("person", "event", "institution", "topic", "unknown")
+PARTICIPATIONS: Final[tuple[str, ...]] = ("host", "guest", "interviewee", "quoted", "unknown")
+
+
+class ParticipantCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: str = Field(max_length=MAX_CLAIM_ID_CHARS)
+    entity: Literal["person", "event", "institution", "topic", "unknown"]
+    introduced: bool
+    participation: Literal["host", "guest", "interviewee", "quoted", "unknown"]
+    speaks_at: str | None = Field(default=None, max_length=MAX_CLAIM_ID_CHARS)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=MAX_VERDICT_LINES)
+
+
+class ParticipantsOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    participants: list[ParticipantCheck] = Field(default_factory=list)
+
+
+def participants_schema(count: int) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["participants"],
+        "properties": {
+            "participants": {
+                "type": "array",
+                "minItems": count,
+                "maxItems": count,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "item_id",
+                        "entity",
+                        "introduced",
+                        "participation",
+                        "speaks_at",
+                        "evidence_ids",
+                    ],
+                    "properties": {
+                        "item_id": {"type": "string", "maxLength": MAX_CLAIM_ID_CHARS},
+                        "entity": {"type": "string", "enum": list(ENTITY_TYPES)},
+                        "introduced": {"type": "boolean"},
+                        "participation": {"type": "string", "enum": list(PARTICIPATIONS)},
+                        "speaks_at": {"type": ["string", "null"], "maxLength": MAX_CLAIM_ID_CHARS},
+                        "evidence_ids": {
+                            "type": "array",
+                            "maxItems": MAX_VERDICT_LINES,
+                            "items": {"type": "string", "maxLength": MAX_CLAIM_ID_CHARS},
+                        },
+                    },
+                },
+            }
+        },
+    }
+
+
 # Deduplication (05-prompt-instructions.md): the relation between two candidate propositions.
 EQUIVALENT: Final = "equivalent"
 EXPLICIT_CORRECTION: Final = "explicit_correction"
@@ -688,6 +765,49 @@ BLOCK_TOPIC_SCHEMA: Final[dict[str, Any]] = {
         }
     },
 }
+
+
+# ── The outline of a narrated recording (Sprint B2 T2) ───────────────
+
+MIN_OUTLINE_SECTIONS: Final = 4
+MAX_OUTLINE_SECTIONS: Final = 6
+# A shorter recording may come back with three; fewer is not an outline.
+ACCEPT_OUTLINE_SECTIONS: Final = 3
+
+OUTLINE_SCHEMA: Final[dict[str, Any]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["sections"],
+    "properties": {
+        "sections": {
+            "type": "array",
+            "minItems": MIN_OUTLINE_SECTIONS,
+            "maxItems": MAX_OUTLINE_SECTIONS,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["title", "fact_ids"],
+                "properties": {
+                    "title": {"type": "string", "maxLength": MAX_TOPIC_TITLE_CHARS},
+                    "fact_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                },
+            },
+        }
+    },
+}
+
+
+class OutlineSection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    title: str = Field(default="", max_length=MAX_TOPIC_TITLE_CHARS)
+    fact_ids: list[str] = Field(default_factory=list)
+
+
+class OutlineOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    sections: list[OutlineSection] = Field(default_factory=list)
 
 
 # ── One block of the recording, and heading merges ──────────────────

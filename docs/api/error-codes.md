@@ -211,16 +211,28 @@ codes.
 
 | Code | Status | Where | Meaning / client action |
 | --- | --- | --- | --- |
-| `invalid_profile` | 422 | `POST /v1/ai/prompt-profiles/{id}/versions`, `/activate`, `POST /v1/ai/experiments` | The configuration cannot be saved or run. `problems[]` = `{field, code, detail}` per reason (`unknown_variable`, `too_long`, `empty`, `unbalanced_braces`, `context_budget`, `unknown_stage`, `model_unavailable`, `unsupported`, `out_of_range`, `unsupported_language`); show each beside its field. Nothing is clamped or dropped. |
+| `invalid_profile` | 422 | `POST /v1/ai/prompt-profiles/{id}/versions`, `/activate`, `POST /v1/ai/experiments` | The configuration cannot be saved or run. `problems[]` = `{field, code, detail}` per reason (`unknown_variable`, `missing_variable` (a placeholder the bundled stage text uses), `missing_section` / `duplicate_section` / `unknown_section` (Write notes keeps GENERAL, SUMMARY SUBTASK, TOPIC/BULLET SUBTASK, HEADING SUBTASK, CHRONOLOGY once each), `too_long`, `empty` (send null for the bundled text), `unbalanced_braces`, `context_budget`, `unknown_stage`, `model_unavailable`, `unsupported`, `out_of_range`, `unsupported_language`); show each beside its field. Nothing is clamped or dropped. |
 | `version_conflict` | 409 | `POST /v1/ai/prompt-profiles/{id}/versions` | Another version of the profile was saved at the same moment. Reload and save again. |
 | `incompatible_version` | 409 | `/activate`, `POST /v1/ai/experiments` | The version was written against a prompt contract or algorithm this deployment no longer runs; `detail` says which. Save it again as a new version. |
 | `active_revision_conflict` | 409 | `POST /v1/ai/prompt-profiles/{id}/activate` | Another admin moved the active pointer since this page loaded; `current_revision` is the new one. Reload and decide again — never an overwrite. |
+| `acceptance_required` | 409 | `POST /v1/ai/prompt-profiles/{id}/activate` | P1-04: a version that never wrote this workspace's notes must also have passed the critical cases (`POST /v1/ai/experiments` with `suite: "critical"`) on the current service version (prompt version, schemas, algorithm, final check). `detail` names the failed cases or says to run them (again). A rollback to a previously active version does not. |
 | `evaluation_required` | 409 | `POST /v1/ai/prompt-profiles/{id}/activate` | A version that never wrote this workspace's notes needs `evaluation_ref`: a completed experiment in which it ran, every run done, and no review finding `wrong_actor`, `missing_condition` or `unsupported_claim` against it. A rollback to a previously active version does not. |
 | `transcript_not_shared` | 403 | `POST /v1/ai/experiments`, `/estimate` | The caller can see the note but not its transcript. Choose another source or ask its author. |
 | `source_revision_conflict` | 409 | `POST /v1/ai/experiments`, `/estimate` | The transcript changed since it was chosen; `transcript_rev` is the current one. Choose it again. |
 | `experiment_budget` | 409 | `POST /v1/ai/experiments` | The estimate (`estimate_cents`) does not fit `cap_cents` or what is left of the month's budget (`left_cents`). Lower repetitions or sources, or raise the cap. An unpriced backend is never refused this way: its cost is unknown and a token cap bounds it. |
 | `experiment_active` | 429 | `POST /v1/ai/experiments` | One experiment at a time per workspace. Wait for it, or cancel it. |
 | `invalid_finding` | 422 | `POST /v1/ai/experiments/{id}/reviews` | A finding is not `{run: a\|b, label}` with a label from `labels`. |
+
+## note-service — note instructions (N1)
+
+| Code | Status | Where | Meaning / client action |
+| --- | --- | --- | --- |
+| `not_available` | 404 | every `/v1/ai/instructions` and `/v1/notes/{id}/instructions` route | The feature is off in this deployment (`MDX_NOTE_INSTRUCTIONS_ENABLED`). Hide the card. |
+| `scope_unknown` | 404 | `/v1/ai/instructions/{scope}` | N4 — `scope` is not `workspace` or a meeting family (`client`, `team`, `sales`, `one_on_one`, `interview`, `broadcast`, `memo`). |
+| `text_too_long` | 413 | `PUT /v1/ai/instructions`, `/preview` | The sanitised text is longer than `max_chars` (8 000). Nothing is saved or cut; shorten it. The detail never repeats the text. |
+| `budget_exceeded` | 429 | `PUT /v1/ai/instructions`, `/preview` | The workspace has spent its monthly AI budget; nothing was compiled or saved. `spent_cents`, `budget_cents`. |
+| `too_many_previews` | 429 | `POST /v1/ai/instructions/preview` | More than 30 previews this hour in this workspace; `Retry-After` / `retry_after_s`. Saving is not limited. |
+| `model_unavailable` | 503 | `PUT /v1/ai/instructions`, `/preview` | No writing model resolves for this workspace; nothing saved. A provider failure is not this: the row is saved with `compile_status: "failed"` and the empty profile (200). |
 
 ## note-service — reading somebody else's note
 

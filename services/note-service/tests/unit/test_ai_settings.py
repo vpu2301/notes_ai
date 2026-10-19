@@ -149,6 +149,9 @@ def harness(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
             generation_enabled=kw["generation_enabled"],
             acknowledged=kw["acknowledged"],
             monthly_budget_cents=kw["monthly_budget_cents"],
+            writing_style=kw.get("writing_style", "business"),
+            model_params=kw.get("model_params") or {},
+            model_params_version=kw.get("model_params_version", 0),
         )
         return stored["row"]
 
@@ -164,6 +167,8 @@ def harness(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
     monkeypatch.setattr(router_mod.rules, "month_to_date_cents", _spend)
     monkeypatch.setattr(router_mod, "_plan", _plan)
     monkeypatch.setattr(router_mod, "_required_processors", lambda: list(processors["required"]))
+    # N0: the writer's backend declares a 32K context and two parallel calls.
+    monkeypatch.setattr(router_mod, "_caps", lambda tenant_id: (32_768, 2))
 
     app = create_app()
     client = TestClient(app)
@@ -394,3 +399,102 @@ async def test_a_redis_outage_still_tells_the_admin() -> None:
     assert await notifications.emit_budget_reached(
         redis, tenant_id=TENANT, actor_user_id=None, spent_cents=1, budget_cents=0
     )
+
+
+# ── N0: writing style and model parameters ────────────────────────
+
+FULL = {
+    "temperature": 0.4, "context_window_tokens": 65_536, "max_output_tokens": 2048,
+    "max_concurrency": 4, "facts_per_window": 16, "retries": "thorough",
+    "ask_temperature": 0.3, "ask_max_tokens": 900,
+}  # fmt: skip
+
+
+def test_a_member_sees_the_parameters_and_their_limits(harness) -> None:  # noqa: ANN001
+    _as(harness, "member")
+    body = harness.client.get("/v1/ai/settings").json()
+    assert body["writing_style"] == "business" and body["model_params_version"] == 0
+    assert body["model_params"]["temperature"] == 0.0
+    limit = body["model_params_limits"]["context_window_tokens"]
+    assert limit["cap"] == 32_768 and limit["cap_source"] == "backend"
+    assert body["model_params_measured"]["temperature"] == {"0.2": None, "0.4": None, "0.7": None}
+    assert (
+        harness.client.put("/v1/ai/settings", json={"writing_style": "academic"}).status_code == 403
+    )
+
+
+def test_a_partial_parameter_set_is_refused(harness) -> None:  # noqa: ANN001
+    _as(harness, "tenant_admin")
+    resp = harness.client.put("/v1/ai/settings", json={"model_params": {"temperature": 0.4}})
+    assert resp.status_code == 422
+    assert harness.stored["row"].model_params_version == 0
+
+
+def test_a_value_above_the_backend_cap_is_saved_capped(harness) -> None:  # noqa: ANN001
+    _as(harness, "tenant_admin")
+    body = harness.client.put("/v1/ai/settings", json={"model_params": FULL}).json()
+    assert body["model_params"]["context_window_tokens"] == 32_768
+    assert body["model_params_effective"]["context_window_tokens"] == 32_768
+    assert body["model_params_limits"]["context_window_tokens"]["cap_source"] == "backend"
+    assert body["model_params_version"] == 1
+    assert harness.invalidated  # the worker's cache drops the old values
+
+
+def test_reset_and_a_style_change_each_bump_the_version(harness) -> None:  # noqa: ANN001
+    _as(harness, "tenant_admin")
+    harness.client.put("/v1/ai/settings", json={"model_params": FULL})
+    body = harness.client.put("/v1/ai/settings", json={"reset_model_params": True}).json()
+    assert body["model_params_version"] == 2 and body["model_params"]["temperature"] == 0.0
+    assert harness.stored["row"].model_params == {}
+    body = harness.client.put("/v1/ai/settings", json={"writing_style": "academic"}).json()
+    assert body["writing_style"] == "academic" and body["model_params_version"] == 3
+    # A change to something else leaves the version alone.
+    body = harness.client.put("/v1/ai/settings", json={"generation_enabled": False}).json()
+    assert body["model_params_version"] == 3
+
+
+def test_the_audit_names_what_changed(harness) -> None:  # noqa: ANN001
+    _as(harness, "tenant_admin")
+    harness.client.put("/v1/ai/settings", json={"model_params": FULL, "writing_style": "formal"})
+    payload = harness.audit[-1]["payload"]
+    assert set(payload) == {
+        "tier", "provider", "generation_enabled", "acknowledged", "writing_style",
+        "model_params_changed", "model_params_version", "temperature", "context_window_tokens",
+    }  # fmt: skip
+    assert "temperature" in payload["model_params_changed"] and payload["temperature"] == 0.4
+    harness.client.put("/v1/ai/settings", json={"generation_enabled": True})
+    assert "model_params_changed" not in harness.audit[-1]["payload"]
+
+
+def test_an_invalid_stored_object_says_reset_needed(harness) -> None:  # noqa: ANN001
+    _as(harness, "member")
+    harness.stored["row"] = _row(model_params={"temperature": 9})
+    body = harness.client.get("/v1/ai/settings").json()
+    assert body["model_params_valid"] is False and body["model_params"]["temperature"] == 0.0
+
+
+def test_the_caps_come_from_the_writers_backend(monkeypatch) -> None:  # noqa: ANN001
+    from note_service.routers import ai_settings as router_mod
+
+    resolved = SimpleNamespace(caps=SimpleNamespace(context_window=32_768, max_concurrency=2))
+    registry = SimpleNamespace(resolve=lambda workspace, operation: resolved)
+    monkeypatch.setattr(router_mod, "_registry", lambda: registry)
+    assert router_mod._caps(UUID(int=1)) == (32_768, 2)
+
+
+def test_measured_numbers_are_nulls_where_the_repo_is_not(tmp_path) -> None:  # noqa: ANN001
+    """In the image the module sits at /deps/note_service/routers: no docs/eval above it."""
+    from note_service.routers import ai_settings as router_mod
+
+    shallow = tmp_path / "deps" / "note_service" / "routers" / "ai_settings.py"
+    shallow.parent.mkdir(parents=True)
+    shallow.write_text("")
+    assert router_mod._measured(shallow) == {"temperature": {"0.2": None, "0.4": None, "0.7": None}}
+    # …and are read where the file exists.
+    from note_service.domain.meeting_doc.prompts import PROMPT_VERSION
+
+    (tmp_path / "docs" / "eval").mkdir(parents=True)
+    (tmp_path / "docs" / "eval" / f"model-params-{PROMPT_VERSION}.json").write_text(
+        '{"temperature": {"0.4": 0.12}}'
+    )
+    assert router_mod._measured(shallow)["temperature"]["0.4"] == 0.12

@@ -1076,6 +1076,33 @@ ol.rt-list > li::before {
 }
 .settings-value { font-size: calc(13.5px * var(--fs)); color: var(--text-1); }
 .settings-actions { display: flex; gap: calc(8px * var(--density)); align-items: center; flex-wrap: wrap; }
+/* Advanced: model behaviour — one row per parameter the engine reads. */
+.model-behaviour > summary { cursor: pointer; list-style: revert; }
+.model-behaviour[open] { display: flex; flex-direction: column; gap: calc(10px * var(--density)); }
+.param-table { width: 100%; border-collapse: collapse; font-size: calc(13px * var(--fs)); }
+.param-table th, .param-table td { text-align: left; vertical-align: top; padding: 8px 6px; border-top: var(--hairline) solid var(--line-2); }
+.param-table thead th { border-top: 0; color: var(--text-3); font-weight: 500; }
+.param-table tbody th { font-weight: 500; color: var(--text-1); white-space: nowrap; }
+.param-table td.help { max-width: 320px; }
+.param-input { display: flex; align-items: center; gap: 8px; }
+.param-input .input { width: 110px; }
+@media (max-width: 720px) { .param-table thead { display: none; } .param-table tr { display: grid; } }
+/* Note instructions: the text as typed (never rendered), and what the writer understood. */
+.instructions-text, .instructions-input { font-family: var(--mono); font-size: calc(12.5px * var(--fs)); }
+.instructions-text {
+  margin: 0; padding: calc(10px * var(--density)); max-height: 18em; overflow: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  background: var(--surface-2); border-radius: var(--radius-sm); color: var(--text-1);
+}
+.instructions-input { width: 100%; resize: vertical; overflow: auto; }
+.instructions-scopes { flex-wrap: wrap; }
+.scope-dot { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+.instructions-parent summary { cursor: pointer; }
+.settings-sub { margin: calc(8px * var(--density)) 0 4px; font-size: calc(13px * var(--fs)); font-weight: 600; }
+.instructions-list { margin: 0; padding-left: 1.2em; display: grid; gap: 2px; }
+.instructions-guide summary { cursor: pointer; font-size: calc(13px * var(--fs)); color: var(--text-2); }
+.instructions-guide[open] { display: grid; gap: calc(6px * var(--density)); }
+.instructions-guide .btn { justify-self: start; }
 .danger-card { border-color: var(--danger-soft); }
 
 /* Settings tabs reuse the segmented pill; NavLink renders an <a>. */
@@ -1361,6 +1388,20 @@ ol.rt-list > li::before {
   font-size: calc(12.5px * var(--fs));
 }
 .banner .gen-excluded { flex-basis: 100%; margin: 4px 0 0; }
+/* What produced the run: collapsed, for a reviewer */
+.gen-details {
+  margin: 0 0 calc(10px * var(--density));
+  font-size: calc(12.5px * var(--fs));
+}
+.gen-details summary { cursor: pointer; width: fit-content; }
+.gen-details dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 6px 0 0;
+}
+.gen-details dt { font-weight: 600; }
+.gen-details dd { margin: 0; overflow-wrap: anywhere; }
 /* Notes tab before a summary exists */
 .gen-empty {
   display: flex;
@@ -1627,6 +1668,17 @@ li:hover > span > .line-comment, p:hover > .line-comment, .line-comment:focus-vi
 .ai-preview summary { cursor: pointer; font-weight: 600; }
 .ai-preview-head { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
 .ai-preview-text { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; font-size: calc(12px * var(--fs)); max-height: 360px; overflow: auto; }
+.ai-preview-call { margin: 10px 0 0; }
+.ai-preview-call-h {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+  margin: 0 0 4px;
+}
+.ai-preview-code { margin: 12px 0 0; }
+.ai-acceptance { margin: 8px 0 0; padding-left: 18px; font-size: calc(12.5px * var(--fs)); }
+
 .ai-search { display: flex; gap: 8px; }
 .ai-search .input { flex: 1; }
 .ai-hits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -1650,3 +1702,33 @@ li:hover > span > .line-comment, p:hover > .line-comment, .line-comment:focus-vi
   .ai-compare-grid { grid-template-columns: 1fr; }
   .ai-pane[data-shown="false"] { display: none; }
 }
+
+/* Section navigator: short marks on the right edge, one per headed section; hovering opens
+   the list of headings. Hidden on narrow windows, where the note fills the width. */
+.section-nav {
+  position: fixed; right: calc(14px * var(--density)); top: 28vh; z-index: 30;
+  display: flex; align-items: flex-start;
+}
+.section-nav-rail { display: flex; flex-direction: column; gap: 10px; padding: 6px 4px; cursor: pointer; }
+.section-nav-mark { display: block; width: 16px; height: 2px; border-radius: 1px; background: var(--line); transition: background var(--t-fast) var(--ease); }
+.section-nav-mark.on { background: var(--text-1); }
+.section-nav-card {
+  position: absolute; top: -12px; right: 0;
+  width: 260px; max-height: 60vh; overflow-y: auto;
+  margin: 0; padding: calc(10px * var(--density)); list-style: none;
+  background: var(--surface); border: var(--hairline) solid var(--line-2);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-3);
+  opacity: 0; visibility: hidden; transform: translateX(6px);
+  transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease), visibility var(--t-fast);
+}
+.section-nav.open .section-nav-card { opacity: 1; visibility: visible; transform: none; }
+.section-nav-card button {
+  display: block; width: 100%; text-align: left; border: 0; background: none; cursor: pointer;
+  padding: 6px 10px; border-radius: var(--radius-sm);
+  font: inherit; font-size: calc(13.5px * var(--fs)); line-height: 1.35; color: var(--text-3);
+}
+.section-nav-card button:hover, .section-nav-card button:focus-visible { background: var(--surface-hover); color: var(--text-1); outline: none; }
+.section-nav-card button.on { color: var(--accent-text); }
+.doc-section { scroll-margin-top: calc(var(--topbar-h) + 16px); }
+.doc-section.nav-target { background: var(--accent-soft); border-radius: var(--radius-sm); transition: background var(--t-fast) var(--ease); }
+@media (max-width: 1023px) { .section-nav { display: none; } }

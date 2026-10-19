@@ -133,5 +133,16 @@ AI_PROFILE_VERSION_SAVED: Final = "ai.profile_version_saved"  # profile_id, vers
 AI_PROFILE_ACTIVATED: Final = "ai.profile_activated"  # version_id, previous_version_id, revision
 AI_EXPERIMENT_STARTED: Final = "ai.experiment_started"  # sources, candidates, repetitions
 AI_EXPERIMENT_CANCELLED: Final = "ai.experiment_cancelled"  # runs_cancelled
+# ── Note instructions (N1) ──────────────────────────────────────────
+# Scope, version and counts; never the text, a guidance line or a term.
+AI_INSTRUCTIONS_CHANGED: Final = (
+    "ai.instructions_changed"  # scope, version, chars, compile_status, not_applied, dials
+)
+AI_INSTRUCTIONS_CLEARED: Final = "ai.instructions_cleared"  # scope, version
+# N4 — one note's instructions ("Write this note differently"): counts only, target = note.
+NOTE_INSTRUCTIONS_CHANGED: Final = (
+    "note.instructions_changed"  # chars, compile_status, not_applied, dials, base scopes
+)
+NOTE_INSTRUCTIONS_CLEARED: Final = "note.instructions_cleared"  # (no payload keys)
 BILLING_PLAN_CHANGED: Final = "billing.plan_changed"  # from_plan, to_plan, provider
 BILLING_CODE_REDEEMED: Final = "billing.code_redeemed"  # from_plan, to_plan, days

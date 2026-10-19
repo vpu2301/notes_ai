@@ -31,6 +31,8 @@ KEY_DATES: Final[Role] = "key_dates"
 # The figures a recording gave, and what it asks its audience to do.
 SPECIFICATIONS: Final[Role] = "specifications"
 CONTACT: Final[Role] = "contact"
+# Sprint B4 — claims the recording relays, with the speaker's verdict, as a table.
+CLAIMS: Final[Role] = "claims"
 
 ROLES: Final[tuple[Role, ...]] = (
     SUMMARY,
@@ -50,6 +52,7 @@ ROLES: Final[tuple[Role, ...]] = (
     KEY_DATES,
     SPECIFICATIONS,
     CONTACT,
+    CLAIMS,
 )
 
 # Section ids of templates written before roles existed; anything else is `custom`.
@@ -80,6 +83,7 @@ _BY_ID: Final[dict[str, Role]] = {
     # Not "contact": templates already use that id for the attendee block.
     "specifications": SPECIFICATIONS,
     "call_to_action": CONTACT,
+    "claims": CLAIMS,
 }
 
 

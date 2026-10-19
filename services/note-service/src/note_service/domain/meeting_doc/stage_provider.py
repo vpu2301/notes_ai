@@ -7,6 +7,7 @@ an unset one leaves the pipeline's own value. Everything else is the inner provi
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from typing import Any
 
 
@@ -55,7 +56,8 @@ class StageProvider:
 
 class Metered:
     """Counts what one run spent, per call: the backend and model that actually
-    answered, tokens, latency, and failures by kind. Numbers and names only."""
+    answered, tokens, latency, failures by kind, and the sha256 of the system text it
+    sent (P1-01: compared with the resolver's). Numbers, names and hashes only."""
 
     def __init__(self, inner: Any, *, stage: str) -> None:
         self._inner = inner
@@ -63,6 +65,8 @@ class Metered:
         self.calls: list[dict[str, Any]] = []
 
     async def complete(self, *args: Any, **kwargs: Any) -> Any:
+        system = kwargs.get("system")
+        sent = hashlib.sha256(system.encode("utf-8")).hexdigest() if system else None
         try:
             result = await self._inner.complete(*args, **kwargs)
         except Exception as exc:
@@ -73,6 +77,7 @@ class Metered:
                     "model_id": getattr(self._inner, "model_id", None),
                     "ok": False,
                     "error_kind": str(getattr(exc, "kind", type(exc).__name__)),
+                    "system_sha": sent,
                 }
             )
             raise
@@ -82,6 +87,7 @@ class Metered:
                 "backend": getattr(self._inner, "backend", None),
                 "model_id": getattr(self._inner, "model_id", None),
                 "ok": True,
+                "system_sha": sent,
                 "input_tokens": int(getattr(result, "input_tokens", 0) or 0),
                 "output_tokens": int(getattr(result, "output_tokens", 0) or 0),
                 "latency_ms": int(getattr(result, "latency_ms", 0) or 0),

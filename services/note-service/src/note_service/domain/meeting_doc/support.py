@@ -402,6 +402,10 @@ def _body(text: str) -> str:
     return re.sub(r"^\s*(?:#{1,6}\s+|[-*]\s+)", "", text)
 
 
+# Languages that capitalise every noun: a capital letter there is no sign of a name.
+NOUNS_CAPITALISED: Final = frozenset({"de"})
+
+
 def names_in(text: str) -> list[str]:
     """Capitalised non-initial tokens (German nouns included, compared by stem)."""
     body = _body(text)
@@ -460,16 +464,19 @@ MODALITY_MARKERS: Final[dict[str, tuple[str, ...]]] = {
         "wahrscheinlich", "vermutlich", "voraussichtlich", "geplant", "erwartet", "könnte",
         "dürfte", "laut", "schätzung", "geschätzt", "unbestätigt", "nicht bestätigt",
         "vorschlag", "vorgeschlagen", "vorwurf", "einschätzung", "prognose",
+        "behauptung", "behauptet", "unbelegt", "nicht belegt", "widerlegt",
     ),
     "en": (
         "likely", "probably", "expected", "planned", "estimated", "estimate", "could",
         "may", "reportedly", "unconfirmed", "according to", "proposal", "proposed",
         "allegation", "alleged", "opinion", "forecast",
+        "claim", "claims", "claimed", "unsubstantiated", "unproven", "refuted", "disproven",
     ),
     "uk": (
         "ймовірно", "очікується", "очікувано", "планується", "за словами", "за оцінками",
         "непідтверджено", "оцінка", "пропозиція", "запропоновано", "звинувачення", "думка",
-        "прогноз",
+        "прогноз", "твердження", "стверджує", "стверджується", "не підтверджено",
+        "непідтвердженим", "спростовано",
     ),
 }  # fmt: skip
 
@@ -478,28 +485,284 @@ CERTAINTY_PHRASES: Final[dict[str, dict[str, str]]] = {
     "de": {
         "prediction": "Voraussichtlich", "estimate": "Schätzung", "proposal": "Vorschlag",
         "allegation": "Vorwurf", "opinion": "Einschätzung",
+        "reported": "Behauptung", "unproven": "Behauptung — unbelegt",
     },
     "en": {
         "prediction": "Expected", "estimate": "Estimate", "proposal": "Proposal",
         "allegation": "Allegation", "opinion": "Opinion",
+        "reported": "Claim", "unproven": "Claim — unsubstantiated",
     },
     "uk": {
         "prediction": "Очікувано", "estimate": "Оцінка", "proposal": "Пропозиція",
         "allegation": "Звинувачення", "opinion": "Думка",
+        "reported": "Твердження", "unproven": "Твердження — непідтверджено",
     },
 }  # fmt: skip
 
 # The actor suffix: "— laut Reinbold", "(Vorschlag: Söder)".
 ACCORDING_TO: Final[dict[str, str]] = {"de": "laut", "en": "according to", "uk": "за словами"}
 UNSURE_CERTAINTIES: Final[frozenset[str]] = frozenset(
-    {"opinion", "prediction", "estimate", "proposal", "allegation"}
+    {"opinion", "prediction", "estimate", "proposal", "allegation", "reported", "unproven"}
 )
+
+# ── B2 T4: the speaker's verdict on a relayed claim ──
+# ``refuted`` is not unsure (the verdict is firm), but a line resting on an unproven or
+# refuted claim must carry that verdict; code appends the suffix when the words lack it.
+VERDICT_CERTAINTIES: Final[frozenset[str]] = frozenset({"unproven", "refuted"})
+VERDICT_SUFFIX: Final[dict[str, dict[str, str]]] = {
+    "de": {"unproven": "— unbelegt", "refuted": "— widerlegt"},
+    "en": {"unproven": "— unsubstantiated", "refuted": "— refuted"},
+    "uk": {"unproven": "— непідтверджено", "refuted": "— спростовано"},
+}
+VERDICT_WORDS: Final[dict[str, dict[str, tuple[str, ...]]]] = {
+    "de": {
+        "unproven": ("unbelegt", "nicht belegt", "unbestätigt", "nicht nachgewiesen", "nicht bewiesen"),
+        "refuted": ("widerlegt", "falsch", "nicht zutreffend", "entkräftet"),
+    },
+    "en": {
+        "unproven": ("unsubstantiated", "unproven", "unconfirmed", "not proven", "no evidence"),
+        "refuted": ("refuted", "disproven", "debunked", "false", "not the case"),
+    },
+    "uk": {
+        "unproven": ("непідтверджено", "не підтверджено", "бездоказово", "без доказів"),
+        "refuted": ("спростовано", "хибне", "неправда", "не відповідає дійсності"),
+    },
+}  # fmt: skip
+
+
+# B4 — the claims table: the verdict cell's label per certainty, the words that carry a
+# presenter's verdict in a quote (the verdict words plus the "rare / according to" forms),
+# and the table head.
+VERDICT_LABELS: Final[dict[str, dict[str, str]]] = {
+    "de": {"reported": "Behauptung", "unproven": "unbelegt", "refuted": "widerlegt"},
+    "en": {"reported": "Claim", "unproven": "unsubstantiated", "refuted": "refuted"},
+    "uk": {"reported": "Твердження", "unproven": "непідтверджено", "refuted": "спростовано"},
+}
+_VERDICT_CLAUSE_WORDS: Final[dict[str, tuple[str, ...]]] = {
+    "de": ("selten", "laut", "zufolge", "nach einschätzung", "studien"),
+    "en": ("rare", "rarely", "according to", "studies", "research shows"),
+    "uk": ("рідко", "за даними", "згідно з", "дослідження"),
+}
+CLAIMS_HEAD: Final[dict[str, tuple[str, str, str, str]]] = {
+    "en": ("Who", "Claim", "Speaker's verdict", "Evidence"),
+    "de": ("Wer", "Behauptung", "Urteil der Sprecherin", "Beleg"),
+    "uk": ("Хто", "Твердження", "Вердикт мовця", "Доказ"),
+}
+_CLAUSE_SPLIT: Final = re.compile(r"\s*(?:[.!?;:—–]|,\s|\s-\s)\s*")
+VERDICT_CLAUSE_MAX_CHARS: Final = 80
+
+
+def verdict_clause(quote: str, language: str) -> str:
+    """The shortest clause of ``quote`` that carries a verdict word (``unbelegt``,
+    ``widerlegt``, ``selten``, ``laut …``), capped at 80 characters; empty when none."""
+    lang = language if language in VERDICT_WORDS else "en"
+    words = [w for kind in VERDICT_WORDS[lang].values() for w in kind]
+    words += list(_VERDICT_CLAUSE_WORDS.get(lang, ()))
+    best = ""
+    for clause in _CLAUSE_SPLIT.split(quote):
+        clause = clause.strip(" \"„“”«»'")
+        if not clause:
+            continue
+        folded = _fold(clause)
+        if any(re.search(rf"(?<!\w){re.escape(w)}(?!\w)", folded) for w in words) and (
+            not best or len(clause) < len(best)
+        ):
+            best = clause
+    return best[:VERDICT_CLAUSE_MAX_CHARS].rstrip() if best else ""
+
+
+def has_verdict(text: str, kind: str | None, language: str) -> bool:
+    """True when ``text`` carries the words of the speaker's verdict for ``kind``
+    (``unproven`` / ``refuted``); True for any other kind, which needs none."""
+    if kind not in VERDICT_CERTAINTIES:
+        return True
+    lang = language if language in VERDICT_WORDS else "en"
+    folded = _fold(text)
+    return any(
+        re.search(rf"(?<!\w){re.escape(w)}(?!\w)", folded) for w in VERDICT_WORDS[lang][kind]
+    )
+
+
+def with_verdict(text: str, kind: str | None, language: str) -> str:
+    """``text`` with the verdict suffix (``"… — unbelegt"``) when it lacks the verdict."""
+    if kind not in VERDICT_CERTAINTIES or has_verdict(text, kind, language):
+        return text
+    lang = language if language in VERDICT_SUFFIX else "en"
+    return f"{text.rstrip('. ')} {VERDICT_SUFFIX[lang][kind]}"
 
 
 def has_marker(text: str, language: str) -> bool:
     folded = _fold(text)
     markers = MODALITY_MARKERS.get(language) or MODALITY_MARKERS["en"]
     return any(re.search(rf"(?<!\w){re.escape(m)}(?!\w)", folded) for m in markers)
+
+
+# ── B1 T1/T5: a certainty once, as a clause; a holder in the right case ──
+
+# A label a code path put before a sentence ("Vorschlag — …", "Vorwurf: …").
+_CERTAINTY_PREFIX: Final = re.compile(
+    r"^\s*(?:"
+    + "|".join(re.escape(p) for by_kind in CERTAINTY_PHRASES.values() for p in by_kind.values())
+    + r")\s*[—–:-]\s*",
+    re.IGNORECASE,
+)
+
+
+def strip_certainty_prefix(text: str) -> str:
+    """``"Vorschlag — X"`` → ``"X"``, however many labels were stacked."""
+    out = text
+    while True:
+        new = _CERTAINTY_PREFIX.sub("", out, count=1)
+        if new == out:
+            return out
+        out = new
+
+
+# The clause form of a certainty for prose (rung 3): one marker, in the grammar of the
+# language; every clause carries a word of MODALITY_MARKERS so the line gate reads it.
+CERTAINTY_CLAUSES: Final[dict[str, dict[str, str]]] = {
+    "de": {
+        "proposal": "Vorgeschlagen wurde, {text}", "allegation": "Ein Vorwurf lautet, {text}",
+        "prediction": "Voraussichtlich {text}", "estimate": "Geschätzt {text}",
+        "opinion": "Nach einer Einschätzung {text}",
+        "reported": "Behauptet wird, {text}", "unproven": "Unbelegt ist die Behauptung, {text}",
+        "refuted": "Widerlegt ist die Behauptung, {text}",
+    },
+    "en": {
+        "proposal": "It was proposed that {text}", "allegation": "It is alleged that {text}",
+        "prediction": "It is expected that {text}", "estimate": "It is estimated that {text}",
+        "opinion": "In the speaker's opinion, {text}",
+        "reported": "It is claimed that {text}",
+        "unproven": "It is an unsubstantiated claim that {text}",
+        "refuted": "It is a refuted claim that {text}",
+    },
+    "uk": {
+        "proposal": "Запропоновано, що {text}", "allegation": "Звинувачення полягає в тому, що {text}",
+        "prediction": "Очікується, що {text}", "estimate": "За оцінками, {text}",
+        "opinion": "Є думка, що {text}",
+        "reported": "Стверджується, що {text}",
+        "unproven": "Непідтвердженим є твердження, що {text}",
+        "refuted": "Спростовано твердження, що {text}",
+    },
+}  # fmt: skip
+
+
+def certainty_clause(
+    kind: str | None, text: str, language: str, *, actor: str | None = None
+) -> str:
+    """A hedged statement as one sentence carrying its certainty once: with a holder
+    the text does not name, ``"{text} — laut {holder}"``; else the language's clause
+    (``"Vorgeschlagen wurde, …"``). A sure statement, or one that already carries a
+    marker, is returned as it is — never a second label. A relayed claim the speaker
+    judged (``unproven``, ``refuted``) carries that verdict (B2 T4)."""
+    lang = language if language in CERTAINTY_CLAUSES else "en"
+    body = strip_certainty_prefix(text).strip()
+    verdict = kind in VERDICT_CERTAINTIES
+    if not body or (kind not in UNSURE_CERTAINTIES and not verdict):
+        return body
+    if kind in UNSURE_CERTAINTIES and not has_marker(body, lang):
+        who = display_actor(actor, lang)
+        template = CERTAINTY_CLAUSES[lang].get(kind)
+        if who and not names_actor(body, who):
+            body = f"{body.rstrip('.')} — {according_to(who, lang)}"
+        elif template:
+            if lang != "de":
+                first = body.split()[0]
+                if _fold(first) in stop_words(lang):
+                    body = first.lower() + body[len(first) :]
+            body = template.format(text=body)
+    return with_verdict(body, kind, lang) if verdict else body
+
+
+# The dative after "laut" for the holders a note writes most: roles and groups.
+# A proper name is never changed.
+_DATIVE_EXACT: Final[dict[str, str]] = {
+    "politische beobachter": "politischen Beobachtern", "beobachter": "Beobachtern",
+    "experten": "Experten", "kritiker": "Kritikern", "analysten": "Analysten",
+    "umfragen": "Umfragen", "medien": "Medien", "die medien": "den Medien",
+    "die regierung": "der Regierung", "die partei": "der Partei",
+    "die opposition": "der Opposition", "die polizei": "der Polizei",
+    "die behörden": "den Behörden", "das unternehmen": "dem Unternehmen",
+    "die demokraten": "den Demokraten", "die republikaner": "den Republikanern",
+    "demokraten": "Demokraten", "republikaner": "Republikanern",
+}  # fmt: skip
+
+
+def _dative_plural_noun(noun: str) -> str:
+    if noun.endswith("n") or noun.endswith("s"):
+        return noun
+    if noun.endswith(("er", "el", "e")):
+        return noun + "n"
+    return noun
+
+
+def dative(actor: str, language: str) -> str:
+    """The holder as it stands after "laut": a role or group noun in the dative
+    ("politische Beobachter" → "politischen Beobachtern", "die Regierung" → "der
+    Regierung"); a proper name, or anything the table does not cover, unchanged."""
+    if language != "de":
+        return actor
+    phrase = " ".join(actor.split())
+    exact = _DATIVE_EXACT.get(_fold(phrase))
+    if exact:
+        return exact
+    words = phrase.split()
+    # A lower-case adjective on a plural noun: both take the dative ending.
+    if (
+        len(words) == 2
+        and words[0][:1].islower()
+        and words[0].endswith("e")
+        and words[1][:1].isupper()
+    ):
+        adjective, noun = words
+        return f"{adjective}n {_dative_plural_noun(noun)}"
+    return phrase
+
+
+def according_to(actor: str, language: str) -> str:
+    """``laut politischen Beobachtern``, ``according to Reinbold``."""
+    lang = language if language in ACCORDING_TO else "en"
+    return f"{ACCORDING_TO[lang]} {dative(actor, lang)}"
+
+
+# ── B1 T2: a heading from a statement ───────────────────────────────
+
+_CLAUSE_END: Final = re.compile(r"\s*(?:[,;:(—–]|\s-\s)")
+_LEADING_ARTICLES: Final[dict[str, frozenset[str]]] = {
+    "de": frozenset({"der", "die", "das", "ein", "eine", "einen", "einem", "einer", "eines", "dem", "den", "des"}),
+    "en": frozenset({"a", "an", "the"}),
+    "uk": frozenset(),
+}  # fmt: skip
+HEADING_WORDS_MIN: Final = 3
+HEADING_WORDS_MAX: Final = 8
+# The document standard's heading length (doclint.HEADING_MAX_CHARS reads the same value).
+HEADING_MAX_CHARS: Final = 60
+
+
+def noun_phrase(text: str, language: str, *, max_words: int = HEADING_WORDS_MAX) -> str:
+    """A heading from a statement, mechanically: its first clause, a leading article
+    and a certainty label off, trailing function words off, three to ``max_words`` words
+    (the standard's eight, or a workspace's shorter dial). Empty when fewer than three
+    words remain — never a bare name, never a stamp."""
+    body = strip_certainty_prefix(_body(text)).strip()
+    body = _CLAUSE_END.split(body, 1)[0].strip()
+    words = body.split()
+    articles = _LEADING_ARTICLES.get(language, frozenset())
+    while words and _fold(words[0]) in articles:
+        words.pop(0)
+    words = words[: max(HEADING_WORDS_MIN, max_words)]
+    stops = stop_words(language)
+    while words and _fold(words[-1].strip(".!?;:,")) in stops:
+        words.pop()
+    # The standard's length: shorter from the end, never below three words.
+    while len(words) > HEADING_WORDS_MIN and len(" ".join(words)) > HEADING_MAX_CHARS:
+        words.pop()
+        while words and _fold(words[-1].strip(".!?;:,")) in stops:
+            words.pop()
+    if len(words) < HEADING_WORDS_MIN or len(" ".join(words)) > HEADING_MAX_CHARS:
+        return ""
+    out = " ".join(words).rstrip(".!?;:,")
+    return out[:1].upper() + out[1:]
 
 
 def names_actor(text: str, actor: str) -> bool:
@@ -857,23 +1120,30 @@ def real_name(name: str | None) -> str | None:
 # ── Claims a word gate cannot vouch for ─────────────────────────────
 
 # Conditions, negations, comparisons, promises and modality: one changed word inverts
-# the claim while every other word still overlaps. Matched on the folded text.
+# the claim while every other word still overlaps. Matched on the folded text. Routing
+# only (what is meaning-checked), never the correctness gate: F1-03 polarity pairs too.
 _RISK_WORDS: Final[dict[str, re.Pattern[str]]] = {
     "en": re.compile(
         r"\b(?:if|unless|only|provided|both|either|neither|not|no|never|none|nobody|without|"
         r"more|less|fewer|than|most|least|higher|lower|promise[sd]?|pledge[sd]?|vow(?:s|ed)?|"
+        r"better|worse|best|worst|improv\w*|worsen\w*|increas\w*|decreas\w*|support\w*|"
+        r"oppos\w*|approv\w*|reject\w*|den(?:y|ies|ied)|"
         r"guarantee[sd]?|will|would|could|might|may|must|should|"
         r"thousands?|millions?|billions?|trillions?|percent|dollars?|euros?)\b"
     ),
     "de": re.compile(
         r"\b(?:wenn|falls|sofern|nur|beide[nmrs]?|sowohl|weder|nicht|kein(?:e[nmrs]?)?|nie|niemals|"
         r"ohne|mehr|weniger|als|höher|niedriger|versprech\w*|versprich\w*|versproch\w*|"
+        r"besser\w*|schlechter\w*|beste[nmrs]?|schlechteste\w*|verbesser\w*|verschlechter\w*|"
+        r"unterstütz\w*|lehn\w*|abgelehnt|genehmig\w*|zugestimmt|stimm\w*|"
         r"zusag\w*|garantier\w*|wird|werden|würde[nt]?|könnte[nt]?|kann|soll(?:te)?|muss|müsste|"
         r"tausend\w*|million\w*|milliard\w*|billion\w*|prozent|dollar|euro)\b"
     ),
     "uk": re.compile(
         r"(?<!\w)(?:якщо|якби|лише|тільки|обидва|обидві|не|ні|ніколи|жоден|без|більше|менше|ніж|"
         r"обіця\w*|пообіця\w*|гарант\w*|буде|будуть|би|може|можуть|мусить|має|"
+        r"кращ\w*|гірш\w*|найкращ\w*|найгірш\w*|покращ\w*|погірш\w*|підтрим\w*|"
+        r"проти|відхил\w*|схвал\w*|"
         r"тисяч\w*|мільйон\w*|мільярд\w*|трильйон\w*|відсот\w*|долар\w*|євро)(?!\w)"
     ),
 }

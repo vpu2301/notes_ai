@@ -57,7 +57,20 @@ def test_risk_is_read_from_the_claim_and_from_its_quote() -> None:
     assert support.high_risk("Tausende Menschen kamen.", "de")
     assert support.high_risk("Trump könnte die Kompetenzen ausreizen.", "de")
     assert support.high_risk("Нам не потрібні генератори.", "uk")
-    assert not support.high_risk("The board approved the budget for Leeds.", "en")
+    assert not support.high_risk("The board met in Leeds.", "en")
+    # F1-03: polarity and comparison words route both directions of a pair to the check.
+    for claim, language in (
+        ("The board approved the budget for Leeds.", "en"),
+        ("Die Lage ist besser.", "de"),
+        ("Die Lage ist schlechter.", "de"),
+        ("Es kamen mehr Menschen.", "de"),
+        ("Es kamen weniger Menschen.", "de"),
+        ("She supports the plan.", "en"),
+        ("She opposes the plan.", "en"),
+        ("Ситуація краща.", "uk"),
+        ("Ситуація гірша.", "uk"),
+    ):
+        assert support.high_risk(claim, language), claim
     # The dropped negation is in the quote, not the claim: the quote makes it risky.
     [kept] = _verify(_fact("The board approved the budget increase for Leeds."), fidelity=True)
     assert verify.MEANING_PENDING in kept.flags
@@ -206,7 +219,7 @@ def test_a_holder_is_written_whole_and_a_number_never() -> None:
 def test_a_framing_sentence_is_not_labelled_as_a_claim() -> None:
     fact = _opinion("Politische Beobachter")
     ctx = doclint.LintContext(language="de", speech_ms=60_000, facts={fact.item_key: fact})
-    framing = Line("Podcast-Folge über die Midterm-Wahlen.", "framing", (fact.item_key,))
+    framing = Line("Sendung über die Midterm-Wahlen.", "framing", (fact.item_key,))
     summary = Line("Die Lage ist ernst.", "summary", (fact.item_key,))
     assert not doclint._certainty_missing(framing, ctx)
     assert doclint._certainty_missing(summary, ctx)
@@ -255,10 +268,9 @@ def test_composed_prose_has_no_connectives_under_fidelity() -> None:
         )
         for n in range(4)
     ]
-    with_leads = overview.composed_sentences(facts, language="de")
-    without = overview.composed_sentences(facts, language="de", connectives=False)
-    assert with_leads[0][0].startswith("Zunächst —")
-    assert not any(s.startswith(tuple(overview.CONNECTIVES["de"])) for s, _ids in without)
+    # B1 T1: rung 3 never writes a sequence, fidelity or not.
+    without = overview.composed_sentences(facts, language="de")
+    assert not any(s.startswith(("Zunächst", "Anschließend", "Schließlich")) for s, _ids in without)
 
 
 # ── S2-03: merge without losing conditions ──────────────────────────
@@ -402,6 +414,8 @@ def test_a_fallback_heading_names_the_theme_its_facts_carry_not_a_voice() -> Non
         frozenset({"Trump"}),
         themes=("Zölle und Inflation", "Briefwahl und Manipulation"),
     )
-    assert themed == "08:24 — Briefwahl und Manipulation"
-    # No theme the facts carry: the old heading.
-    assert "Briefwahl und" not in compose.fallback_heading(facts, "de", frozenset({"Trump"}))
+    assert themed == "Briefwahl und Manipulation"
+    # No theme the facts carry: the block's claim, never a stamp and a name.
+    plain = compose.fallback_heading(facts, "de", frozenset({"Trump"}))
+    assert plain != "Briefwahl und Manipulation" and plain != "Trump"
+    assert not plain.startswith("08:24")

@@ -13,7 +13,7 @@ import re
 import time
 from collections import Counter
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Final, Protocol
 
@@ -22,6 +22,7 @@ from . import (
     compose,
     doclint,
     entities,
+    final_check,
     numbers,
     overview,
     prompts,
@@ -29,12 +30,14 @@ from . import (
     roles,
     roles_table,
     schema,
+    styling,
     support,
     types,
     verify,
     windows,
 )
 from . import merge as merge_rules
+from .stage_provider import StageProvider
 from .verify import MEANING_UNVERIFIED, PARAPHRASE_UNSUPPORTED, VerifiedFact
 from .windows import Window
 
@@ -138,6 +141,11 @@ class DocumentResult:
     """What became of every extracted fact (lines, languages, outcomes); for a
     replay, never stored."""
     trace: list[verify.FactTrace] = field(default_factory=list, repr=False, compare=False)
+    """F1-02: the last check before writing (:func:`finalize`); None when it does not run.
+    Not data; never stored."""
+    finalizer: Any = field(default=None, repr=False, compare=False)
+    """Generated lines the last check kept out of the asserted prose, for review."""
+    final_rejected: list[final_check.Rejected] = field(default_factory=list)
 
     @property
     def partial(self) -> bool:
@@ -200,6 +208,10 @@ async def run(
     instructions: dict[str, str] | None = None,
     stage_providers: dict[str, ChatLike] | None = None,
     length: str = "standard",
+    final: bool = False,
+    profile: Any | None = None,
+    params: Any | None = None,
+    writing_style: str = "business",
 ) -> DocumentResult:
     """Build a document from an ASR result.
 
@@ -209,6 +221,15 @@ async def run(
     across languages is checked by meaning (:func:`_confirm_meaning`). ``fidelity`` (only
     with ``multilingual``): high-risk claims are checked by meaning too and repaired once,
     a narrator's view stays the narrator's, and composed prose invents no sequence.
+    ``final`` (only with ``fidelity``): :func:`finalize` checks every asserted line against
+    the transcript before it is written (F1-02); the caller runs it after doclint.
+    ``profile`` (N2): a workspace's ``WritingProfile`` — FORM only (length, caps, sections
+    left out, a style block for the compose prompts); None or empty changes nothing.
+    ``params`` (N0): the workspace's ``ModelParams``, already capped by the backend — the
+    compose and detail calls' temperature, the context the windows are sized for, the
+    writing calls' output budget and the facts per window; extraction and every check
+    stay at temperature 0.0. ``writing_style`` (N0): its line and code defaults, under the
+    profile's dials. None and ``business``: today's run.
 
     ``instructions`` (a profile, S3): ``{stage: rendered task text}`` in place of the
     bundled extraction/composition/verification text; the contract stays. ``stage_providers``:
@@ -225,9 +246,15 @@ async def run(
     staged = stage_providers or {}
     composer = staged.get("composition", provider)
     verifier = staged.get("verification", provider)
+    # The final check runs on the verification binding; its own entry only meters it apart.
+    final_verifier = staged.get("final_check", verifier)
     provider = staged.get("extraction", provider)
     language = output_language or language
     fidelity = fidelity and multilingual
+    final = final and fidelity
+    style = styling.build(profile, writing_style)
+    # A profile's length wins over a prompt profile's; one scale for budget and linter.
+    scale = style.effective_scale(compose.LENGTH_SCALE.get(length, 1.0))
     # 05-prompt-instructions.md: common rules + stage texts over every builder's own rules,
     # a profile's text in place of a bundled one. Off: the previous prompts, byte for byte.
     task_texts = prompts.task(language, length, overrides=texts) if multilingual else None
@@ -235,7 +262,16 @@ async def run(
     noise_reasons = schema.OFFERED_NOISE_REASONS if multilingual else schema.NOISE_REASONS
     family = family or types.FALLBACK
     small = small_model(provider)
-    sizes = sizes_for(provider)
+    # B2: a narrated family gets the addenda and, on a capable backend, the outline step.
+    narrated = family.meeting_type in render.NARRATED_FAMILIES
+    sizes = sized(sizes_for(provider, getattr(params, "context_window_tokens", None)), params)
+    # N0: the workspace's temperature on the compose and detail calls only. A stage the
+    # AI-notes profile pins keeps its own (the inner StageProvider replaces it).
+    temperature = float(getattr(params, "temperature", 0.0) or 0.0)
+    detailer = provider
+    if temperature:
+        composer = StageProvider(composer, stage="composition", temperature=temperature)
+        detailer = StageProvider(provider, stage="details", temperature=temperature)
     kinds = types.fact_kinds(family)
     # `user_point` is the author's own; the engine never proposes one.
     offered = tuple(k for k in kinds if k != "user_point")
@@ -308,6 +344,7 @@ async def run(
                 small=small,
                 multilingual=multilingual,
                 task=task_texts,
+                narrated=narrated,
             )
 
     extracted_windows = await asyncio.gather(*(one(w) for w in built))
@@ -445,15 +482,15 @@ async def run(
         out.windows_done += 1
         per_window[window.index]["facts_extracted"] = len(extracted.facts)
         asked, twins = await _figure_details(
-            provider, window, extracted, language, promote=schema.FIGURE in offered
+            detailer, window, extracted, language, promote=schema.FIGURE in offered
         )
         details_asked += asked
         if schema.NEXT_STEP in offered:
             twins += _contact_twins(extracted, language)
             twins += await _contact_details(
-                provider, window, [*extracted.facts, *twins], language, contact_hints(window)
+                detailer, window, [*extracted.facts, *twins], language, contact_hints(window)
             )
-        await _person_details(provider, window, extracted, language)
+        await _person_details(detailer, window, extracted, language)
         kept = await check([*extracted.facts, *twins], window, stats)
         if tables:
             # A verified figure replaces its key point only where figures are tabled.
@@ -482,6 +519,7 @@ async def run(
                 small=small,
                 multilingual=multilingual,
                 task=task_texts,
+                narrated=narrated,
             )
             second = await check(again.facts, window, verify.VerifyStats()) if again else []
             kept, replaced = restated(kept, second)
@@ -558,6 +596,7 @@ async def run(
                 small=small,
                 multilingual=multilingual,
                 task=task_texts,
+                narrated=narrated,
             )
         if again is None:
             return []
@@ -583,18 +622,62 @@ async def run(
         return kept
 
     jobs = []
+    # Every window a fact can come from, by index: the final check finds its lines here.
+    pool = {w.index: w for w in built}
     for k in retry_thirds:
         third_turns = [t for t in turns if bounds[k] <= t.start_ms < bounds[k + 1]]
         for i, window in enumerate(
             windows.build_windows(third_turns, max_chars=sizes.window_chars)
         ):
-            jobs.append(
-                reread(k, dataclasses.replace(window, index=COVERAGE_WINDOW_BASE + 100 * k + i))
-            )
+            retry_window = dataclasses.replace(window, index=COVERAGE_WINDOW_BASE + 100 * k + i)
+            pool[retry_window.index] = retry_window
+            jobs.append(reread(k, retry_window))
         coverage_retry.append(k + 1)
     for kept in await asyncio.gather(*jobs):
         coverage_retry_facts += len(kept)
         verified.extend(kept)
+
+    recovery: Counter[str] = Counter()
+    if fidelity:
+        # F2-03: a promise, a condition or an amount no writable fact came from is asked
+        # for once, line by line; what comes back passes every check like any fact.
+        targets = recovery_targets(built, verified, recording_language)
+        recovery["lines"] = sum(len(lines) for _w, lines in targets)
+        for window, lines in targets:
+            allowance = fact_budget(window, sizes.max_facts_budget)
+            recovery["calls"] += 1
+            again = await _extract(
+                provider,
+                window,
+                language,
+                schema.extract_schema(
+                    offered,
+                    judgement_fields=family.judgement_fields,
+                    carried_items=len(carried),
+                    max_facts=allowance,
+                    noise=not small,
+                    noise_reasons=noise_reasons,
+                ),
+                carried=carried,
+                max_facts=allowance,
+                max_tokens=extract_tokens(allowance),
+                system_suffix=prompts.recovery_suffix(language, lines),
+                small=small,
+                multilingual=multilingual,
+                task=task_texts,
+                narrated=narrated,
+            )
+            if again is None:
+                recovery["failed"] += 1
+                continue
+            on_lines = [f for f in again.facts if f.turn in lines]
+            found = [
+                f
+                for f in await check(on_lines, window, verify.VerifyStats())
+                if not f.evidence_only and f.item_key not in {v.item_key for v in verified}
+            ]
+            recovery["facts"] += len(found)
+            verified.extend(found)
 
     merged_sources: list[VerifiedFact] = []
     merge_tally: Counter[str] = Counter()
@@ -616,6 +699,18 @@ async def run(
     for fact in facts:
         if fact.window_index in per_window:
             per_window[fact.window_index]["facts_kept_after_merge"] += 1
+    participants: Counter[str] = Counter()
+    if fidelity:
+        # F2-01: a name near an introduction cue is somebody taking part only when the
+        # participant check says so (and which voice is theirs).
+        facts = await _confirm_participants(
+            verifier,
+            facts,
+            pool,
+            language,
+            participants,
+            task=task_texts or prompts.task(language, length),
+        )
     # Who each voice is to this recording, by code.
     table = roles_table.build(
         raw_turns,
@@ -666,6 +761,7 @@ async def run(
     blocks_merged = 0
     summary: list[tuple[str, list[str]]] | None = None
     brief: Brief | None = None
+    budget: compose.VolumeBudget | None = None
     entity_stats: dict[str, int] = {"seen": 0, "model_failed": 0, "marked": 0, "model": 0}
     # A person introduced in the recording is somebody a line may name.
     introduced = {f.person.name for f in document_facts if f.person is not None}
@@ -677,9 +773,17 @@ async def run(
             | introduced
             | rec_names
         ),
+        narrated=narrated,
         reduce_tokens=sizes.reduce_max_tokens,
         fidelity=fidelity,
         task=task_texts,
+        final=final,
+        style=style.block(language),
+        echo_extra=style.echo_extra,
+        summary_cap=style.summary_cap(scale),
+        summary_band=styling.p2_sentences(scale),
+        heading_max_words=style.heading_max_words,
+        quote_subpoints=style.quote_children,
     )
     if fidelity:
         # A name in any verified fact's text may be named in any line (the text, where
@@ -696,7 +800,11 @@ async def run(
         # Names nobody in the workspace knows, asked of the model once before writing.
         people = gate.known | {g.term for g in glossary if getattr(g, "kind", "") == "person"}
         renamed = await _model_names(
-            entity_provider or provider,
+            (
+                StageProvider(entity_provider, stage="details", temperature=temperature)
+                if entity_provider is not None and temperature
+                else entity_provider or detailer
+            ),
             document_facts,
             brief,
             people=frozenset(people),
@@ -718,28 +826,44 @@ async def run(
         # within the section band; paragraph 2 follows the blocks.
         excluded_speech = sum(max(0, e.end_ms - e.start_ms) for e in excluded)
         minutes = max(0, speech_ms - excluded_speech) / 60_000
-        # Parts come from the transcript (cues, then lexical shifts), not from fact positions.
-        segmentation = compose.segment(
-            turns, minutes, language, classify.structure_cues(turns, language)
+        # A narrated recording's parts are its argument, proposed by the outline step (B2 T2);
+        # otherwise, and when the outline is refused, parts come from the transcript (cues,
+        # then lexical shifts), not from fact positions.
+        outlined = (
+            await _outline(composer, document_facts, language, gate=gate, brief=brief)
+            if gate.narrated and not style.topics_off and not small and not FORCE_FALLBACKS
+            else None
         )
-        parts, blocks_merged = compose.blocks_at(document_facts, segmentation)
-        budget = compose.VolumeBudget(
-            minutes, len(parts), scale=compose.LENGTH_SCALE.get(length, 1.0)
-        )
-        topics = await _reduce_blocks(
-            composer,
-            parts,
-            language,
-            budget,
-            brief=brief,
-            gate=gate,
-            table=table,
-            minutes=minutes,
-            small=small,
-        )
+        if outlined is not None:
+            parts, blocks_merged = outlined, 0
+            segmentation = compose.Segmentation((), compose.SOURCE_OUTLINE)
+        else:
+            segmentation = compose.segment(
+                turns, minutes, language, classify.structure_cues(turns, language)
+            )
+            parts, blocks_merged = compose.blocks_at(document_facts, segmentation)
+        budget = compose.VolumeBudget(minutes, len(parts), scale=scale, bullets=style.bullets)
+        if style.topics_off:
+            # N2: no topic sections asked for — no block pass; the summary still gets its
+            # skeleton from each block's most specific fact. Not a failure.
+            topics = None
+        else:
+            topics = await _reduce_blocks(
+                composer,
+                parts,
+                language,
+                budget,
+                brief=brief,
+                gate=gate,
+                table=table,
+                minutes=minutes,
+                small=small,
+            )
         if topics:
             # An uncited fact with a number, a date or a holder is kept.
-            _append_salient(topics, document_facts, gate)
+            _append_salient(
+                topics, document_facts, gate, keep_central=fidelity and length != "short"
+            )
         tops = compose.top_per_block(parts, language, gate.people)
         summary = await _summary(
             composer,
@@ -761,8 +885,7 @@ async def run(
                 language=language,
                 known=gate.known,
                 key_ids=[f.item_key for f in tops] or (brief.key_fact_ids if brief else None),
-                connectives=not fidelity,
-            )
+            )[: gate.summary_cap]
             or None
         )
         ladder = "composed" if summary else None
@@ -784,10 +907,26 @@ async def run(
     opening = ""
     if document_facts:
         speakers, guests, others = compose.speakers_of(table, language)
+        # B1 T4: nobody named → no sentence about who speaks (a role word says nothing).
+        if not compose.anyone_named(table):
+            speakers, guests, others = [], [], []
         show = compose.show_name(raw_turns)
+        # B1 T4: a year the recording cannot know is not written (counts only).
+        recording_year = meeting_date.year if meeting_date else None
+        subject, dropped = overview.strip_foreign_year(
+            _gated_phrase(brief.subject if brief else "", document_facts, gate), recording_year
+        )
+        framing_text, dropped_framing = overview.strip_foreign_year(
+            brief.framing
+            if brief and compose.framing_participants_ok(brief.framing, table)
+            else "",
+            recording_year,
+        )
+        gate.counts["year_unsupported"] += dropped + dropped_framing
         orientation: dict[str, Any] = {
-            "subject": _gated_phrase(brief.subject if brief else "", document_facts, gate),
-            "framing": brief.framing if brief else "",
+            "subject": subject,
+            # F2-01: a framing naming somebody the table did not accept is not used.
+            "framing": framing_text,
             "speakers": speakers,
             "guests": guests,
             "others": others,
@@ -834,7 +973,10 @@ async def run(
         meeting_date=meeting_date,
         presenter_lines=family.meeting_type == "broadcast",
         subject=brief.subject if brief else "",
+        family_type=family.meeting_type,
         figure_tables=tables,
+        tables_off=not style.figure_tables,
+        sections_off=style.sections_off,
         recording_names=gate.known,
     )
     if fidelity:
@@ -934,12 +1076,16 @@ async def run(
                 "no_information",
                 "first_person",
                 "descriptive",
+                "attribution",
+                "hedge",
+                "verdict",
             )
         },
         "summary_retries": gate.retries,
         "summary_fallback": fallback,
         "summary_ladder": ladder,
         "topics_fallback": topics_fallback,
+        "outline": gate.outline,
         "topics_failure": gate.topics_failure,
         "noise_passages": len(out.noise),
         "noise_flagged": flagged,
@@ -968,6 +1114,23 @@ async def run(
         "multilingual_evidence": multilingual,
         "fidelity": fidelity,
         "length": length,
+        # One scale for the volume budget and the linter's bands (N2).
+        "length_scale": scale,
+        # N2 — what a writing profile did to this run: numbers and booleans, never text.
+        "instructions_applied": {
+            "scale": scale,
+            "summary_cap": gate.summary_cap,
+            "bullets": list(style.bullets),
+            "sections_off": len(style.sections_off),
+            "topics_skipped": style.topics_off,
+            "heading_max_words": style.heading_max_words,
+        }
+        if style != styling.DEFAULT
+        else None,
+        "blocks_skipped_by_profile": len(parts) if style.topics_off else 0,
+        # The topic call's "{bullets}": with the language and flags, its system text (P1-01).
+        "bullets_per_block": budget.bullets_per_block if budget is not None else None,
+        "target_words": budget.target_words if budget is not None else None,
         "facts_high_risk": stats.high_risk,
         "meaning_calls": meaning_budget.used,
         "merge": dict(merge_tally),
@@ -982,6 +1145,8 @@ async def run(
         ),
         "facts_cross_language": stats.cross_language,
         "meaning_check": dict(meaning),
+        "participants": dict(participants),
+        "recovery": dict(recovery),
         "meaning_unverified": out.meaning_unverified,
         "incomplete": out.incomplete,
         "section_hashes": section_hashes(out.sections),
@@ -1072,6 +1237,7 @@ async def run(
                 small=small,
                 multilingual=multilingual,
                 task=task_texts,
+                narrated=narrated,
             )
             if again is None:
                 continue
@@ -1118,7 +1284,130 @@ async def run(
         return rebuilt
 
     out.regenerator = regenerate
+    if final:
+        verdicts: dict[str, tuple[str, str | None]] = {}
+        final_task = task_texts or prompts.task(language, length)
+
+        async def finalizer(
+            sections: list[render.RenderedSection],
+        ) -> tuple[list[render.RenderedSection], list[final_check.Rejected], Counter[str]]:
+            tally: Counter[str] = Counter()
+            kept, rejected = await final_check.validate(
+                sections,
+                facts=out.facts,
+                windows_by_index=pool,
+                verifier=final_verifier,
+                language=language,
+                task=final_task,
+                cache=verdicts,
+                tally=tally,
+            )
+            return kept, rejected, tally
+
+        out.finalizer = finalizer
     return out
+
+
+async def finalize(document: DocumentResult) -> DocumentResult:
+    """F1-02: the last check, after composition, attribution patching and doclint's repairs
+    and before anything is written. A line it cannot confirm leaves the asserted prose (kept
+    for review, ``incomplete`` says so); a failing check keeps every generated line out
+    rather than publish one unchecked. Records ``stats.final_check``. Never raises."""
+    if document.finalizer is None:
+        document.stats = {
+            **document.stats,
+            "final_check": {"ran": False},
+            "fates": fates(document),
+        }
+        return document
+    try:
+        kept, rejected, tally = await document.finalizer(list(document.sections))
+    except Exception:  # noqa: BLE001 — never publish what could not be checked
+        logger.warning("meeting_doc.final_check_crashed", exc_info=True)
+        kept, rejected, tally = _unchecked(document.sections)
+    document.sections = kept
+    document.final_rejected = rejected
+    if rejected and final_check.FINAL_UNVERIFIED not in document.incomplete:
+        document.incomplete = [*document.incomplete, final_check.FINAL_UNVERIFIED]
+    document.stats = {
+        **document.stats,
+        "final_check": {
+            "ran": True,
+            "version": final_check.VERSION,
+            **dict(tally),
+            # Ids only: which facts the lines kept for review rest on.
+            "unverified_sources": sorted({i for r in rejected for i in r.line.fact_ids}),
+        },
+        "incomplete": document.incomplete,
+        "section_hashes": section_hashes(document.sections),
+        "fates": fates(document),
+    }
+    return document
+
+
+def fates(document: DocumentResult) -> list[dict[str, Any]]:
+    """F2-03 — what became of every kept fact, as the note is about to be written: its
+    original evidence (window, line, time, language), the meaning check's outcome or why
+    it decided nothing, what it was merged into, and where it ended: ``written`` (with the
+    section), ``merged``, ``evidence``, ``not_a_participant``, ``review_unverified``,
+    ``review_final_check`` or ``suggested`` (verified, not selected for the prose). Ids,
+    positions and codes; never text. Extraction-stage outcomes are in ``trace``."""
+    written: dict[str, str] = {}
+    for section in document.sections:
+        for line in section.lines:
+            for key in line.fact_ids:
+                written.setdefault(key, section.section_key)
+    held = {k for r in document.final_rejected for k in r.line.fact_ids}
+    survivor = {k: f.item_key for f in document.facts for k in f.also}
+    out: list[dict[str, Any]] = []
+    for fact in document.facts:
+        if fact.kind in (schema.COMPLETION, schema.JUDGEMENT):
+            continue
+        key = fact.item_key
+        flags = set(fact.flags)
+        if key in written:
+            placement = "written"
+        elif flags & {verify.MERGED, verify.SUPERSEDED}:
+            placement = "merged"
+        elif verify.INTRODUCTION_REJECTED in flags:
+            placement = "not_a_participant"
+        elif fact.evidence_only:
+            placement = "evidence"
+        elif MEANING_UNVERIFIED in flags:
+            placement = "review_unverified"
+        elif key in held:
+            placement = "review_final_check"
+        else:
+            placement = "suggested"
+        out.append(
+            {
+                "key": key,
+                "kind": fact.kind,
+                "window": fact.window_index,
+                "line": fact.line,
+                "start_ms": fact.start_ms,
+                "language": fact.source_language,
+                "meaning": fact.meaning,
+                "merged_into": survivor.get(key),
+                "section": written.get(key),
+                "placement": placement,
+            }
+        )
+    return out
+
+
+def _unchecked(
+    sections: Sequence[render.RenderedSection],
+) -> tuple[list[render.RenderedSection], list[final_check.Rejected], Counter[str]]:
+    """Every asserted generated line out of the prose, for review: what a crashed check leaves."""
+    dropped = {
+        (si, li): "check_failed"
+        for si, s in enumerate(sections)
+        for li, line in enumerate(s.lines)
+        if line.kind not in final_check.STRUCTURAL
+    }
+    kept, rejected = final_check._apply(sections, {}, dropped)
+    return kept, rejected, Counter({"crashed": 1, "unverified": len(rejected)})
 
 
 # Introductions happen at the start: only the first windows are searched.
@@ -1218,6 +1507,20 @@ def sizes_for(provider: ChatLike | None, context_window: int | None = None) -> S
     )
 
 
+def sized(sizes: Sizes, params: Any | None) -> Sizes:
+    """``sizes`` with a workspace's output budget and facts per window (N0). The facts cap
+    scales with the window as the budget does, so the default (24) changes nothing."""
+    if params is None:
+        return sizes
+    update: dict[str, Any] = {}
+    if getattr(params, "max_output_tokens", None):
+        update["reduce_max_tokens"] = int(params.max_output_tokens)
+    facts = getattr(params, "facts_per_window", MAX_FACTS_BUDGET)
+    if facts != MAX_FACTS_BUDGET:
+        update["max_facts_budget"] = round(facts * sizes.window_chars / windows.MAX_WINDOW_CHARS)
+    return replace(sizes, **update) if update else sizes
+
+
 def extract_tokens(max_facts: int) -> int:
     """Output budget for that many facts, each up to a sentence and a
     quote. Unused budget costs nothing; a cut-off answer costs the window."""
@@ -1291,7 +1594,10 @@ async def _model_names(
             continue
         if canonical.casefold() in known or prompts.echoes_example(canonical):
             continue  # another participant, or a copied example: rejected
+        if not entities.is_correction(surface, canonical):
+            continue  # an article, an ending or capitals: grammar, not a mishearing
         if entities.similarity(surface, canonical) >= entities.MODEL_THRESHOLD:
+            # The model is no entity evidence: offered as a term, never as a person.
             table[surface] = entities.Correction(surface, canonical, entities.SOURCE_MODEL)
         else:
             doubted.add(surface)
@@ -1403,6 +1709,9 @@ def _noise_lines(extracted: schema.ExtractOut, window: Window) -> list[tuple[int
 # Line support share is per language: ``support.line_support_threshold``.
 # More than this share of a summary failing the gate: ask once more, strictly.
 SUMMARY_FAIL_SHARE: Final = 0.3
+# B1 T0 (eval only): every summary rung and every block call fails, so the fallbacks are
+# measured on their own. Never set by the service.
+FORCE_FALLBACKS: bool = False
 MAX_FACTS_BUDGET: Final = 24
 MIN_FACTS_BUDGET: Final = 8
 MIN_BULLETS_PER_TOPIC: Final = 2
@@ -1435,11 +1744,17 @@ class _Gate:
                 "descriptive",
                 "subject",
                 "unspecific",
+                "year_unsupported",
+                "verdict",
             ),
             0,
         )
     )
     retries: int = 0
+    """B2: a narrated family (broadcast, memo) — the addenda and the outline step."""
+    narrated: bool = False
+    """B2 T2: what the outline step did (None when it did not run or was refused)."""
+    outline: dict[str, Any] | None = None
     """The rung that wrote the summary: ``model`` or ``strict``."""
     summary_rung: str | None = None
     """The output budget of a reduce call on this backend."""
@@ -1459,6 +1774,8 @@ class _Gate:
     block_chapters: int = 0
     headings_retried: int = 0
     headings_fallback: int = 0
+    """Headings written so far (folded): a fallback heading is never one of them."""
+    headings_taken: set[str] = field(default_factory=set)
     merges_refused: int = 0
     quote_children: int = 0
     block_failures: Counter[str] = field(default_factory=Counter)
@@ -1466,6 +1783,17 @@ class _Gate:
     fidelity: bool = False
     """The task texts every composition builder puts over its own rules (multilingual)."""
     task: prompts.Task | None = None
+    """F1-02's final check runs on every written line: a capitalised German noun the
+    facts do not have is left to it; only a name of the recording blocks a line here."""
+    final: bool = False
+    """N2 — the workspace's FORM preferences: the block after each compose prompt, style
+    samples that count as examples, and the code dials the compose steps read."""
+    style: str = ""
+    echo_extra: frozenset[str] = frozenset()
+    summary_cap: int = schema.MAX_SUMMARY_SENTENCES
+    summary_band: tuple[int, int] = compose.P2_SENTENCES
+    heading_max_words: int = styling.HEADING_WORDS_MAX
+    quote_subpoints: bool = True
 
     @property
     def dropped(self) -> int:
@@ -1473,7 +1801,7 @@ class _Gate:
         return self.counts["example"]
 
     def echo(self, text: str) -> bool:
-        if prompts.echoes_example(text):
+        if prompts.echoes_example(text, self.echo_extra):
             self.counts["example"] += 1
             return True
         return False
@@ -1484,7 +1812,7 @@ class _Gate:
         ``claims`` (summary sentences): a sentence resting on an opinion or forecast
         must name its holder and keep its hedge; sentences are dropped, bullets patched."""
         plain = render.strip_inline_ids(text)[0]
-        if prompts.echoes_example(plain):
+        if prompts.echoes_example(plain, self.echo_extra):
             return "example"
         if not cited:
             return "unsupported"
@@ -1506,11 +1834,22 @@ class _Gate:
         evidence = " ".join(f"{f.text} {f.quote}" for f in cited)
         owners = {f.owner_label for f in cited if f.owner_label}
         owners |= {f.attributed_to for f in cited if f.attributed_to}
-        if support.new_names(plain, evidence, self.known | owners):
+        new = support.new_names(plain, evidence, self.known | owners)
+        if new and self.final and self.language in support.NOUNS_CAPITALISED:
+            # F2-03: "Wahlkampf" or "Dividende" is a noun, not a name; a new name of this
+            # recording ("Brandt" in a line about Calder's facts) still blocks it.
+            proper = {w.casefold() for w in self.people}
+            new = [n for n in new if any(p.casefold() in proper for p in n.split("-"))]
+        if new:
             return "name"
-        if support.support_ratio(plain, evidence, self.language) < support.line_support_threshold(
-            self.language
-        ):
+        # Word overlap cannot judge a line on evidence spoken in another language; with the
+        # final check on, its meaning is checked against that evidence instead (F2-03).
+        across = self.final and any(
+            f.source_language and f.source_language != self.language for f in cited
+        )
+        if not across and support.support_ratio(
+            plain, evidence, self.language
+        ) < support.line_support_threshold(self.language):
             return "unsupported"
         if claims:
             unsure = [f for f in cited if f.certainty in support.UNSURE_CERTAINTIES]
@@ -1520,6 +1859,13 @@ class _Gate:
                 return "attribution"
             if unsure and not support.has_marker(plain, self.language):
                 return "hedge"
+            # B2 T4: a relayed claim the speaker judged keeps that verdict.
+            if any(
+                not support.has_verdict(plain, f.certainty, self.language)
+                for f in cited
+                if f.certainty in support.VERDICT_CERTAINTIES
+            ):
+                return "verdict"
         return None
 
     def third_person(self, text: str) -> str:
@@ -1574,9 +1920,11 @@ async def _extract(
     small: bool = False,
     multilingual: bool = False,
     task: prompts.Task | None = None,
+    narrated: bool = False,
 ) -> schema.ExtractOut | None:
     """One window; ``None`` when the model could not answer in shape.
-    ``system_suffix`` is the rule the last answer broke; ``small`` is the profile."""
+    ``system_suffix`` is the rule the last answer broke; ``small`` is the profile;
+    ``narrated`` adds the broadcast/memo addendum (B2 T3)."""
     prompt = prompts.extract_prompt(
         window.render(),
         language,
@@ -1586,7 +1934,9 @@ async def _extract(
         contact_lines=contact_lines,
         one_shot=small,
     )
-    system = prompts.extract_system(language, noise=not small, multilingual=multilingual, task=task)
+    system = prompts.extract_system(
+        language, noise=not small, multilingual=multilingual, task=task, narrated=narrated
+    )
     if system_suffix:
         system = f"{system}\n\n{system_suffix}"
     used_schema = extract_schema or schema.EXTRACT_SCHEMA
@@ -1863,6 +2213,7 @@ async def _meaning_verdicts(
     *,
     task: prompts.Task,
     budget: MeaningBudget | None = None,
+    failures: dict[int, str] | None = None,
 ) -> dict[int, Verdict]:
     """``{id(fact): Verdict}`` for each claim against its line and the lines either side,
     in batches (05-prompt-instructions.md, verification). A response that does not cover
@@ -1881,6 +2232,8 @@ async def _meaning_verdicts(
         tally["checked"] += len(batch)
         if budget is not None and not budget.take():
             tally["budget"] += len(batch)
+            if failures is not None:
+                failures.update({id(f): "budget" for f in batch})
             continue
         try:
             answer = await provider.complete(
@@ -1894,12 +2247,16 @@ async def _meaning_verdicts(
         except Exception:  # noqa: BLE001 — the claims stay, marked unverified
             tally["unavailable"] += len(batch)
             logger.warning("meeting_doc.meaning_check_failed", exc_info=True)
+            if failures is not None:
+                failures.update({id(f): "unavailable" for f in batch})
             continue
         answered = [c.claim_id for c in parsed.checks]
         if sorted(answered) != sorted(ids):
             # Missing, repeated or unknown claim ids: truncated or malformed — nothing counts.
             tally["malformed"] += len(batch)
             logger.warning("meeting_doc.meaning_check_malformed", extra={"claims": len(batch)})
+            if failures is not None:
+                failures.update({id(f): "malformed" for f in batch})
             continue
         for given in parsed.checks:
             index = ids.index(given.claim_id)
@@ -1910,6 +2267,8 @@ async def _meaning_verdicts(
                 evidence = (-1,)
             if not set(evidence) <= lines_shown:
                 tally["foreign_lines"] += 1
+                if failures is not None:
+                    failures[id(batch[index])] = "foreign_lines"
                 continue
             verdicts[id(batch[index])] = Verdict(
                 verdict=given.verdict,
@@ -1951,12 +2310,14 @@ async def _confirm_meaning(
     pending = [f for f in facts if verify.MEANING_PENDING in f.flags]
     if not pending:
         return facts
+    failures: dict[int, str] = {}
     verdicts = await _meaning_verdicts(
-        provider, pending, window, language, tally, task=task, budget=budget
+        provider, pending, window, language, tally, task=task, budget=budget, failures=failures
     )
     for fact in pending:
         found = verdicts.get(id(fact))
         tally[found.verdict if found else "undecided"] += 1
+        fact.meaning = found.verdict if found else failures.get(id(fact), "undecided")
     if repair:
         candidates: list[VerifiedFact] = []
         original: dict[int, str] = {}
@@ -1984,6 +2345,7 @@ async def _confirm_meaning(
                 if second is not None and second.verdict == schema.SUPPORTED:
                     verdicts[id(fact)] = second
                     tally["repaired"] += 1
+                    fact.meaning = "repaired"
                 else:
                     fact.text = original[id(fact)]
                     tally["repair_rejected"] += 1
@@ -1999,6 +2361,183 @@ async def _confirm_meaning(
         if settled is not None:
             out.append(settled)
     return out
+
+
+# The recovery pass: at most this many lines, in at most this many windows (calls).
+RECOVERY_LINES_MAX: Final = 4
+RECOVERY_CALLS_MAX: Final = 2
+RECOVERY_MIN_WORDS: Final = 8
+
+
+def recovery_targets(
+    built: Sequence[Window], verified: Sequence[VerifiedFact], recording_language: str | None
+) -> list[tuple[Window, list[int]]]:
+    """``[(window, line numbers)]`` — lines carrying an amount and a condition or a
+    promise (risk words in the line's own language), long enough to say something, that
+    no writable fact cites (a copied quote is evidence, not a fact); most at stake first,
+    bounded. Lines only: a proposition nobody said cannot be a target."""
+    covered = [
+        (f.start_ms, f.end_ms) for f in verified if not f.evidence_only and f.kind != schema.FIGURE
+    ]
+    scored: list[tuple[int, int, Window, windows.Turn]] = []
+    for window in built:
+        for turn in window.turns:
+            if len(turn.text.split()) < RECOVERY_MIN_WORDS:
+                continue
+            if any(start < turn.end_ms and turn.start_ms < end for start, end in covered):
+                continue
+            lang = turn.language or recording_language or "en"
+            if not support.high_risk(turn.text, lang):
+                continue
+            score = int(any(ch.isdigit() for ch in turn.text)) + int(support.conditional(turn.text))
+            if score:
+                scored.append((-score, turn.start_ms, window, turn))
+    scored.sort(key=lambda x: (x[0], x[1]))
+    chosen: dict[int, tuple[Window, list[int]]] = {}
+    for _score, _start, window, turn in scored[:RECOVERY_LINES_MAX]:
+        if window.index not in chosen and len(chosen) >= RECOVERY_CALLS_MAX:
+            continue
+        chosen.setdefault(window.index, (window, []))[1].append(turn.number)
+    return list(chosen.values())
+
+
+# One participant check per job, at most this many introductions (earliest first).
+PARTICIPANT_ITEMS_MAX: Final = 8
+# Lines shown per introduction: the one before it and the next five (who answers).
+PARTICIPANT_LINES_BEFORE: Final = 1
+PARTICIPANT_LINES_AFTER: Final = 5
+
+
+async def _confirm_participants(
+    provider: ChatLike,
+    facts: list[VerifiedFact],
+    pool: dict[int, Window],
+    language: str,
+    tally: Counter[str],
+    *,
+    task: prompts.Task,
+) -> list[VerifiedFact]:
+    """F2-01 — one bounded call on the introductions code cannot settle: every ``pending``
+    one, and every introduction of somebody else (whose voice it is). Accepted: a person,
+    introduced as taking part (``checked``; ``speaker`` from the line they speak, never
+    the introducer's or an earlier one). Quoted: a person, no voice. Anything else, a
+    pending one left unanswered included, is evidence only (``INTRODUCTION_REJECTED``);
+    an unanswered lexical one stays as code established it."""
+    asked = [
+        f
+        for f in sorted(facts, key=lambda x: x.start_ms)
+        if f.person is not None
+        and (f.person.evidence == verify.INTRO_PENDING or not f.person.self_introduction)
+    ][:PARTICIPANT_ITEMS_MAX]
+    if not asked:
+        return facts
+    shown: list[tuple[windows.Turn, ...]] = []
+    for fact in asked:
+        window = pool.get(fact.window_index)
+        turns = window.turns if window else ()
+        at = next(
+            (
+                i
+                for i, t in enumerate(turns)
+                if t.number == (fact.line if fact.line is not None else fact.turn)
+            ),
+            None,
+        )
+        shown.append(
+            ()
+            if at is None
+            else turns[max(0, at - PARTICIPANT_LINES_BEFORE) : at + PARTICIPANT_LINES_AFTER + 1]
+        )
+    ids = [f"p{n}" for n in range(1, len(asked) + 1)]
+    tally["checked"] = len(asked)
+    answers: dict[int, schema.ParticipantCheck] = {}
+    try:
+        answer = await provider.complete(
+            prompts.participants_prompt(
+                [
+                    (
+                        pid,
+                        f.person.name if f.person else "",
+                        [windows.render_line(t) for t in lines],
+                    )
+                    for pid, f, lines in zip(ids, asked, shown, strict=True)
+                ]
+            ),
+            schema.participants_schema(len(asked)),
+            max_tokens=MEANING_CHECK_MAX_TOKENS,
+            temperature=0.0,
+            system=prompts.participants_system(language, task=task),
+        )
+        parsed = schema.ParticipantsOut.model_validate_json(_json_of(answer))
+        if sorted(p.item_id for p in parsed.participants) == sorted(ids):
+            answers = {ids.index(p.item_id): p for p in parsed.participants}
+        else:
+            tally["malformed"] = len(asked)
+    except Exception:  # noqa: BLE001 — unanswered: pending ones introduce nobody
+        tally["unavailable"] = len(asked)
+        logger.warning("meeting_doc.participant_check_failed", exc_info=True)
+    decided: dict[int, VerifiedFact] = {}
+    for n, fact in enumerate(asked):
+        person = fact.person
+        assert person is not None  # noqa: S101 — selected above
+        lines = {t.number: t for t in shown[n]}
+        given = answers.get(n)
+        if given is not None and not set(given.evidence_ids) <= {str(k) for k in lines}:
+            tally["foreign_lines"] += 1
+            given = None
+        if given is None:
+            if person.evidence == verify.INTRO_PENDING:
+                tally["undecided"] += 1
+                decided[id(fact)] = dataclasses.replace(
+                    fact, flags=[*fact.flags, verify.INTRODUCTION_REJECTED]
+                )
+            continue
+        taking_part = given.entity == "person" and given.introduced
+        if given.entity == "person" and given.participation == "quoted":
+            tally["quoted"] += 1
+            decided[id(fact)] = dataclasses.replace(
+                fact,
+                person=dataclasses.replace(
+                    person, entity="person", participation="quoted", evidence=verify.INTRO_CHECKED
+                ),
+            )
+            continue
+        if not taking_part:
+            tally[f"rejected_{given.entity}"] += 1
+            decided[id(fact)] = dataclasses.replace(
+                fact,
+                person=dataclasses.replace(person, entity=given.entity),
+                flags=[*fact.flags, verify.INTRODUCTION_REJECTED],
+            )
+            continue
+        speaker = person.speaker
+        intro_line = fact.line if fact.line is not None else fact.turn
+        try:
+            spoken = lines.get(int(given.speaks_at)) if given.speaks_at else None
+        except ValueError:
+            spoken = None
+        if person.self_introduction:
+            speaker = fact.speaker_label
+        elif (
+            spoken is not None
+            and spoken.number > intro_line
+            and spoken.speaker_label
+            and spoken.speaker_label != fact.speaker_label
+        ):
+            speaker = spoken.speaker_label
+            tally["linked"] += 1
+        tally["accepted"] += 1
+        decided[id(fact)] = dataclasses.replace(
+            fact,
+            person=dataclasses.replace(
+                person,
+                entity="person",
+                participation=given.participation,
+                evidence=verify.INTRO_CHECKED,
+                speaker=speaker,
+            ),
+        )
+    return [decided.get(id(f), f) for f in facts]
 
 
 # One deduplication call per job, at most this many pairs (nearest first).
@@ -2153,7 +2692,10 @@ async def _context(
             schema.REDUCE_CONTEXT_SCHEMA,
             max_tokens=gate.reduce_tokens,
             temperature=0.0,
-            system=prompts.context_system(language, task=gate.task),
+            system=prompts.with_style(
+                prompts.context_system(language, task=gate.task, narrated=gate.narrated),
+                gate.style,
+            ),
         )
         parsed = schema.ContextOut.model_validate_json(_json_of(answer))
     except Exception:  # noqa: BLE001
@@ -2246,13 +2788,23 @@ async def _reduce_block(
     ``small``: heading and bullets are separate calls over at most fifteen facts, no sub-points."""
     facts = list(block.facts)
     by_id = {f.item_key: f for f in facts}
-    if small:
+    if FORCE_FALLBACKS:
+        heading, bullets, parsed_any = "", [], False
+    elif small:
         heading, bullets, parsed_any = await _block_small(
             provider, facts, by_id, language, budget, brief=brief, gate=gate, table=table
         )
     else:
         heading, bullets, parsed_any = await _block_capable(
-            provider, facts, by_id, language, budget, brief=brief, gate=gate, table=table
+            provider,
+            facts,
+            by_id,
+            language,
+            budget,
+            brief=brief,
+            gate=gate,
+            table=table,
+            title=block.title,
         )
     if len(bullets) < MIN_BULLETS_PER_TOPIC:
         if parsed_any and not bullets:
@@ -2264,9 +2816,15 @@ async def _reduce_block(
         return chapter
     if not heading:
         heading = compose.fallback_heading(
-            facts, language, gate.people, themes=_themes(gate, brief)
+            facts,
+            language,
+            gate.people,
+            themes=_themes(gate, brief),
+            taken=gate.headings_taken,
+            max_words=gate.heading_max_words,
         )
         gate.headings_fallback += 1
+    gate.headings_taken.add(heading.casefold())
 
     # Within the budget, the most specific first; then in time order.
     def first_start(bullet: Bullet) -> int:
@@ -2317,11 +2875,25 @@ async def _block_capable(
     brief: Brief | None,
     gate: _Gate,
     table: roles_table.RolesTable,
+    title: str | None = None,
 ) -> tuple[str, list[Bullet], bool]:
     """Heading and bullets in one call, retried once when the heading is
-    refused. ``(heading, bullets, whether any answer parsed)``."""
+    refused. ``(heading, bullets, whether any answer parsed)``. ``title``: the
+    outline's standing title for this block (B2 T2), used as the heading."""
     listing = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in facts])
-    system = prompts.block_system(language, budget.bullets_per_block, task=gate.task)
+    system = prompts.with_style(
+        prompts.heading_range(
+            prompts.block_system(
+                language,
+                budget.bullets_per_block,
+                task=gate.task,
+                narrated=gate.narrated,
+                title=title or "",
+            ),
+            gate.heading_max_words,
+        ),
+        gate.style,
+    )
     heading = ""
     bullets: list[Bullet] = []
     parsed_any = False
@@ -2348,9 +2920,13 @@ async def _block_capable(
         written = _block_bullets(parsed, by_id, language, gate, table)
         if len(written) >= len(bullets):
             bullets = written
-        candidate = parsed.heading.strip().rstrip(":.!?").strip()
-        if candidate and not _heading_faults(candidate, facts, gate):
-            heading = candidate
+        if title:
+            # The outline's title stands (B2 T2); the model's heading is not consulted.
+            heading = title
+        else:
+            candidate = parsed.heading.strip().rstrip(":.!?").strip()
+            if candidate and not _heading_faults(candidate, facts, gate):
+                heading = candidate
         if heading and len(bullets) >= MIN_BULLETS_PER_TOPIC:
             break
         if attempt == 0 and not heading:
@@ -2418,7 +2994,9 @@ async def _block_small(
             _with_brief(listing, brief, language),
             schema.BLOCK_BULLETS_SCHEMA,
             schema.BlockOut,
-            prompts.block_bullets_system(language, per_call, task=gate.task),
+            prompts.with_style(
+                prompts.block_bullets_system(language, per_call, task=gate.task), gate.style
+            ),
             language,
             gate,
         )
@@ -2430,7 +3008,12 @@ async def _block_small(
     listing = prompts.facts_block(
         [(f.item_key, f.kind, f.text, f.start_ms) for f in chunks[0]] if chunks else []
     )
-    system = prompts.block_heading_system(language, task=gate.task)
+    system = prompts.with_style(
+        prompts.heading_range(
+            prompts.block_heading_system(language, task=gate.task), gate.heading_max_words
+        ),
+        gate.style,
+    )
     for attempt in range(BLOCK_ATTEMPTS):
         parsed = await _small_call(
             provider,
@@ -2489,7 +3072,7 @@ def _block_bullets(
             continue
         children: list[Child] = list(_children(bullet, text, ids, by_id, gate))
         for child in bullet.children:
-            if not child.quote_of or child.quote_of not in by_id:
+            if not gate.quote_subpoints or not child.quote_of or child.quote_of not in by_id:
                 continue
             fact = by_id[child.quote_of]
             quoted = compose.quote_child(fact, _speaker_name(fact, table), language)
@@ -2536,8 +3119,10 @@ def _block_chapter(
     *,
     brief: Brief | None = None,
 ) -> tuple[str, list[Bullet], list[str]] | None:
-    """One block's chapter: its statements by time (the specific ones when any), under its name
-    (fidelity: under the brief's theme its facts carry, when one does)."""
+    """One block's chapter: its most specific facts, then the ones that add to the
+    framing (:func:`compose.chapter_rank`), written in time order under a heading that
+    says what the block claims (fidelity: under the brief's theme its facts carry, when
+    one does) — never a timestamp, never a bare name, never a heading already written."""
     usable = [
         f
         for f in facts
@@ -2547,16 +3132,137 @@ def _block_chapter(
         and PARAPHRASE_UNSUPPORTED not in f.flags
         and MEANING_UNVERIFIED not in f.flags
     ]
-    specific = [f for f in usable if compose.specificity(f, language, gate.people) > 0]
-    shown = (specific or usable)[: budget.bullets_per_block]
+    framing = (
+        compose.framing_words(language, brief.subject, brief.framing, *brief.themes)
+        if brief
+        else frozenset()
+    )
+    ranked = compose.chapter_rank(usable, language, gate.people, framing)
+    shown = ranked[: budget.bullets_per_block]
     if len(shown) < MIN_BULLETS_PER_TOPIC:
         return None
-    title = compose.fallback_heading(facts, language, gate.people, themes=_themes(gate, brief))
+    title = compose.fallback_heading(
+        ranked,
+        language,
+        gate.people,
+        themes=_themes(gate, brief),
+        taken=gate.headings_taken,
+        max_words=gate.heading_max_words,
+    )
+    gate.headings_taken.add(title.casefold())
     return (
         title,
         [(f.text, [f.item_key], []) for f in sorted(shown, key=lambda f: f.start_ms)],
         [f.item_key for f in facts],
     )
+
+
+OUTLINE_ATTEMPTS = 2
+# An outline needs at least three sections of four facts; below that it is not asked for.
+OUTLINE_MIN_FACTS = schema.ACCEPT_OUTLINE_SECTIONS * compose.MIN_BLOCK_FACTS
+
+
+def _outline_title_faults(title: str, facts: Sequence[VerifiedFact], gate: _Gate) -> list[str]:
+    """An outline title must pass the heading rules, question included, and name nothing
+    its facts do not."""
+    faults = [
+        f for f in doclint.heading_faults(title, gate.heading_max_words) if f != "punctuation"
+    ]
+    if title.casefold().rstrip(":.!?") in doclint.GENERIC_HEADINGS:
+        faults.append("generic")
+    evidence = " ".join(f"{f.text} {f.quote}" for f in facts)
+    if doclint.unsupported_names(title, evidence, gate.language, gate.people):
+        faults.append("name")
+    if gate.echo(title):
+        faults.append("example")
+    return faults
+
+
+async def _outline(
+    provider: ChatLike,
+    facts: list[VerifiedFact],
+    language: str,
+    *,
+    gate: _Gate,
+    brief: Brief | None,
+) -> list[compose.Block] | None:
+    """The outline step (B2 T2): one call proposes the sections of a narrated recording's
+    argument; code validates the assignment (:func:`compose.blocks_from_outline`) and the
+    titles — a faulty title is asked for once more, then written by
+    :func:`compose.fallback_heading`. None when the call fails twice or assigns too few
+    sections: the time-contiguous path follows."""
+    if len(facts) < OUTLINE_MIN_FACTS:
+        # Too few facts for three sections of four: the time path, no call spent.
+        gate.outline = None
+        return None
+    listing = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in facts])
+    system = prompts.with_style(prompts.outline_system(language, task=gate.task), gate.style)
+    data = _with_brief(listing, brief, language)
+
+    async def ask(system_text: str) -> schema.OutlineOut | None:
+        gate.block_calls += 1
+        try:
+            answer = await provider.complete(
+                data,
+                schema.OUTLINE_SCHEMA,
+                max_tokens=gate.reduce_tokens,
+                temperature=0.0,
+                system=system_text,
+            )
+            return schema.OutlineOut.model_validate_json(_json_of(answer))
+        except ValueError:
+            gate.block_failures["outline_invalid"] += 1
+            logger.warning("meeting_doc.outline_failed", exc_info=True)
+        except Exception:  # noqa: BLE001 — the outline must not cost the note
+            gate.block_failures["outline_error"] += 1
+            logger.warning("meeting_doc.outline_failed", exc_info=True)
+        return None
+
+    built = None
+    for _attempt in range(OUTLINE_ATTEMPTS):
+        parsed = await ask(system)
+        if parsed is None:
+            continue
+        if len(parsed.sections) < schema.ACCEPT_OUTLINE_SECTIONS:
+            gate.block_failures["outline_short"] += 1
+            continue
+        built = compose.blocks_from_outline(
+            facts, [(sec.title, sec.fact_ids) for sec in parsed.sections]
+        )
+        if built is not None and len(built[0]) >= schema.ACCEPT_OUTLINE_SECTIONS:
+            break
+        gate.block_failures["outline_short"] += 1
+        built = None
+    if built is None:
+        gate.outline = None
+        return None
+    blocks, counts = built
+    faulty = [
+        k for k, b in enumerate(blocks) if _outline_title_faults(b.title or "", b.facts, gate)
+    ]
+    retried = False
+    if faulty:
+        retried = True
+        again = await ask(f"{system}\n\n{prompts.heading_retry(language)}")
+        if again is not None and len(again.sections) == len(blocks):
+            for k in list(faulty):
+                title = again.sections[k].title.strip()
+                if title and not _outline_title_faults(title, blocks[k].facts, gate):
+                    blocks[k] = dataclasses.replace(blocks[k], title=title)
+                    faulty.remove(k)
+    for k in faulty:
+        heading = compose.fallback_heading(
+            blocks[k].facts,
+            language,
+            gate.people,
+            themes=_themes(gate, brief),
+            taken=gate.headings_taken,
+            max_words=gate.heading_max_words,
+        )
+        gate.headings_fallback += 1
+        blocks[k] = dataclasses.replace(blocks[k], title=heading or None)
+    gate.outline = {**counts, "retried": retried, "fallback_titles": len(faulty)}
+    return blocks
 
 
 async def _reduce_blocks(
@@ -2720,13 +3426,24 @@ def _distance(
     return abs((start + end) // 2 - fact.start_ms)
 
 
+def central(fact: VerifiedFact, language: str) -> bool:
+    """F2-03 — a claim at stake: an amount and a condition, or a promise, in its words."""
+    text = fact.text
+    return support.high_risk(text, language) and (
+        any(ch.isdigit() for ch in text) or support.conditional(text)
+    )
+
+
 def _append_salient(
     topics: Topics,
     facts: list[VerifiedFact],
     gate: _Gate,
+    *,
+    keep_central: bool = False,
 ) -> None:
     """A key point with a number, a date or a person is kept even when no bullet
-    wrote about it: it joins the topic nearest in time."""
+    wrote about it: it joins the topic nearest in time. ``keep_central`` (standard and
+    detailed length, fidelity): a central claim joins even a full topic."""
     if not topics:
         return
     by_id = {f.item_key: f for f in facts}
@@ -2742,7 +3459,9 @@ def _append_salient(
         # fact as a fact (it never moves to another part of the recording).
         index = min(range(len(topics)), key=lambda k, f=fact: _distance(topics[k], f, by_id))
         title, bullets, ids = topics[index]
-        if len(bullets) >= compose.BULLETS[1]:
+        if len(bullets) >= compose.BULLETS[1] and not (
+            keep_central and central(fact, gate.language)
+        ):
             gate.salient_skipped_full += 1
             continue
 
@@ -2774,15 +3493,31 @@ async def _summary(
     ``SUMMARY_FAIL_SHARE`` failures the model is asked once more strictly, then
     the overview is written by code. ``small`` runs the rungs in the other order."""
     gate = gate or _Gate(language=language)
+    if FORCE_FALLBACKS:
+        return None
     block = prompts.facts_block([(f.item_key, f.kind, f.text, f.start_ms) for f in facts])
     by_id = {f.item_key: f for f in facts}
-    base = prompts.summary_system(language, task=gate.task)
-    if headings:
-        base = f"{base}\n\n{prompts.summary_blocks(headings, language)}"
+    base = prompts.with_style(
+        prompts.summary_system(language, task=gate.task, narrated=gate.narrated), gate.style
+    )
+    # The run's own parts go with its data, not into the instructions: the system text is
+    # exactly what the resolver shows for this profile (P1-01), and model-written headings
+    # never become instructions.
+    parts = (
+        prompts.summary_band(prompts.summary_blocks(headings, language), gate.summary_band)
+        if headings
+        else ""
+    )
+    cap = gate.summary_cap
+    summary_schema = (
+        schema.REDUCE_SUMMARY_SCHEMA
+        if cap == schema.MAX_SUMMARY_SENTENCES
+        else schema.summary_schema(cap)
+    )
     # Rung 2's skeleton: the facts to use, in time order, one sentence per
     # one or two of them.
     if skeleton_ids:
-        groups = [[i] for i in skeleton_ids][: schema.MAX_SUMMARY_SENTENCES + 1]
+        groups = [[i] for i in skeleton_ids][: cap + 1]
     else:
         ordered = [f.item_key for f in sorted(facts, key=lambda f: f.start_ms)][:12]
         groups = [ordered[k : k + 2] for k in range(0, len(ordered), 2)][:6]
@@ -2791,9 +3526,10 @@ async def _summary(
     for attempt, rung in enumerate(rungs):
         system = strict if rung == "strict" else base
         try:
+            data = _with_brief(block, brief, language)
             answer = await provider.complete(
-                _with_brief(block, brief, language),
-                schema.REDUCE_SUMMARY_SCHEMA,
+                f"{parts}\n\n{data}" if parts else data,
+                summary_schema,
                 max_tokens=gate.reduce_tokens,
                 temperature=0.0,
                 system=system,
@@ -2821,7 +3557,7 @@ async def _summary(
                 continue
             return None
         gate.summary_rung = rung
-        return out[: schema.MAX_SUMMARY_SENTENCES] or None
+        return out[:cap] or None
     return None
 
 

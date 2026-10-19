@@ -289,3 +289,87 @@ def test_cleanly_attributed_words_are_not_uncertain() -> None:
     got = _apply_diarization(_output([seg]), diar)  # type: ignore[arg-type]
 
     assert got.segments[0].speaker_uncertain is False
+
+
+# ── A clip is a turn (Sprint B3 T4) ──────────────────────────────────
+
+
+def _clip_output(language: str = "de") -> TranscriptionOutput:
+    out = _output(
+        [
+            Segment(text="Der Moderator sagt", start_ms=0, end_ms=4000, avg_confidence=0.9),
+            Segment(
+                text="we will win", start_ms=4000, end_ms=7000, avg_confidence=0.9, language="en"
+            ),
+            Segment(
+                text="and win big", start_ms=7500, end_ms=10_000, avg_confidence=0.9, language="en"
+            ),
+            Segment(text="Soweit das Zitat", start_ms=10_000, end_ms=14_000, avg_confidence=0.9),
+        ]
+    )
+    return out.model_copy(update={"language": language})
+
+
+def test_a_clip_the_diariser_left_under_the_narrator_becomes_its_own_turn() -> None:
+    diar = _StubDiarization(
+        spans={
+            (0, 4000): "SPEAKER_1",
+            (4000, 7000): "SPEAKER_1",
+            (7500, 10_000): "SPEAKER_1",
+            (10_000, 14_000): "SPEAKER_1",
+        },
+        speakers=["SPEAKER_1"],
+    )
+    got = _apply_diarization(_clip_output(), diar)  # type: ignore[arg-type]
+    assert [s.speaker for s in got.segments] == ["SPEAKER_1", "SPEAKER_2", "SPEAKER_2", "SPEAKER_1"]
+    assert [s.speaker_uncertain for s in got.segments] == [False, True, True, False]
+    assert got.speakers == ["SPEAKER_1", "SPEAKER_2"]
+
+
+def test_a_clip_the_diariser_separated_keeps_its_own_label() -> None:
+    diar = _StubDiarization(
+        spans={
+            (0, 4000): "SPEAKER_1",
+            (4000, 7000): "SPEAKER_2",
+            (7500, 10_000): "SPEAKER_1",
+            (10_000, 14_000): "SPEAKER_1",
+        },
+        speakers=["SPEAKER_1", "SPEAKER_2"],
+    )
+    got = _apply_diarization(_clip_output(), diar)  # type: ignore[arg-type]
+    assert [s.speaker for s in got.segments] == ["SPEAKER_1", "SPEAKER_2", "SPEAKER_2", "SPEAKER_1"]
+    assert not got.segments[1].speaker_uncertain
+
+
+def test_a_long_other_language_stretch_is_a_participant_not_a_clip() -> None:
+    from asr_worker.processor import clips_as_turns
+
+    segs = [
+        Segment(
+            text="Guten Morgen", start_ms=0, end_ms=3000, avg_confidence=0.9, speaker="SPEAKER_1"
+        ),
+        Segment(
+            text="so let me walk you through it",
+            start_ms=3000,
+            end_ms=70_000,
+            avg_confidence=0.9,
+            speaker="SPEAKER_1",
+            language="en",
+        ),
+        Segment(
+            text="and that is the whole plan",
+            start_ms=70_000,
+            end_ms=130_000,
+            avg_confidence=0.9,
+            speaker="SPEAKER_1",
+            language="en",
+        ),
+    ]
+    assert [s.speaker for s in clips_as_turns(segs, recording="de")] == ["SPEAKER_1"] * 3
+
+
+def test_unlabelled_segments_in_the_recording_language_are_not_clips() -> None:
+    from asr_worker.processor import clips_as_turns
+
+    segs = [Segment(text="hallo", start_ms=0, end_ms=3000, avg_confidence=0.9)]
+    assert clips_as_turns(segs, recording="de") == segs

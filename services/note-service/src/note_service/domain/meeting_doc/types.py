@@ -13,6 +13,7 @@ from .roles import (  # noqa: F401  (re-exported for this module's readers)
     ACTION_ITEMS,
     AGENDA,
     ATTENDEES,
+    CLAIMS,
     CONTACT,
     CUSTOM,
     DECISIONS,

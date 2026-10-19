@@ -293,6 +293,14 @@ def test_a_table_in_a_topic_replaces_the_bullets_that_restate_its_figures() -> N
     dims = next(s for s in sections if s.title == "Dimensions and performance")
     assert "The boat is 66 feet long" not in dims.text
     assert "| Length overall | 66 feet |" in dims.text
+    # N2: a writing profile without figure tables keeps the statements, and no table.
+    plain = render.render_sections(
+        [*figures, *extra], role_by_key=ROLE_BY_KEY, topics=topics, tables_off=True
+    )
+    dims = next(s for s in plain if s.title == "Dimensions and performance")
+    assert "The boat is 66 feet long" in dims.text
+    assert not [ln for s in plain for ln in s.lines if ln.kind == "figure"]
+    assert not [s for s in plain if s.role == roles.SPECIFICATIONS]
 
 
 def test_no_action_item_is_read_from_a_table() -> None:
@@ -352,9 +360,15 @@ def test_a_meeting_writes_no_presenter_line() -> None:
 
 def test_somebody_else_introduced_is_introduced_not_the_presenter() -> None:
     quote = "and next to me this is Anna from sales who runs the sea trials"
-    [fact] = _verify([_intro(quote, name="Anna", organisation="sales")], _window(quote))
-    assert not fact.person.self_introduction
+    # "this is" + one word may as well name a thing: only the participant check (fidelity)
+    # can make it somebody; until then it is pending, and without fidelity nobody (F2-01).
+    [fact] = _verify(
+        [_intro(quote, name="Anna", organisation="sales")], _window(quote), fidelity=True
+    )
+    assert not fact.person.self_introduction and fact.person.evidence == verify.INTRO_PENDING
     assert render.presenter_text(fact.person) == "Introduced: Anna, sales"
+    [plain] = _verify([_intro(quote, name="Anna", organisation="sales")], _window(quote))
+    assert plain.person is None and plain.kind == schema.KEY_POINT
 
 
 def test_the_extractor_is_told_which_lines_introduce_somebody() -> None:

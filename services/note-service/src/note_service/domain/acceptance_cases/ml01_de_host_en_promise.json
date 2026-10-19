@@ -1,0 +1,103 @@
+{
+ "id": "ml01_de_host_en_promise",
+ "sentinel": "German host + English conditional $5,000 promise: both chambers as the condition, every adult citizen as the recipient",
+ "meeting_type": "auto",
+ "output_language": "auto",
+ "result": {
+  "language": "de",
+  "result_rev": 1,
+  "turns": [
+   {
+    "speaker": "SPEAKER_1",
+    "name": null,
+    "start_ms": 0,
+    "end_ms": 38000,
+    "paragraphs": [
+     "Willkommen zu einer neuen Folge von Weltlage kompakt, ich bin Lena Brandt. In den Vereinigten Staaten wird im November der Kongress gewählt, also das ganze Repräsentantenhaus und ein Drittel des Senats. Präsident Robert Calder steht selbst nicht auf dem Wahlzettel, macht den Wahlkampf seiner Partei aber zur Abstimmung über sich. Bei einer Kundgebung in Ohio hat er dafür ein ungewöhnliches Versprechen abgegeben."
+    ]
+   },
+   {
+    "speaker": "SPEAKER_2",
+    "name": null,
+    "start_ms": 38000,
+    "end_ms": 58000,
+    "paragraphs": [
+     "And here is my promise. If we win the House of Representatives and the United States Senate, both of them, I will issue a dividend to every adult citizen in the United States of America for $5,000. So if we win, you win, and you get five thousand dollars."
+    ],
+    "language": "en"
+   },
+   {
+    "speaker": "SPEAKER_1",
+    "name": null,
+    "start_ms": 58000,
+    "end_ms": 92000,
+    "paragraphs": [
+     "Wie genau das finanziert werden soll, lässt Calder offen. Fachleute schätzen die Kosten auf mehr als eine Billion Dollar, ungefähr so viel wie der gesamte Verteidigungshaushalt. Politisch gilt das Versprechen als unrealistisch. Auf derselben Kundgebung bat Calder seine Anhänger um etwas anderes."
+    ]
+   },
+   {
+    "speaker": "SPEAKER_2",
+    "name": null,
+    "start_ms": 92000,
+    "end_ms": 98000,
+    "paragraphs": [
+     "So I'm asking you to pretend that I'm on the ballot."
+    ],
+    "language": "en"
+   },
+   {
+    "speaker": "SPEAKER_1",
+    "name": null,
+    "start_ms": 98000,
+    "end_ms": 140000,
+    "paragraphs": [
+     "Die Opposition setzt dagegen auf die Lebenshaltungskosten. Ihre Kandidatinnen versprechen niedrigere Mieten und günstigere Medikamente und wollen die Zölle des Präsidenten zurücknehmen. Umfragen sehen die Partei des Präsidenten derzeit hinten: Im September waren nur 32 Prozent der Befragten mit seiner Arbeit zufrieden."
+    ]
+   },
+   {
+    "speaker": "SPEAKER_1",
+    "name": null,
+    "start_ms": 140000,
+    "end_ms": 152000,
+    "paragraphs": [
+     "Das war Weltlage kompakt. Schreibt uns eure Einschätzung in die Kommentare, und bis zum nächsten Mal."
+    ]
+   }
+  ]
+ },
+ "assertions": {
+  "must_contain_any": [
+   [
+    "5.000",
+    "5000",
+    "fünftausend"
+   ]
+  ],
+  "must_not_contain": [
+   "seine Wähler",
+   "seinen Wählern",
+   "ihre Wähler",
+   "alle Wähler"
+  ],
+  "same_line": [
+   [
+    [
+     "5.000",
+     "5000",
+     "fünftausend"
+    ],
+    [
+     "erwachsen"
+    ],
+    [
+     "beide Kammern",
+     "beiden Kammern",
+     "Repräsentantenhaus und",
+     "und Senat",
+     "und den Senat",
+     "sowohl"
+    ]
+   ]
+  ]
+ }
+}

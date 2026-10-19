@@ -20,6 +20,7 @@ import { BillingSettingsPage } from "./pages/settings/BillingSettingsPage";
 import { DataSettingsPage } from "./pages/settings/DataSettingsPage";
 import { DevicesSettingsPage } from "./pages/settings/DevicesSettingsPage";
 import { MembersSettingsPage } from "./pages/settings/MembersSettingsPage";
+import { NoteWritingSettingsPage } from "./pages/settings/NoteWritingSettingsPage";
 import { SecuritySettingsPage } from "./pages/settings/SecuritySettingsPage";
 import { SettingsLayout } from "./pages/settings/SettingsLayout";
 import { WorkspaceSettingsPage } from "./pages/settings/WorkspaceSettingsPage";
@@ -199,6 +200,7 @@ export function App() {
                 <Route path="workspace" element={<WorkspaceSettingsPage />} />
                 {/* Who processes this workspace's meetings; every member may read it. */}
                 <Route path="data" element={<DataSettingsPage />} />
+                <Route path="writing" element={<NoteWritingSettingsPage />} />
                 {/* How notes are written: profiles, tests, activation. Members read; admins change. */}
                 <Route path="ai-notes" element={<AINotesSettingsPage />} />
                 {/* Plan, usage, plan changes (admins). */}

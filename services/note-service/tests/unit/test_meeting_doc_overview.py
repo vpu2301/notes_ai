@@ -82,7 +82,7 @@ def test_the_first_paragraph_names_type_subject_speakers_guest_and_themes() -> N
         guests=["Felix Holtermann (Handelsblatt)"],
         themes=["der 11. September", "die Gründung von Palantir", "Alex Karp", "Überwachung"],
     )
-    assert text.startswith("Podcast-Folge über Palantir.")
+    assert text.startswith("Sendung über Palantir.")
     assert "Erzähler/in und als Gast Felix Holtermann (Handelsblatt)" in text
     assert (
         "Themen sind der 11. September, die Gründung von Palantir, Alex Karp und Überwachung."
@@ -136,9 +136,9 @@ def test_composed_prose_is_three_to_six_cited_sentences_in_time_order() -> None:
     starts = [by_id[ids[0]].start_ms for _s, ids in out]
     assert starts == sorted(starts)
     assert all(len(ids) == 1 for _s, ids in out)
-    assert out[0][0].startswith("Zunächst — ")
-    assert out[-1][0].startswith("Schließlich — ")
-    assert all(s.endswith(".") for s, _ids in out)
+    # B1 T1: plain sentences — no "Zunächst — / Schließlich —" scaffolding.
+    assert all(s[:1].isupper() and s.endswith(".") and s.count(".") == 1 for s, _ids in out)
+    assert not any(s.startswith(("Zunächst", "Anschließend", "Schließlich")) for s, _ids in out)
 
 
 def test_composed_prose_takes_the_named_key_facts_first() -> None:
@@ -158,20 +158,19 @@ def test_composed_prose_never_uses_evidence() -> None:
 # ── §2.6 chapters and A-12 blocks ────────────────────────────────────
 
 
-def test_chapters_are_time_spans_headed_by_what_that_span_names() -> None:
+def test_chapters_are_time_spans_headed_by_what_that_span_claims() -> None:
     facts = [
         _vf(f"In {2000 + n} {NAMES[n // 4]} met {n + 3} investors about Data", n * 60_000)
         for n in range(12)
     ]
     out = overview.chapters(facts, language="en")
-    assert [title for title, _b, _ids in out] == [
-        "00:00 — Peter Thiel",
-        "03:00 — Alex Karp",
-        "06:00 — Alex Karp",
-        "09:00 — PayPal",
-    ]
-    # "Data" is in every span: the recording's subject, not a chapter's.
-    assert all("Data" not in title for title, _b, _ids in out)
+    titles = [title for title, _b, _ids in out]
+    assert len(titles) == 4
+    # B1 T2: a heading is the span's claim — no timestamp, never a bare name, all distinct.
+    assert all(not re.match(r"^\d\d:\d\d", t) for t in titles)
+    assert all(len(t.split()) >= 3 for t in titles)
+    assert len({t.casefold() for t in titles}) == len(titles)
+    assert titles[0].startswith("In 2000 Peter Thiel met")
     assert all(len(ids) >= overview.CHAPTER_MIN_FACTS for _t, _b, ids in out)
 
 
@@ -210,7 +209,10 @@ def test_every_model_pass_failing_still_writes_prose_and_chapters() -> None:
     assert _bullets_above_first_heading(document) == 0
     chapters = [s for s in document.sections if s.role == roles.TOPICS]
     assert len(chapters) >= 2
-    assert all(re.match(r"^\d\d:\d\d( — .+)?$", s.title or "") for s in chapters)
+    # B1 T2: every chapter is headed by its claim — no timestamp, distinct, three words or more.
+    assert all(not re.match(r"^\d\d:\d\d", s.title or "") for s in chapters)
+    assert all(len((s.title or "").split()) >= 3 for s in chapters)
+    assert len({(s.title or "").casefold() for s in chapters}) == len(chapters)
 
 
 def test_a_failed_block_is_its_chapter_at_any_length() -> None:
@@ -233,7 +235,8 @@ def test_the_model_summary_is_the_second_paragraph_and_speakers_stay_code() -> N
     assert document.stats["summary_ladder"] == "model"
     top = document.sections[0]
     first, second = top.text.split("\n\n")
-    assert "Es sprechen Erzähler/in." in first
+    # B1 T4: nobody is named, so there is no sentence about who speaks.
+    assert "Es sprechen" not in first and "Erzähler" not in first
     assert [line.kind for line in top.lines if line.text in second.splitlines()] == [
         "summary"
     ] * len(second.splitlines())
@@ -341,7 +344,7 @@ def test_introductions_sit_in_the_first_paragraph_and_never_read_as_turns() -> N
     )
     paragraphs = top.text.split("\n\n")
     assert len(paragraphs) == 2
-    assert paragraphs[0].startswith("Podcast-Folge über Palantir.")
+    assert paragraphs[0].startswith("Sendung über Palantir.")
     assert "Anna Berg (Reporterin beim Handelsblatt)" in paragraphs[0]
     assert "als Gast Felix Holtermann (Reporterin beim Handelsblatt)" in paragraphs[0]
     assert "Gast:" not in top.text

@@ -246,8 +246,13 @@ apps:
       # Staging only (ADR-0060); prod stays off until precision >= 0.9.
       MDX_NOTE_ENTITY_MODEL_TIER: "true"
       # Internal review of multilingual evidence; prod stays off until signed off.
+      # Staging is the authorized test environment for the corrected path: fidelity
+      # includes the F1 final check before writing. Jobs run on the flags pinned when
+      # queued, so a change here reaches new jobs only (Run details shows which).
       MDX_NOTE_MULTILINGUAL_EVIDENCE: "true"
       MDX_NOTE_FIDELITY: "true"
+      # Note instructions (N1): on in staging; production stays off until N5.
+      MDX_NOTE_INSTRUCTIONS_ENABLED: "true"
     secretEnv: [mdx-hf-endpoints]
     masterKey: true
     podLabels:

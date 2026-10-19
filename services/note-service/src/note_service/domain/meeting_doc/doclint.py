@@ -41,7 +41,7 @@ POINTS_PER_SECTION: Final = (2, 6)
 MERGE_HEADING_SHARE: Final = 0.4
 MERGE_SPAN_MS: Final = 90_000
 HEADING_WORDS: Final = (3, 8)
-HEADING_MAX_CHARS: Final = 60
+HEADING_MAX_CHARS: Final = support.HEADING_MAX_CHARS
 HEADING_MAX_SHARED: Final = 0.6
 BULLET_WORDS: Final = (8, 25)
 SENTENCE_MAX_WORDS: Final = 35
@@ -58,6 +58,7 @@ SEVERITY: Final[dict[str, str]] = {
     "D-ORIENT": "S2", "D-STRUCT": "S2", "D-SPEC": "S2", "D-VOL": "S2", "D-REF": "S2",
     "D-LABEL": "S2", "F-COPY": "S2", "F-DESC": "S2", "F-COV": "S2",
     "D-HEAD": "S3", "D-RED": "S3", "D-NEST": "S3", "D-LANG": "S3", "D-FORM": "S3",
+    "I-AVOID": "S3",
 }  # fmt: skip
 HARD: Final = frozenset({"S1", "S2"})
 
@@ -102,6 +103,8 @@ RULES: Final[dict[str, Rule]] = {
     "line.language": Rule("D-LANG"),
     "line.cited": Rule("D-REF"),
     "line.child": Rule("D-NEST"),
+    # N2: a word a writing profile asks to avoid — reported, never repaired.
+    "style.avoid": Rule("I-AVOID"),
     # orientation
     "orient.present": Rule("D-ORIENT", hook=True),
     "orient.p1": Rule("D-ORIENT", hook=True),
@@ -245,10 +248,35 @@ class LintContext:
     """Facts and speech minutes per third, from the engine's stats."""
     facts_by_third: tuple[int, ...] = ()
     minutes_by_third: tuple[float, ...] = ()
+    """N2 — the run's length scale (a writing profile's, else a prompt profile's) and a
+    writing profile's bands: the linter keeps the note to what was asked, not to the
+    standard."""
+    scale: float = 1.0
+    points: tuple[int, int] = POINTS_PER_SECTION
+    heading_max_words: int = HEADING_WORDS[1]
+    topics_expected: bool = True
+    avoid: tuple[str, ...] = ()
 
     @property
     def minutes(self) -> float:
         return self.speech_ms / 60_000
+
+    @property
+    def para2_words(self) -> tuple[int, int]:
+        return _band(PARA2_WORDS, self.scale, floor=PARA1_WORDS[0])
+
+    @property
+    def para2_sentences(self) -> tuple[int, int]:
+        from .styling import p2_sentences
+
+        return p2_sentences(self.scale)
+
+
+def _band(pair: tuple[int, int], scale: float, *, floor: int = 1) -> tuple[int, int]:
+    """A band at this scale; never below ``floor``."""
+    if scale == 1.0:
+        return pair
+    return max(floor, round(pair[0] * scale)), max(floor, round(pair[1] * scale))
 
 
 @dataclass
@@ -454,7 +482,23 @@ def check(sections: Sequence[RenderedSection], ctx: LintContext) -> list[Finding
     out += _check_lines(sections, ctx)
     out += _check_volume(sections, ctx)
     out += _check_coverage(ctx)
+    out += _check_avoid(sections, ctx)
     return out
+
+
+def _check_avoid(sections: Sequence[RenderedSection], ctx: LintContext) -> list[Finding]:
+    """A composed line using a word the writing profile asks to avoid (N2): reported."""
+    if not ctx.avoid:
+        return []
+    pattern = re.compile(
+        r"(?<!\w)(?:" + "|".join(re.escape(a) for a in ctx.avoid) + r")(?!\w)", re.IGNORECASE
+    )
+    return [
+        _finding("style.avoid", s.section_key, n, "avoided_phrase")
+        for s in sections
+        for n, line in enumerate(s.lines)
+        if line.kind not in ("quote", "heading") and pattern.search(line.text)
+    ]
 
 
 def coverage_ratio(ctx: LintContext) -> float | None:
@@ -550,10 +594,10 @@ def _check_orientation(sections: Sequence[RenderedSection], ctx: LintContext) ->
             out.append(_finding("orient.type_words", key, detail="mapping"))
     if second:
         text = " ".join(ln.text for ln in second)
-        low, high = PARA2_WORDS
+        low, high = ctx.para2_words
         if not low <= _words(text) <= high:
             out.append(_finding("orient.p2", key, detail="length"))
-        low, high = PARA2_SENTENCES
+        low, high = ctx.para2_sentences
         if not low <= len(second) <= high:
             out.append(_finding("orient.p2", key, detail="sentences"))
         for ln in second:
@@ -580,7 +624,12 @@ def p1_faults(first: Sequence[Line], ctx: LintContext) -> list[str]:
         faults.append("type")
     speakers, guests = _roles(ctx)
     lead = overview._SPEAKERS.get(ctx.language, overview._SPEAKERS["en"]).split("{")[0].strip()
-    if lead.casefold() not in folded and not any(ln.kind == "presenter" for ln in first):
+    # B1 T4: with nobody named there is no sentence about who speaks.
+    if (
+        (speakers or guests)
+        and lead.casefold() not in folded
+        and not any(ln.kind == "presenter" for ln in first)
+    ):
         faults.append("speakers")
     themes_lead = overview._THEMES.get(ctx.language, overview._THEMES["en"]).split("{")[0].strip()
     if themes_lead.casefold() in folded:
@@ -628,13 +677,14 @@ def type_word_fault(text: str, ctx: LintContext) -> bool:
 
 def _check_sections(headed: list[RenderedSection], ctx: LintContext) -> list[Finding]:
     out: list[Finding] = []
-    if ctx.minutes >= SECTIONS_FROM_MINUTES:
+    # A profile that leaves out topic sections (N2) expects none: no count finding.
+    if ctx.topics_expected and ctx.minutes >= SECTIONS_FROM_MINUTES:
         target = target_sections(ctx.minutes)
         if len(headed) < max(SECTIONS_MIN, target - SECTIONS_TOLERANCE):
             out.append(_finding("sections.count", detail="too_few"))
         elif len(headed) > min(SECTIONS_MAX, target + SECTIONS_TOLERANCE):
             out.append(_finding("sections.count", detail="too_many"))
-    low, high = POINTS_PER_SECTION
+    low, high = ctx.points
     for s in headed:
         points = _points(s)
         if points < low:
@@ -654,16 +704,17 @@ def _points(s: RenderedSection) -> int:
     return sum(
         1
         for ln in s.lines
-        if (ln.kind in ("bullet", "key_point") and not _is_child(ln)) or ln.kind == "figure"
+        if (ln.kind in ("bullet", "key_point") and not _is_child(ln))
+        or ln.kind in ("figure", "claim")
     )
 
 
-def heading_faults(title: str) -> list[str]:
+def heading_faults(title: str, max_words: int = HEADING_WORDS[1]) -> list[str]:
     heading = title.strip()
     faults = []
     chapter = re.match(r"^\d{1,2}:\d{2}\b", heading)
     words = _words(re.sub(r"^\d{1,2}:\d{2}\s*—\s*", "", heading))
-    low, high = HEADING_WORDS
+    low, high = HEADING_WORDS[0], max_words
     if not chapter and not low <= words <= high:
         faults.append("words")
     if len(heading) > HEADING_MAX_CHARS:
@@ -682,6 +733,14 @@ def _overlap(a: frozenset[str], b: frozenset[str]) -> float:
     return len(a & b) / min(len(a), len(b)) if a and b else 0.0
 
 
+# A chapter stamp before a heading: never part of what makes two headings distinct.
+_STAMP: Final = re.compile(r"^\d{1,2}:\d{2}\s*—\s*")
+
+
+def _heading_tokens(heading: str) -> frozenset[str]:
+    return _tokens(_STAMP.sub("", heading))
+
+
 def _check_headings(headed: list[RenderedSection], ctx: LintContext) -> list[Finding]:
     out: list[Finding] = []
     title_tokens = _tokens(ctx.title or "")
@@ -689,7 +748,7 @@ def _check_headings(headed: list[RenderedSection], ctx: LintContext) -> list[Fin
     for s in headed:
         heading = (s.title or "").strip()
         key = s.section_key
-        faults = heading_faults(heading)
+        faults = heading_faults(heading, ctx.heading_max_words)
         out += [_finding("heading.form", key, detail=d) for d in faults]
         if heading.casefold().rstrip(":.!?") in GENERIC_HEADINGS:
             out.append(_finding("heading.generic", key, detail="generic"))
@@ -698,7 +757,7 @@ def _check_headings(headed: list[RenderedSection], ctx: LintContext) -> list[Fin
         named = _recase(heading, ctx.language, evidence) if "caps" in faults else heading
         if evidence and any(not _supported(n, evidence) for n in _names(named, ctx)):
             out.append(_finding("heading.nouns", key, detail="name"))
-        tokens = _tokens(heading)
+        tokens = _heading_tokens(heading)
         if any(_overlap(tokens, other) > HEADING_MAX_SHARED for other in seen):
             out.append(_finding("heading.distinct", key, detail="overlap"))
         elif len(tokens) >= 2 and tokens <= title_tokens:
@@ -755,7 +814,8 @@ def _certainty_missing(line: Line, ctx: LintContext) -> bool:
     unsure = [
         ctx.facts[i]
         for i in line.fact_ids
-        if i in ctx.facts and ctx.facts[i].certainty in support.UNSURE_CERTAINTIES
+        if i in ctx.facts
+        and ctx.facts[i].certainty in support.UNSURE_CERTAINTIES | support.VERDICT_CERTAINTIES
     ]
     if not unsure:
         return False
@@ -776,14 +836,14 @@ def body_words(sections: Sequence[RenderedSection]) -> int:
     return sum(_words(_body(ln.text)) for ln in _body_lines(sections))
 
 
-def volume_band(minutes: float) -> tuple[float, float]:
-    return WORDS_PER_MINUTE[0] * minutes, WORDS_PER_MINUTE[1] * minutes
+def volume_band(minutes: float, scale: float = 1.0) -> tuple[float, float]:
+    return WORDS_PER_MINUTE[0] * minutes * scale, WORDS_PER_MINUTE[1] * minutes * scale
 
 
 def _check_volume(sections: Sequence[RenderedSection], ctx: LintContext) -> list[Finding]:
     out: list[Finding] = []
     if ctx.minutes >= VOLUME_FROM_MINUTES:
-        low, high = volume_band(ctx.minutes)
+        low, high = volume_band(ctx.minutes, ctx.scale)
         words = body_words(sections)
         if words < low:
             out.append(_finding("volume.words", detail="below"))
@@ -798,7 +858,7 @@ def _check_volume(sections: Sequence[RenderedSection], ctx: LintContext) -> list
         ):
             key = sections[placed[j][0]].section_key
             out.append(_finding("redundancy", key, placed[j][1], "duplicate"))
-    for si, n in _cross_repeats(sections):
+    for si, n in _cross_repeats(sections, ctx.points[0]):
         out.append(_finding("redundancy", sections[si].section_key, n, "orientation"))
     for si, n in _subset_lines(sections):
         out.append(_finding("line.subset", sections[si].section_key, n, "subset"))
@@ -809,7 +869,13 @@ def _check_volume(sections: Sequence[RenderedSection], ctx: LintContext) -> list
 
 # ── Lines that add nothing ──────────────────────────────────────────
 
-_CONNECTIVE_LEADS: Final = tuple(lead for leads in overview.CONNECTIVES.values() for lead in leads)
+# The connectives rung 3 wrote before B1 ("Zunächst — …"): a note written by an older run
+# still carries them, and its ladder is recognised by them. New ladders are plain sentences.
+_CONNECTIVE_LEADS: Final = (
+    "First —", "Then —", "Finally —",
+    "Zunächst —", "Anschließend —", "Schließlich —",
+    "Спочатку —", "Потім —", "Зрештою —",
+)  # fmt: skip
 
 
 def _subset_lines(sections: Sequence[RenderedSection]) -> list[tuple[int, int]]:
@@ -898,14 +964,16 @@ def _drop_filler(
         sections = without(sections, subset)
     # Lines the repairs after _drop_redundant added (chapters, volume).
     sections = _drop_redundant(sections, ctx, done)
-    cross = _cross_repeats(sections)
+    cross = _cross_repeats(sections, ctx.points[0])
     if cross:
         done[RULES["redundancy"].code] += len(cross)
         sections = without(sections, cross)
     return sections
 
 
-def _cross_repeats(sections: Sequence[RenderedSection]) -> set[tuple[int, int]]:
+def _cross_repeats(
+    sections: Sequence[RenderedSection], least: int = POINTS_PER_SECTION[0]
+) -> set[tuple[int, int]]:
     """§7: no fact rendered twice across orientation and sections. A
     summary sentence that says what a bullet says: the bullet goes when
     its section keeps two points, otherwise the sentence."""
@@ -920,7 +988,7 @@ def _cross_repeats(sections: Sequence[RenderedSection]) -> set[tuple[int, int]]:
                 continue
             if _jaccard(tt, bt) < REDUNDANT_JACCARD:
                 continue
-            if points[bi] > POINTS_PER_SECTION[0] and _is_bullet(sections[bi].lines[bn]):
+            if points[bi] > least and _is_bullet(sections[bi].lines[bn]):
                 drop.add((bi, bn))
                 points[bi] -= 1
             else:
@@ -1140,14 +1208,14 @@ def _repair_orientation(
             first = [rebuilt, *presenter]
             done[RULES["orient.p1"].code] += 1
     second = [ln for ln in second if not _QUOTE_MARKS.search(ln.text)]
-    if len(second) < PARA2_SENTENCES[0]:
+    if len(second) < ctx.para2_sentences[0]:
         ladder = _composed_p2(ctx, second)
         if len(ladder) > len(second):
             second = ladder
             done[RULES["orient.p2"].code] += 1
-    while len(second) > PARA2_SENTENCES[0] and (
-        len(second) > PARA2_SENTENCES[1]
-        or _words(" ".join(ln.text for ln in second)) > PARA2_WORDS[1]
+    while len(second) > ctx.para2_sentences[0] and (
+        len(second) > ctx.para2_sentences[1]
+        or _words(" ".join(ln.text for ln in second)) > ctx.para2_words[1]
     ):
         second = second[:-1]
         done[RULES["orient.p2"].code] += 1
@@ -1193,7 +1261,6 @@ def _composed_p2(ctx: LintContext, current: list[Line]) -> list[Line]:
         language=ctx.language,
         known=ctx.known,
         key_ids=ctx.brief.get("key_fact_ids"),
-        connectives=not ctx.fidelity,
     ):
         line = Line(sentence, "summary", tuple(ids))
         if line_fault(line, ctx) is None:
@@ -1205,13 +1272,10 @@ def _fallback_heading(s: RenderedSection, ctx: LintContext) -> str:
     facts = [ctx.facts[i] for ln in s.lines for i in ln.fact_ids if i in ctx.facts]
     if not facts:
         return s.title or ""
-    name = overview._top_name(facts, ctx.language, ctx.known)
-    if not name:
-        # German names the recording does not know: runs of capitalised words.
-        runs = Counter(run for f in facts for run in support.capital_runs(f.text))
-        name = runs.most_common(1)[0][0] if runs else ""
-    stamp = overview.mmss(min(f.start_ms for f in facts))
-    return f"{stamp} — {name}" if name else stamp
+    # B1 T2: what the section claims, never a stamp and a name.
+    return overview.chapter_heading(facts, ctx.language, ctx.known) or overview.mmss(
+        min(f.start_ms for f in facts)
+    )
 
 
 def _recase(heading: str, language: str, evidence: str = "") -> str:
@@ -1245,7 +1309,7 @@ def _repair_headings(
             out.append(s)
             continue
         heading = (s.title or "").strip()
-        faults = heading_faults(heading)
+        faults = heading_faults(heading, ctx.heading_max_words)
         if "punctuation" in faults or "question" in faults:
             heading = heading.rstrip(":.!?; ").strip()
             done[code] += 1
@@ -1254,7 +1318,7 @@ def _repair_headings(
             heading = _recase(heading, ctx.language, evidence)
             done[code] += 1
         if "chars" in faults:
-            heading = " ".join(heading.split()[: HEADING_WORDS[1]])
+            heading = " ".join(heading.split()[: ctx.heading_max_words])
             done[code] += 1
         generic = heading.casefold() in GENERIC_HEADINGS
         unsupported = bool(evidence) and any(
@@ -1267,7 +1331,8 @@ def _repair_headings(
         previous = out[-1] if out and _headed(out[-1]) else None
         if (
             previous
-            and _overlap(_tokens(previous.title or ""), _tokens(heading)) > HEADING_MAX_SHARED
+            and _overlap(_heading_tokens(previous.title or ""), _heading_tokens(heading))
+            > HEADING_MAX_SHARED
         ):
             out[-1] = _merge(previous, s, ctx)
             done[code] += 1
@@ -1284,7 +1349,7 @@ def _groups(s: RenderedSection) -> list[list[Line]]:
     """Top-level points with their sub-points (and any table rows)."""
     groups: list[list[Line]] = []
     for ln in s.lines:
-        point = (_is_bullet(ln) and not _is_child(ln)) or ln.kind == "figure"
+        point = (_is_bullet(ln) and not _is_child(ln)) or ln.kind in ("figure", "claim")
         if groups and not point:
             groups[-1].append(ln)
         else:
@@ -1296,7 +1361,7 @@ def _split(s: RenderedSection, ctx: LintContext, taken: set[str]) -> list[Render
     """At the largest time gap between points; the second half is headed
     by its entity and time."""
     groups = _groups(s)
-    low = POINTS_PER_SECTION[0]
+    low = ctx.points[0]
     if len(groups) < 2 * low:
         return [s]
     starts = [min((t for ln in g if (t := _start(ln, ctx)) is not None), default=0) for g in groups]
@@ -1322,7 +1387,7 @@ def _repair_sections(
     if [s.section_key for s in ordered] != [s.section_key for s in topics]:
         done[code] += 1
     topics = ordered
-    low, high = POINTS_PER_SECTION
+    low, high = ctx.points
     n = 0
     while n < len(topics) and len(topics) > 1:
         if _points(topics[n]) < low:
@@ -1339,7 +1404,8 @@ def _repair_sections(
         done[code] += len(parts) - 1
         split += parts
     topics = split
-    if count and ctx.minutes >= SECTIONS_FROM_MINUTES:
+    # A profile that leaves out topic sections (N2) gets no chapters in their place.
+    if count and ctx.topics_expected and ctx.minutes >= SECTIONS_FROM_MINUTES:
         target = target_sections(ctx.minutes)
         while len(topics) > min(SECTIONS_MAX, target + SECTIONS_TOLERANCE):
             pair = _mergeable_pair(topics, ctx)
@@ -1375,7 +1441,7 @@ def _chapters(ctx: LintContext, taken: set[str]) -> list[RenderedSection]:
             line = Line(f"- {text.strip().rstrip('.')}", "bullet", tuple(ids))
             if line_fault(line, ctx) is None:
                 lines.append(line)
-        if len(lines) < POINTS_PER_SECTION[0]:
+        if len(lines) < ctx.points[0]:
             continue
         key = roles.generated_key(title, taken)
         taken.add(key)
@@ -1392,7 +1458,7 @@ def _repair_volume(
     section."""
     if ctx.minutes < VOLUME_FROM_MINUTES:
         return sections
-    low, high = volume_band(ctx.minutes)
+    low, high = volume_band(ctx.minutes, ctx.scale)
     code = RULES["volume.words"].code
     words = body_words(sections)
     sections = list(sections)
@@ -1427,7 +1493,7 @@ def _repair_volume(
         for _spec, _order, si, n in candidates:
             if words <= high:
                 break
-            if points[si] <= POINTS_PER_SECTION[0]:
+            if points[si] <= ctx.points[0]:
                 continue
             owned = sections[si].lines
             group = [n]
@@ -1453,7 +1519,7 @@ def _home(
 ) -> int | None:
     best, distance = None, None
     for n in topics:
-        if _points(sections[n]) >= POINTS_PER_SECTION[1]:
+        if _points(sections[n]) >= ctx.points[1]:
             continue
         span = _span(sections[n], ctx)
         if span is None:
@@ -1487,8 +1553,14 @@ def lint(sections: Sequence[RenderedSection], ctx: LintContext) -> LintReport:
 
 
 def context_of(
-    document: Any, *, known: frozenset[str] = frozenset(), title: str | None = None
+    document: Any,
+    *,
+    known: frozenset[str] = frozenset(),
+    title: str | None = None,
+    styling: Any = None,
 ) -> LintContext:
+    """``styling`` (N2): the run's writing profile; its bands replace the standard ones and
+    the run's length scale (``stats.length_scale``) scales the volume and summary."""
     stats = document.stats or {}
     speech = int(stats.get("speech_ms") or 0) - int(stats.get("excluded_ms") or 0)
     orientation = (document.brief or {}).get("orientation") or {}
@@ -1512,7 +1584,22 @@ def context_of(
         facts_by_third=tuple(int(n) for n in stats.get("facts_by_third") or ()),
         minutes_by_third=tuple(float(m) for m in stats.get("speech_minutes_by_third") or ()),
         fidelity=bool(stats.get("fidelity")),
+        **_styled(styling, stats),
     )
+
+
+def _styled(styling: Any, stats: dict[str, Any]) -> dict[str, Any]:
+    """The LintContext fields a writing profile changes; {} without one (today's bands)."""
+    scale = float(stats.get("length_scale") or 1.0)
+    if styling is None:
+        return {"scale": scale} if scale != 1.0 else {}
+    return {
+        "scale": scale,
+        "points": tuple(styling.bullets),
+        "heading_max_words": styling.heading_max_words,
+        "topics_expected": not styling.topics_off,
+        "avoid": tuple(styling.avoid),
+    }
 
 
 async def enforce(
@@ -1521,11 +1608,21 @@ async def enforce(
     regenerate: Regenerate | None = None,
     known: frozenset[str] = frozenset(),
     title: str | None = None,
+    profile: Any = None,
+    writing_style: str = "business",
 ) -> Any:
     """Lint, send hard findings to the hook once, repair and fall back, record.
-    Never raises: a failing linter leaves the document as it was (``stats.lint.error``)."""
+    Never raises: a failing linter leaves the document as it was (``stats.lint.error``).
+    ``profile`` (N2) and ``writing_style`` (N0): the bands follow the run's styling."""
     try:
-        ctx = context_of(document, known=known, title=title)
+        from .styling import build
+
+        styling = (
+            build(profile, writing_style)
+            if profile is not None or writing_style != "business"
+            else None
+        )
+        ctx = context_of(document, known=known, title=title, styling=styling)
         sections = list(document.sections)
         findings = check(sections, ctx)
         regenerated = 0
@@ -1611,6 +1708,6 @@ def rubric_auto(sections: Sequence[RenderedSection], ctx: LintContext) -> dict[s
     q7: int | None = None
     words = body_words(sections)
     if ctx.minutes >= VOLUME_FROM_MINUTES:
-        low, high = volume_band(ctx.minutes)
+        low, high = volume_band(ctx.minutes, ctx.scale)
         q7 = 2 if low <= words <= high else 1 if 0.75 * low <= words <= 1.25 * high else 0
     return {"Q3": q3, "Q7": q7, "specific_share": share, "words": words}

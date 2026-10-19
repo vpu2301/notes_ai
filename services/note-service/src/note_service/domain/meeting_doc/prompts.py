@@ -14,7 +14,7 @@ from typing import Any, Final
 
 # Versions 2026-10-12 … 2026-10-23 were labels set ahead of the calendar; compare
 # versions by the hash table in test_meeting_doc_prompts.py, never by string order.
-PROMPT_VERSION: Final = "2026-10-18.3"
+PROMPT_VERSION: Final = "2026-10-19.3"
 # What a generation with multilingual evidence OFF sends, byte for byte (the rollback path).
 PREVIOUS_PROMPT_VERSION: Final = "2026-10-01.3"
 
@@ -164,6 +164,11 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         # A statement that stands on its own.
         "standalone_right": "Ferrytale reprints remain delayed by a shortage of card stock",
         "standalone_wrong": "It was noted that reprints are delayed",
+        # Sprint B2: the narrated addenda and the outline step.
+        "narrated_figure": "approval of the Quillhaven council's work in September",
+        "narrated_bullet": "35 of the 100 seats on the Quillhaven council are up for election, 22 of them held by the Ferrytale list",
+        "outline_levy": "Why the Ferrytale levy decides the majority",
+        "outline_rights": "The Quillhaven council's rights",
         # The extraction shots.
         "shot_proposal": "I think we should print the Lantern edition in midnight blue.",
         "shot_hold": "Hmm. Let me think about that.",
@@ -200,6 +205,11 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "opinion_text": "das Ferrytale-Regelheft wurde als verwirrend beschrieben",
         "standalone_right": "Ferrytale-Nachdrucke verzögern sich weiter wegen knappen Kartenkartons",
         "standalone_wrong": "Es wurde festgestellt, dass Nachdrucke verzögert sind",
+        # Sprint B2: the narrated addenda and the outline step.
+        "narrated_figure": "Zustimmung zur Arbeit des Quillhaven-Rats im September",
+        "narrated_bullet": "35 der 100 Sitze im Quillhaven-Rat stehen zur Wahl, 22 davon von der Ferrytale-Liste",
+        "outline_levy": "Warum die Ferrytale-Abgabe die Mehrheit entscheidet",
+        "outline_rights": "Die Rechte des Quillhaven-Rats",
         "shot_proposal": "Ich finde, wir sollten die Lantern-Edition in Mitternachtsblau drucken.",
         "shot_hold": "Hmm. Lass mich darüber nachdenken.",
         "shot_should": "Wir sollten das Ferrytale-Regelheft wirklich neu schreiben.",
@@ -228,6 +238,11 @@ EXAMPLES: Final[dict[str, dict[str, str]]] = {
         "opinion_text": "правила Ferrytale описано як заплутані",
         "standalone_right": "Передруки Ferrytale досі затримуються через нестачу картону",
         "standalone_wrong": "Було зазначено, що передруки затримуються",
+        # Sprint B2: the narrated addenda and the outline step.
+        "narrated_figure": "схвалення роботи ради Квілхейвена у вересні",
+        "narrated_bullet": "35 зі 100 місць у раді Квілхейвена переобирають, 22 з них — у списку Ferrytale",
+        "outline_levy": "Чому збір Ferrytale вирішує більшість",
+        "outline_rights": "Права ради Квілхейвена",
         "shot_proposal": "Гадаю, варто надрукувати Lantern-видання в темно-синьому кольорі.",
         "shot_hold": "Хм. Дай подумати.",
         "shot_should": "Треба переписати правила Ferrytale.",
@@ -536,6 +551,204 @@ REDUCE_CONTEXT_SYSTEM: Final[dict[str, str]] = {
 
 
 # The small-model profile shows ONE example: every example is one more thing to copy.
+# ── Sprint B2: narrated families (broadcast, memo) ──────────────────
+# Addenda appended after a builder's base text and before the guard when the family is
+# narrated; the meeting tables above stay byte for byte what they were.
+
+EXTRACT_NARRATED: Final[dict[str, str]] = {
+    "en": (
+        "This recording is a narrated piece: a presenter explains and reports what others "
+        "say. In addition to the rules above:\n"
+        "- Every number the presenter attaches to something named is a `figure` whose "
+        f"`name` carries the referent ('{_EN['narrated_figure']}', never just 'approval'); a "
+        "number without a referent is not a fact.\n"
+        "- When the presenter relays a claim made by another person or side, that is a fact "
+        "with `attributed_to` = who claims and `certainty`: `reported` when the presenter only "
+        "relays it; `unproven` when the presenter calls it unsubstantiated, unproven or "
+        "unconfirmed; `refuted` when the presenter calls it disproven, false or not the case. "
+        "The quote includes the presenter's words about it.\n"
+        "- A promise or an announcement stays a promise (`certainty: proposal`, "
+        "`attributed_to` = who promises); never write that something happens when it was said "
+        "that it should happen.\n"
+        "- What the piece explains (rules, an institution's numbers, historical comparisons) is "
+        "a `key_point` even if nobody 'says' it; pointers to other videos, comments or the "
+        "channel are not."
+    ),
+    "de": (
+        "Diese Aufnahme ist ein erzähltes Stück: eine Sprecherin oder ein Sprecher erklärt und "
+        "berichtet, was andere sagen. Zusätzlich zu den Regeln oben:\n"
+        "- Jede Zahl, die die Sprecherin an etwas Benanntes hängt, ist ein `figure` mit dem "
+        f"Bezug im `name` („{_DE['narrated_figure']}“, nie nur „Zustimmung“); eine Zahl ohne "
+        "Bezug ist kein Fakt.\n"
+        "- Wenn die Sprecherin eine Behauptung einer anderen Person oder Seite wiedergibt, ist "
+        "das ein Fakt mit `attributed_to` = wer behauptet und `certainty`: `reported`, wenn die "
+        "Sprecherin die Behauptung nur wiedergibt; `unproven`, wenn sie sie als unbelegt, nicht "
+        "nachgewiesen oder unbestätigt bezeichnet; `refuted`, wenn sie sie als widerlegt, "
+        "falsch oder nicht zutreffend bezeichnet. Das Zitat enthält die Worte der Sprecherin "
+        "dazu.\n"
+        "- Ein Versprechen oder eine Ankündigung bleibt ein Versprechen (`certainty: proposal`, "
+        "`attributed_to` = wer verspricht); schreibe nie, dass etwas geschieht, wenn gesagt "
+        "wurde, dass es geschehen soll.\n"
+        "- Was das Stück erklärt (Regeln, Zahlen einer Institution, geschichtliche "
+        "Vergleiche), ist ein `key_point`, auch wenn niemand es „sagt“; der Hinweis auf "
+        "weitere Videos, Kommentare oder den Kanal ist keiner."
+    ),
+    "uk": (
+        "Цей запис — розповідний матеріал: ведуча або ведучий пояснює і переказує, що кажуть "
+        "інші. На додачу до правил вище:\n"
+        "- Кожне число, яке ведуча прив'язує до чогось названого, є `figure`, а `name` несе "
+        f"те, до чого воно стосується («{_UK['narrated_figure']}», ніколи просто "
+        "«схвалення»); число без того, до чого воно стосується, не є фактом.\n"
+        "- Коли ведуча переказує твердження іншої особи чи сторони, це факт із `attributed_to` "
+        "= хто стверджує та `certainty`: `reported`, коли ведуча лише переказує; `unproven`, "
+        "коли вона називає його непідтвердженим, недоведеним або неперевіреним; `refuted`, "
+        "коли вона називає його спростованим, хибним або таким, що не відповідає дійсності. "
+        "Цитата містить слова ведучої про це.\n"
+        "- Обіцянка або анонс лишається обіцянкою (`certainty: proposal`, `attributed_to` = хто "
+        "обіцяє); ніколи не пиши, що щось відбувається, якщо сказано, що воно має відбутися.\n"
+        "- Те, що матеріал пояснює (правила, цифри установи, історичні порівняння), є "
+        "`key_point`, навіть якщо ніхто цього не «каже»; згадка про інші відео, коментарі чи "
+        "канал — ні."
+    ),
+}
+
+CONTEXT_NARRATED: Final[dict[str, str]] = {
+    "en": (
+        "This recording is a narrated piece. `subject` names what it is about, with no year "
+        "unless the facts name the year of the event itself. `framing` says in one sentence "
+        "what the piece explains and where it leads (its thesis), not that it is a video. "
+        "`key_fact_ids` begin with the fact a viewer would retell first (the surprising "
+        "number, the promise, the decision), then the thesis, then the main figures."
+    ),
+    "de": (
+        "Diese Aufnahme ist ein erzähltes Stück. `subject` nennt, worum es geht, ohne "
+        "Jahreszahl, es sei denn, die Fakten nennen das Jahr des Ereignisses selbst. `framing` "
+        "sagt in einem Satz, was das Stück erklärt und worauf es hinausläuft (seine These), "
+        "nicht, dass es ein Video ist. `key_fact_ids` beginnen mit dem Fakt, den ein Zuschauer "
+        "als Erstes weitererzählen würde (die überraschende Zahl, das Versprechen, die "
+        "Entscheidung), dann die These, dann die wichtigsten Zahlen."
+    ),
+    "uk": (
+        "Цей запис — розповідний матеріал. `subject` називає, про що він, без року, якщо "
+        "тільки факти самі не називають рік події. `framing` одним реченням каже, що матеріал "
+        "пояснює і до чого веде (його теза), а не те, що це відео. `key_fact_ids` починаються "
+        "з факту, який глядач переказав би першим (несподіване число, обіцянка, рішення), "
+        "далі теза, далі головні цифри."
+    ),
+}
+
+# The block addendum opens with the section's standing title when the outline gave one.
+BLOCK_NARRATED_LEAD: Final[dict[str, dict[str, str]]] = {
+    "en": {
+        "titled": "These facts belong to one section of the argument, whose title stands: {title}.",
+        "untitled": "These facts belong to one section of the argument.",
+    },
+    "de": {
+        "titled": "Diese Fakten gehören zu einem Abschnitt des Arguments, dessen Titel feststeht: {title}.",
+        "untitled": "Diese Fakten gehören zu einem Abschnitt des Arguments.",
+    },
+    "uk": {
+        "titled": "Ці факти належать до одного розділу аргументу, заголовок якого вже визначено: {title}.",
+        "untitled": "Ці факти належать до одного розділу аргументу.",
+    },
+}
+BLOCK_NARRATED: Final[dict[str, str]] = {
+    "en": (
+        "Write the points so that the numbers, dates and names are IN the point "
+        f"('{_EN['narrated_bullet']}'), not in a sub-point. Do not repeat what the opening "
+        "sentence already says. A relayed claim names who makes it and keeps the presenter's "
+        "verdict ('— unsubstantiated', '— refuted', '— rare according to studies'). A promise "
+        "stays a promise, with 'promises' or 'is to'."
+    ),
+    "de": (
+        "Schreibe die Punkte so, dass die Zahlen, Daten und Namen IM Punkt stehen "
+        f"(„{_DE['narrated_bullet']}“), nicht in einem Unterpunkt. Wiederhole nicht, was der "
+        "Einleitungssatz schon sagt. Eine wiedergegebene Behauptung nennt, wer sie aufstellt, "
+        "und behält das Urteil der Sprecherin („— unbelegt“, „— widerlegt“, „— laut "
+        "Untersuchungen selten“). Ein Versprechen bleibt im Konjunktiv oder mit „verspricht“."
+    ),
+    "uk": (
+        "Пиши пункти так, щоб числа, дати й імена стояли В пункті "
+        f"(«{_UK['narrated_bullet']}»), а не в підпункті. Не повторюй того, що вже каже "
+        "вступне речення. Переказане твердження називає, хто його висуває, і зберігає вердикт "
+        "ведучої («— непідтверджено», «— спростовано», «— за даними досліджень рідко»). "
+        "Обіцянка лишається обіцянкою — з «обіцяє» або «має»."
+    ),
+}
+
+SUMMARY_NARRATED: Final[dict[str, str]] = {
+    "en": (
+        "This recording is a narrated piece. The first sentence says what is at stake (the "
+        "thesis); the second names the fact a viewer would retell first; the further sentences "
+        "carry the main figures and claims with the presenter's verdict. At most 5 sentences. "
+        "No chronology ('first, then'), no description of the video."
+    ),
+    "de": (
+        "Diese Aufnahme ist ein erzähltes Stück. Der erste Satz sagt, was auf dem Spiel steht "
+        "(die These); der zweite nennt den Fakt, den ein Zuschauer als Erstes weitererzählen "
+        "würde; die weiteren Sätze tragen die wichtigsten Zahlen und Behauptungen mit dem "
+        "Urteil der Sprecherin. Höchstens 5 Sätze. Keine Chronologie („zuerst, dann“), keine "
+        "Beschreibung des Videos."
+    ),
+    "uk": (
+        "Цей запис — розповідний матеріал. Перше речення каже, що на кону (теза); друге "
+        "називає факт, який глядач переказав би першим; наступні речення несуть головні цифри "
+        "й твердження з вердиктом ведучої. Щонайбільше 5 речень. Без хронології («спочатку, "
+        "потім»), без опису відео."
+    ),
+}
+
+# One rule for the title call on a narrated recording (the title prompt is English).
+TITLE_NARRATED: Final = (
+    "When the facts contain one surprising, concrete claim (a promise, a number, a verdict), "
+    "the title names the subject and that claim, joined by a colon, within the length limit "
+    "('Quillhaven council vote: the Ferrytale levy promise' — an invented town, never copied); "
+    "otherwise the subject alone."
+)
+
+# The outline step (B2 T2): one call over all verified facts proposes the sections of a
+# narrated recording's argument; code builds the blocks from the assignment.
+OUTLINE_SYSTEM: Final[dict[str, str]] = {
+    "en": (
+        "These are the verified facts of one narrated recording (an explainer, a report, a "
+        "lecture), in time order, each with its id. Return `sections`: 4 to 6 sections that are "
+        "the recording's ARGUMENT — the steps a listener would use to retell it — each with a "
+        "`title` and the `fact_ids` that belong to it. A title is a noun phrase of 3 to 8 words "
+        f"naming what that part establishes ('{_EN['outline_levy']}', "
+        f"'{_EN['outline_rights']}'); never a generic label (Background, Overview, Other), "
+        "never a question, never a name alone. Put every fact in exactly one section; a fact "
+        "may belong to a later section than its position if the argument needs it there. The "
+        "first section is what the recording is about and what is at stake; the last is what "
+        "happens next or what remains open, when the facts say so. Use only the ids given."
+    ),
+    "de": (
+        "Dies sind die geprüften Fakten einer erzählten Aufnahme (Erklärstück, Bericht, "
+        "Vortrag), in zeitlicher Reihenfolge, jeder mit seiner id. Gib `sections` zurück: 4 "
+        "bis 6 Abschnitte, die das ARGUMENT der Aufnahme sind — die Schritte, in denen jemand "
+        "sie nacherzählen würde — jeder mit `title` und den `fact_ids`, die hineingehören. Ein "
+        "Titel ist eine Nominalphrase aus 3 bis 8 Wörtern, die sagt, was dieser Teil festhält "
+        f"(„{_DE['outline_levy']}“, „{_DE['outline_rights']}“); nie eine allgemeine "
+        "Bezeichnung (Hintergrund, Überblick, Sonstiges), nie eine Frage, nie nur ein Name. "
+        "Jeder Fakt gehört in genau einen Abschnitt; er darf in einem späteren Abschnitt "
+        "stehen als seine Position, wenn das Argument es verlangt. Der erste Abschnitt sagt, "
+        "worum es geht und was auf dem Spiel steht; der letzte, was als Nächstes kommt oder "
+        "offen bleibt, wenn die Fakten es sagen. Nur die gegebenen ids."
+    ),
+    "uk": (
+        "Це перевірені факти одного розповідного запису (пояснення, репортаж, лекція) у "
+        "хронологічному порядку, кожен зі своїм id. Поверни `sections`: 4–6 розділів, що є "
+        "АРГУМЕНТОМ запису — кроками, якими слухач переказав би його — кожен із `title` та "
+        "`fact_ids`, що до нього належать. Заголовок — іменникова фраза з 3–8 слів, яка "
+        f"називає, що саме встановлює ця частина («{_UK['outline_levy']}», "
+        f"«{_UK['outline_rights']}»); ніколи загальна назва (Передісторія, Огляд, Інше), "
+        "ніколи запитання, ніколи лише ім'я. Кожен факт належить рівно одному розділу; факт "
+        "може стояти в пізнішому розділі, ніж його позиція, якщо цього вимагає аргумент. "
+        "Перший розділ — про що запис і що на кону; останній — що далі або що лишається "
+        "відкритим, коли факти про це кажуть. Лише надані id."
+    ),
+}
+
+
 _EXTRACT_SHOT_ONE: Final[dict[str, str]] = {
     "en": (
         "Example of the mistake to avoid (an invented company — never copy from it):\n"
@@ -569,13 +782,19 @@ def guard(language: str) -> str:
 
 
 def extract_system(
-    language: str, *, noise: bool = True, multilingual: bool = False, task: Task | None = None
+    language: str,
+    *,
+    noise: bool = True,
+    multilingual: bool = False,
+    task: Task | None = None,
+    narrated: bool = False,
 ) -> str:
     """``noise=False`` (small-model profile) leaves out the rule for the absent field.
     ``multilingual``: no language is noise, and lines in another language are evidence
     restated in ``language``; off, the prompt is byte for byte the previous version's.
     ``task``: the common rules and the extraction text go first; this builder's rules
-    (kinds, quotes, fields, the noise and source-language rules, the guard) stay under them."""
+    (kinds, quotes, fields, the noise and source-language rules, the guard) stay under them.
+    ``narrated`` (B2 T3): the broadcast/memo addendum after the rules, before the guard."""
     text = _pick(EXTRACT_SYSTEM, language)
     rule = _pick(_NOISE_RULE, language)
     if multilingual:
@@ -585,6 +804,8 @@ def extract_system(
             text = text.replace(_ANSWER_LANGUAGE_LINE[language], _SOURCE_LANGUAGE_RULE[language])
     if not noise:
         text = text.replace(rule, "")
+    if narrated:
+        text = f"{text}\n\n{_pick(EXTRACT_NARRATED, language)}"
     rules = f"{text}\n\n{guard(language)}"
     return _with_task(f"{task.common}\n\n{task.extraction}" if task else None, rules)
 
@@ -679,7 +900,9 @@ ENTITY_SYSTEM: Final = (
     "You receive spellings of names as a speech recogniser wrote them, and what the "
     "recording is about. For each spelling, give the correct spelling of the real "
     "person, organisation or place it most likely is, or the same spelling if unsure. "
-    "Never replace a name with a different person. Answer for every spelling given."
+    "Never replace a name with a different person. Answer for every spelling given. "
+    "Removing an article, changing a grammatical ending or capitalisation is not a "
+    "correction: give the same spelling. A capital letter alone does not make a word a name."
 )
 
 
@@ -748,6 +971,28 @@ def coverage_suffix(language: str, start_ms: int, end_ms: int, ids: Sequence[str
         .replace("{end}", mmss(end_ms))
         .replace("{ids}", ", ".join(ids) or "—")
     )
+
+
+# F2-03 — the recovery pass: high-risk lines no writable fact came from, asked for once.
+RECOVERY_SUFFIX: Final[dict[str, str]] = {
+    "en": "Line(s) {lines} state something no fact captures yet (a promise, a condition, an "
+    "amount, a decision). Return what each says as a `key_point`: the quote copied exactly "
+    "from that line, the text keeping every condition, amount, recipient and who says it. "
+    "If a line states nothing of the kind, return nothing for it.",
+    "de": "Zeile(n) {lines} sagen etwas, das noch kein Fakt erfasst (ein Versprechen, eine "
+    "Bedingung, einen Betrag, eine Entscheidung). Gib jeweils als `key_point` zurück, was die "
+    "Zeile sagt: das Zitat wörtlich aus dieser Zeile, der Text mit jeder Bedingung, jedem "
+    "Betrag, jedem Empfänger und wer es sagt. Sagt eine Zeile nichts dergleichen, gib für sie "
+    "nichts zurück.",
+    "uk": "Рядок(и) {lines} кажуть те, чого ще не охоплює жоден факт (обіцянку, умову, суму, "
+    "рішення). Поверни сказане в кожному як `key_point`: цитата дослівно з цього рядка, текст "
+    "зберігає кожну умову, суму, отримувача і того, хто це каже. Якщо рядок нічого такого не "
+    "каже, нічого для нього не повертай.",
+}
+
+
+def recovery_suffix(language: str, lines: Sequence[int]) -> str:
+    return _pick(RECOVERY_SUFFIX, language).replace("{lines}", ", ".join(str(n) for n in lines))
 
 
 # Lines code found an introduction in, pointed out to the extractor.
@@ -887,8 +1132,23 @@ SUMMARY_BLOCKS: Final[dict[str, str]] = {
 }
 
 
-def block_system(language: str, bullets: int = 4, *, task: Task | None = None) -> str:
+def block_system(
+    language: str,
+    bullets: int = 4,
+    *,
+    task: Task | None = None,
+    narrated: bool = False,
+    title: str = "",
+) -> str:
+    """``narrated`` (B2 T3): the broadcast/memo addendum after the table's text; ``title``
+    is the outline's standing title for this block, named in the addendum's lead."""
     text = _pick(BLOCK_SYSTEM, language).replace("{bullets}", str(bullets))
+    if narrated:
+        lead = _pick(BLOCK_NARRATED_LEAD, language)  # type: ignore[arg-type]
+        opening = (
+            lead["titled"].replace("{title}", title.strip()) if title.strip() else lead["untitled"]
+        )
+        text = f"{text}\n\n{opening} {_pick(BLOCK_NARRATED, language)}"
     composing = (
         task.composing("TOPIC/BULLET SUBTASK", "HEADING SUBTASK", "CHRONOLOGY") if task else ""
     )
@@ -1018,12 +1278,22 @@ def topics_system(language: str) -> str:
     return f"{_pick(REDUCE_TOPICS_SYSTEM, language)}\n\n{guard(language)}"
 
 
-def summary_system(language: str, *, task: Task | None = None) -> str:
-    rules = f"{_pick(REDUCE_SUMMARY_SYSTEM, language)}\n\n{guard(language)}"
+def summary_system(language: str, *, task: Task | None = None, narrated: bool = False) -> str:
+    text = _pick(REDUCE_SUMMARY_SYSTEM, language)
+    if narrated:
+        text = f"{text}\n\n{_pick(SUMMARY_NARRATED, language)}"
+    rules = f"{text}\n\n{guard(language)}"
     return _with_task(
         f"{task.common}\n\n{task.composing('SUMMARY SUBTASK', 'CHRONOLOGY')}" if task else None,
         rules,
     )
+
+
+def outline_system(language: str, *, task: Task | None = None) -> str:
+    """The outline step's system text (B2 T2): the common task rules, then the outline rules
+    and the guard."""
+    rules = f"{_pick(OUTLINE_SYSTEM, language)}\n\n{guard(language)}"
+    return _with_task(f"{task.common}\n\n{task.composing()}" if task else None, rules)
 
 
 # The one follow-up for figures that came back without their fields.
@@ -1093,6 +1363,39 @@ _DEDUPLICATION_CONTRACT: Final = (
     "is the proposition that corrects the left); a reason of a few words; merged_text for "
     "an equivalent pair, or null."
 )
+
+
+# F2-01 — the participant check: code cannot tell a person introduced as taking part from
+# an event, a chamber or a quoted voice named near an introduction cue.
+_PARTICIPANTS: Final = (
+    "Each item in the data is a name that may have been introduced, with the lines around "
+    "it; a line's id is the number in its brackets. Decide from the shown lines only, never "
+    "from outside knowledge. entity: what the name denotes — person, event (an election, a "
+    "vote, a war), institution (a chamber, a party, a company, a ministry), topic, or "
+    "unknown. introduced: true only if a line presents that person as taking part in this "
+    "recording (presenting it, interviewed, a guest, speaking in it); a person who is only "
+    "mentioned, reported on or quoted is not introduced. participation: host, guest, "
+    "interviewee, quoted (their recorded words are played or cited; they do not take part), "
+    "or unknown. An institution is never a guest; a named person speaking for it can be. "
+    "speaks_at: the id of the first shown line that the introduced person speaks "
+    "themselves, or null when no shown line is clearly theirs. evidence_ids: the ids the "
+    "decision rests on. When unsure, answer unknown, false and null. Answer one entry per "
+    "item, every item exactly once, item_id as given."
+)
+
+
+def participants_system(language: str, *, task: Task) -> str:
+    """Common rules, the participant contract, the data guard."""
+    return f"{task.common}\n\n{_PARTICIPANTS}\n\n{guard(language)}"
+
+
+def participants_prompt(items: list[tuple[str, str, list[str]]]) -> str:
+    """``items`` = ``[(item_id, name, rendered lines)]``."""
+    blocks = []
+    for item_id, name, lines in items:
+        shown = "\n".join(f"   {line}" for line in lines)
+        blocks.append(f"item_id {item_id}: {name}\n{shown}")
+    return f"{DATA_OPEN}\n" + "\n".join(blocks) + f"\n{DATA_CLOSE}"
 
 
 def meaning_check_system(language: str, *, task: Task) -> str:
@@ -1175,10 +1478,13 @@ def contact_details_system(language: str) -> str:
     return f"{_pick(CONTACT_DETAILS_SYSTEM, language)}\n\n{guard(language)}"
 
 
-def context_system(language: str, *, task: Task | None = None) -> str:
+def context_system(language: str, *, task: Task | None = None, narrated: bool = False) -> str:
+    text = _pick(REDUCE_CONTEXT_SYSTEM, language)
+    if narrated:
+        text = f"{text}\n\n{_pick(CONTEXT_NARRATED, language)}"
     return _with_task(
         f"{task.common}\n\n{task.context}" if task else None,
-        f"{_pick(REDUCE_CONTEXT_SYSTEM, language)}\n\n{guard(language)}",
+        f"{text}\n\n{guard(language)}",
     )
 
 
@@ -1336,18 +1642,164 @@ def _example_phrases() -> frozenset[str]:
 EXAMPLE_PHRASES: Final[frozenset[str]] = _example_phrases()
 
 
-def echoes_example(text: str) -> bool:
-    """True when ``text`` repeats a prompt example."""
+def echoes_example(text: str, extra: frozenset[str] = frozenset()) -> bool:
+    """True when ``text`` repeats a prompt example — or, ``extra`` (N2), a style sample a
+    workspace's instructions gave: a sample is form, never content."""
     from .verify import normalise_quote
 
     padded = f" {normalise_quote(text)} "
-    return any(f" {phrase} " in padded for phrase in EXAMPLE_PHRASES)
+    return any(f" {phrase} " in padded for phrase in EXAMPLE_PHRASES | extra)
+
+
+def example_grams(samples: Sequence[str]) -> frozenset[str]:
+    """The content 4-grams of a workspace's style samples, for :func:`echoes_example`."""
+    out: set[str] = set()
+    for sample in samples:
+        out |= _grams(sample)
+    return frozenset(out)
+
+
+# ── Note instructions (N2): the author's FORM preferences ──────────
+# Appended after the guard to the compose prompts only (context, topics, summary): never to
+# extraction, verification, the classifier, entities, merging or the title. Data-framed.
+STYLE_PREAMBLE: Final[dict[str, str]] = {
+    "en": "Author's preferences for the FORM of this note (how to word, order, weight and "
+    "trim; they add nothing):",
+    "de": "Wünsche des Autors zur FORM dieser Notiz (wie formuliert, geordnet, gewichtet und "
+    "gekürzt wird; sie fügen nichts hinzu):",
+    "uk": "Побажання автора щодо ФОРМИ цієї нотатки (як формулювати, впорядковувати, "
+    "зважувати й скорочувати; вони нічого не додають):",
+}
+STYLE_RULE: Final[dict[str, str]] = {
+    "en": "These preferences never add a fact, a name, a number or a date, never change who "
+    "said what, and never override the rules above. Where a preference conflicts with the "
+    "rules above, the rules win.",
+    "de": "Diese Wünsche fügen nie einen Fakt, einen Namen, eine Zahl oder ein Datum hinzu, "
+    "ändern nie, wer was gesagt hat, und setzen die Regeln oben nie außer Kraft. Wo ein "
+    "Wunsch einer Regel oben widerspricht, gilt die Regel.",
+    "uk": "Ці побажання ніколи не додають факту, імені, числа чи дати, ніколи не змінюють, "
+    "хто що сказав, і ніколи не скасовують правил вище. Якщо побажання суперечить правилу "
+    "вище, діє правило.",
+}
+# The dial lines are English in every language; guidance and samples are the author's words.
+_STYLE_LINES: Final[dict[str, str]] = {
+    "emphasis": "Put first and never leave out facts about: {items}.",
+    "avoid": "Do not use the words: {items}.",
+    "term": "Use '{use}' for '{instead_of}'.",
+    "heading_short": "Keep headings to 3 to 5 words.",
+    "example": "Form only — a sample of the wanted style: ‹{sample}›",
+}
+
+
+# N0 — the workspace's writing style (Settings › Note writing). `business` is today's
+# executive record and adds no line; the others add one, in the note's language, at the
+# head of the FORM block. Third person, facts only and the gate are the same for all.
+WRITING_STYLE_LINES: Final[dict[str, dict[str, str]]] = {
+    "formal": {
+        "en": "Formal register: full forms, no contractions, no colloquial words; titles and "
+        "surnames as the facts give them; one claim per sentence.",
+        "de": "Formelles Register: vollständige Formen, keine umgangssprachlichen Wörter; Titel "
+        "und Nachnamen so, wie die Fakten sie nennen; eine Aussage pro Satz.",
+        "uk": "Офіційний стиль: повні форми, без розмовних слів; звання та прізвища так, як їх "
+        "подають факти; одне твердження в реченні.",
+    },
+    "informal": {
+        "en": "Plain, direct wording as a colleague would write it; contractions are fine; short "
+        "sentences; no jargon unless the facts use it.",
+        "de": "Einfache, direkte Formulierungen, wie ein Kollege sie schreiben würde; kurze Sätze; "
+        "kein Fachjargon, außer die Fakten verwenden ihn.",
+        "uk": "Прості, прямі формулювання, як написав би колега; короткі речення; без жаргону, "
+        "якщо його немає у фактах.",
+    },
+    "academic": {
+        "en": "Precise, hedged wording: keep every qualifier the facts carry ('estimated', "
+        "'argued', 'suggested'); name who holds each position; prefer 'the speaker argues' "
+        "over bare assertion; keep figures with their units.",
+        "de": "Präzise, abwägende Formulierungen: jede Einschränkung der Fakten behalten "
+        "('geschätzt', 'argumentiert', 'vorgeschlagen'); nennen, wer welche Position vertritt; "
+        "'der Sprecher argumentiert' statt bloßer Behauptung; Zahlen mit ihren Einheiten.",
+        "uk": "Точні, зважені формулювання: зберігати кожне застереження з фактів ('за оцінкою', "
+        "'стверджує', 'пропонує'); називати, хто якої позиції дотримується; 'доповідач "
+        "стверджує' замість голого твердження; числа з одиницями.",
+    },
+}
+
+
+def writing_style_lines(style: str, language: str) -> tuple[str, ...]:
+    """The writing style's line for this language; () for `business` (today's output)."""
+    table = WRITING_STYLE_LINES.get(style)
+    return (_pick(table, language),) if table else ()
+
+
+def style_block(
+    language: str,
+    *,
+    preset: Sequence[str] = (),
+    emphasis: Sequence[str] = (),
+    avoid: Sequence[str] = (),
+    terms: Sequence[tuple[str, str]] = (),
+    heading_short: bool = False,
+    guidance: Sequence[str] = (),
+    examples: Sequence[str] = (),
+) -> str:
+    """The FORM block for the compose prompts; "" when there is nothing to say (then no
+    prompt text changes at all). ``preset``: the writing style's line (N0) — the one the
+    instructions name, else the workspace picker's — first; the other dials follow."""
+    lines: list[str] = list(preset)
+    if emphasis:
+        lines.append(_STYLE_LINES["emphasis"].format(items=", ".join(emphasis)))
+    if avoid:
+        lines.append(_STYLE_LINES["avoid"].format(items=", ".join(avoid)))
+    lines += [_STYLE_LINES["term"].format(use=u, instead_of=i) for u, i in terms]
+    if heading_short:
+        lines.append(_STYLE_LINES["heading_short"])
+    lines += list(guidance)
+    lines += [_STYLE_LINES["example"].format(sample=e) for e in examples]
+    if not lines:
+        return ""
+    clean = [ln.replace(DATA_OPEN, "").replace(DATA_CLOSE, "") for ln in lines]
+    listing = "\n".join(f"- {ln}" for ln in clean)
+    return (
+        f"{_pick(STYLE_PREAMBLE, language)}\n{DATA_OPEN}\n{listing}\n{DATA_CLOSE}\n"
+        f"{_pick(STYLE_RULE, language)}"
+    )
+
+
+def with_style(system: str, block: str) -> str:
+    """A compose system text with the author's FORM block after it (unchanged when none)."""
+    return f"{system}\n\n{block}" if block else system
+
+
+# The heading length each block/heading table names, per language; a short-heading
+# profile asks for 3 to 5 words instead (the tables keep today's wording otherwise).
+_HEADING_RANGES: Final = ("3 to 8", "3 bis 8", "3–8")
+
+
+def heading_range(text: str, max_words: int) -> str:
+    if max_words == 8:
+        return text
+    for wording in _HEADING_RANGES:
+        text = text.replace(wording, wording.replace("8", str(max_words)))
+    return text
+
+
+def summary_band(text: str, band: tuple[int, int]) -> str:
+    """``SUMMARY_BLOCKS`` with the run's sentence band in place of "3 to 6"."""
+    if band == (3, 6):
+        return text
+    lo, hi = band
+    return (
+        text.replace("3 to 6", f"{lo} to {hi}")
+        .replace("3 bis 6", f"{lo} bis {hi}")
+        .replace("3–6", f"{lo}–{hi}")
+    )
 
 
 def _title_prompt() -> str:
     from ..note_title import _SYSTEM  # note_title imports this module
 
-    return _SYSTEM
+    # The meeting title prompt, byte for byte; the narrated rule is pinned on its own.
+    return _SYSTEM.replace("{narrated}", "")
 
 
 def _title_prompt_schema() -> dict:
@@ -1392,6 +1844,7 @@ def fingerprint() -> str:
         "task_resources": {name: _resource(name) for name in TASK_RESOURCES},
         "verification_contract": _VERIFICATION_CONTRACT,
         "deduplication_contract": _DEDUPLICATION_CONTRACT,
+        "participants": _PARTICIPANTS,
         "source_language_rule": _SOURCE_LANGUAGE_RULE,
         "answer_language_line": _ANSWER_LANGUAGE_LINE,
         "shot_one": _EXTRACT_SHOT_ONE,
@@ -1403,10 +1856,24 @@ def fingerprint() -> str:
         "subject_suffix": SUBJECT_SUFFIX,
         "summary_blocks": SUMMARY_BLOCKS,
         "coverage_suffix": COVERAGE_SUFFIX,
+        "recovery_suffix": RECOVERY_SUFFIX,
+        "style_preamble": STYLE_PREAMBLE,
+        "style_rule": STYLE_RULE,
+        "style_lines": _STYLE_LINES,
+        "writing_style_lines": WRITING_STYLE_LINES,
         # The title call changes what the note says, so it is pinned too.
         "title": _title_prompt(),
+        # Sprint B2: the narrated addenda and the outline step.
+        "extract_narrated": EXTRACT_NARRATED,
+        "context_narrated": CONTEXT_NARRATED,
+        "block_narrated_lead": BLOCK_NARRATED_LEAD,
+        "block_narrated": BLOCK_NARRATED,
+        "summary_narrated": SUMMARY_NARRATED,
+        "title_narrated": TITLE_NARRATED,
+        "outline": OUTLINE_SYSTEM,
         "schemas": {
             "extract": schema.EXTRACT_SCHEMA,
+            "outline": schema.OUTLINE_SCHEMA,
             "topics": schema.REDUCE_TOPICS_SCHEMA,
             "summary": schema.REDUCE_SUMMARY_SCHEMA,
             "context": schema.REDUCE_CONTEXT_SCHEMA,
@@ -1418,6 +1885,7 @@ def fingerprint() -> str:
             "merge": schema.MERGE_SCHEMA,
             "meaning_check": schema.meaning_check_schema(1),
             "deduplication": schema.deduplication_schema(1),
+            "participants": schema.participants_schema(1),
             "extract_multilingual": schema.extract_schema(
                 noise_reasons=schema.OFFERED_NOISE_REASONS
             ),

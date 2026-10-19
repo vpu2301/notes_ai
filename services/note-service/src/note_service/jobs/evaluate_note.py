@@ -42,12 +42,15 @@ class EvaluationDeps:
         provider_for: Any,
         provider_named: Any = None,
         costs: Any = None,
+        fallbacks: Any = None,
     ) -> None:
         self.app_pool = app_pool
         self.transcripts_store = transcripts_store
         self.provider_for = provider_for
         self.provider_named = provider_named
         self.costs = costs
+        # `() -> [{kind, backend, primary, reason}]`: overrides on their fallback (P1-02).
+        self.fallbacks = fallbacks
 
 
 async def handle_evaluate(deps: EvaluationDeps, *, tenant_id: UUID, payload: dict) -> dict:
@@ -111,7 +114,12 @@ async def handle_evaluate(deps: EvaluationDeps, *, tenant_id: UUID, payload: dic
         calls = [c for m in meters for c in m.calls]
         tokens = sum(c.get("input_tokens", 0) + c.get("output_tokens", 0) for c in calls)
         cents = _cost(deps.costs, calls)
-        metrics = {**metrics, "calls": per_model(calls), "tokens": tokens}
+        metrics = {
+            **metrics,
+            "calls": per_model(calls),
+            "tokens": tokens,
+            **comparison_integrity(run.config_snapshot, calls, _fallbacks(deps)),
+        }
         async with tenant_connection(deps.app_pool, tenant_id) as conn:
             await experiments.finish_run(
                 conn,
@@ -195,8 +203,11 @@ async def _run_one(
         )
         meters.append(meter)
         staged[stage] = meter
+    # The final check exactly as a generation runs it: the verification binding, metered apart.
+    staged["final_check"] = Metered(staged["verification"]._inner, stage="final_check")
+    meters.append(staged["final_check"])
 
-    from .generate_note import _recording_type
+    from .generate_note import _recording_type, final_check_pinned
 
     turns = windows.prepare_turns(windows.turns_from_result(result)).turns
     extractor = staged["extraction"]
@@ -228,9 +239,38 @@ async def _run_one(
         instructions=profiles.stage_overrides(config),
         stage_providers=staged,
         length=experiment.length,
+        final=final_check_pinned(snap),
     )
     document = await doclint.enforce(document, regenerate=document.regenerator)
-    return {"artifact": artifact_of(document, language), "metrics": metrics_of(document)}
+    document = await pipeline.finalize(document)
+    document.stats["prompt_hashes"] = profiles.prompt_hashes(
+        config,
+        language=language,
+        multilingual=bool(snap.get("multilingual", True)),
+        fidelity=bool(snap.get("fidelity", True)),
+        small=pipeline.small_model(extractor),
+        bullets=int(document.stats.get("bullets_per_block") or profiles.DEFAULT_BULLETS),
+    )
+    document.stats["runtime"] = {
+        "run_kind": snap.get("run_kind", "experiment"),
+        "pinned_build_sha": snap.get("build_sha"),
+        "algorithm_version": snap.get("algorithm_version"),
+    }
+    artifact = artifact_of(document, language)
+    metrics = metrics_of(document)
+    if source.get("case_id"):
+        # P1-04: a critical case is checked by code against the produced note.
+        from ..domain import acceptance
+
+        found = acceptance.case(str(source["case_id"]))
+        failures = acceptance.check(found.assertions, artifact) if found else ["unknown_case"]
+        metrics["acceptance"] = {
+            "case": source["case_id"],
+            "passed": not failures,
+            "failures": failures,
+            "suite_version": acceptance.suite_version(),
+        }
+    return {"artifact": artifact, "metrics": metrics}
 
 
 def artifact_of(document: Any, language: str) -> dict[str, Any]:
@@ -250,6 +290,16 @@ def artifact_of(document: Any, language: str) -> dict[str, Any]:
                 ],
             }
             for s in document.sections
+        ],
+        # Lines the final check kept out of the prose: shown for review, never as the note.
+        "unverified_lines": [
+            {
+                "section_key": r.section_key,
+                "text": r.line.text,
+                "fact_ids": list(r.line.fact_ids),
+                "reason": r.reason,
+            }
+            for r in getattr(document, "final_rejected", None) or []
         ],
         "facts": [
             {
@@ -287,6 +337,9 @@ _METRIC_KEYS = (
     "lines_total",
     "excluded_language_ms",
     "coverage_gaps",
+    "final_check",
+    "runtime",
+    "prompt_hashes",
 )
 
 
@@ -299,6 +352,42 @@ def metrics_of(document: Any) -> dict[str, Any]:
     }
 
 
+def _fallbacks(deps: EvaluationDeps) -> list[dict[str, Any]]:
+    try:
+        return list(deps.fallbacks()) if getattr(deps, "fallbacks", None) else []
+    except Exception:  # noqa: BLE001 — a report detail never fails a run
+        return []
+
+
+def comparison_integrity(
+    snapshot: dict[str, Any], calls: list[dict[str, Any]], fallbacks: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """P1-02 — what was asked for against what answered: ``requested`` (each stage's bound
+    backend, or ``routed``), ``fallbacks`` this worker resolved to, and ``clean`` only
+    when every bound stage was answered by its own backend and nothing fell back — else
+    ``unclean_reasons`` says why the result is not a comparison of the selected models."""
+    bindings = snapshot.get("models") or {}
+    requested = {stage: (binding.get("backend") or "routed") for stage, binding in bindings.items()}
+    reasons: list[str] = []
+    for stage, backend in requested.items():
+        if backend == "routed":
+            continue
+        meter_stages = {stage, "final_check"} if stage == "verification" else {stage}
+        answered = {str(c.get("backend")) for c in calls if c.get("stage") in meter_stages}
+        if answered - {backend}:
+            reasons.append(f"{stage}: answered by {', '.join(sorted(answered - {backend}))}")
+    if fallbacks:
+        reasons.append(
+            "model fallback: " + ", ".join(f"{f.get('kind')}→{f.get('backend')}" for f in fallbacks)
+        )
+    return {
+        "requested": requested,
+        "fallbacks": fallbacks,
+        "clean": not reasons,
+        "unclean_reasons": reasons,
+    }
+
+
 def per_model(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Calls grouped by stage, backend and model: what actually answered."""
     grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -307,9 +396,11 @@ def per_model(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
         g = grouped.setdefault(
             key,
             {"stage": key[0], "backend": key[1], "model_id": key[2], "calls": 0, "failed": 0,
-             "input_tokens": 0, "output_tokens": 0, "latency_ms": 0},
+             "input_tokens": 0, "output_tokens": 0, "latency_ms": 0, "system_hashes": []},
         )  # fmt: skip
         g["calls"] += 1
+        if c.get("system_sha") and c["system_sha"] not in g["system_hashes"]:
+            g["system_hashes"].append(c["system_sha"])
         g["failed"] += 0 if c.get("ok") else 1
         g["input_tokens"] += c.get("input_tokens", 0)
         g["output_tokens"] += c.get("output_tokens", 0)

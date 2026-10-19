@@ -4,7 +4,7 @@ why a proposition did or did not reach the note.
 
     uv run --project services/note-service --with pyyaml python scripts/eval/replay_note.py \
         --backend mistral_eu --input eval/notes/multilingual-real/r04_….json \
-        [--multilingual] [--find '5[.,]?000|dividend'] [--show-text]
+        [--multilingual [--fidelity]] [--find '5[.,]?000|dividend'] [--show-text] [--out DIR]
 
 ``--input`` is a result-view snapshot (``turns``/``segments``, as the worker reads it)
 or a gold-format meeting (``transcript``). The header pins what produced the run:
@@ -12,7 +12,8 @@ git SHA, input hash and revision, prompt version, backend, model, capability pro
 output language. ``--find`` lists the transcript lines matching a pattern and what
 became of every fact cited to them: extracted → excluded / dropped (and why) →
 verified → merged → rendered. Text is printed only with ``--show-text``: this is a
-local tool, its output is never a log.
+local tool, its output is never a log. Every replay is a new run with its own id;
+``--out`` saves its record as ``<input>-<run id>.json`` and never overwrites one.
 """
 
 from __future__ import annotations
@@ -24,7 +25,9 @@ import json
 import re
 import subprocess
 import sys
+import uuid
 from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -90,11 +93,14 @@ async def main(args: argparse.Namespace) -> int:
         if hasattr(provider, "aclose"):
             await provider.aclose()
     stats = produced["stats"]
+    run_id = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:8]}"
+    print(f"run id         {run_id}")
     print(f"git            {_git_sha()}")
     print(f"input          {args.input.name} sha256:{hashlib.sha256(raw).hexdigest()[:16]}")
     print(f"input revision {stats.get('input_revision')}")
     print(f"prompt version {stats.get('prompt_version')}")
-    print(f"multilingual   {stats.get('multilingual_evidence')}")
+    print(f"multilingual   {stats.get('multilingual_evidence')}  fidelity {stats.get('fidelity')}")
+    print(f"final check    {json.dumps(stats.get('final_check'), sort_keys=True)}")
     print(f"backend/model  {produced.get('backend')} / {produced.get('model_id')}")
     print(
         f"profile        small_model={stats.get('small_model_profile')} "
@@ -117,12 +123,14 @@ async def main(args: argparse.Namespace) -> int:
         "facts_dropped_noise", "noise_flagged", "noise_confirmed", "noise_advisory",
         "noise_other_language_advisory", "noise_overridden", "excluded_language_ms",
         "facts_dropped_paraphrase", "facts_cross_language", "meaning_check",
-        "meaning_unverified", "summary_fallback", "topics_fallback",
+        "meaning_unverified", "summary_fallback", "topics_fallback", "incomplete",
     )  # fmt: skip
     print("\nstages:")
     for key in keys:
         print(f"  {key}: {stats.get(key)}")
     print(f"  excluded_ranges: {stats.get('excluded_ranges')}")
+    placements = Counter(x["placement"] for x in stats.get("fates") or [])
+    print(f"  fact placements: {dict(sorted(placements.items()))}")
 
     if args.find:
         pattern = re.compile(args.find, re.IGNORECASE)
@@ -144,10 +152,21 @@ async def main(args: argparse.Namespace) -> int:
                 if t.get("start_ms") in within:
                     cited[n] += 1
                     print(f"    extracted ({t['kind']}, window {t['window']}) → {t['outcome']}")
+            fates = {x["key"]: x for x in stats.get("fates") or []}
             for f in produced["facts"]:
                 if f["start_ms"] in within:
-                    fate = "rendered" if f["item_key"] in rendered_ids else "merged, not rendered"
                     flags = ",".join(f.get("flags") or []) or "-"
+                    known = fates.get(f["item_key"])
+                    if known is None:
+                        fate = "rendered" if f["item_key"] in rendered_ids else "not rendered"
+                    else:
+                        fate = known["placement"] + (
+                            f" in {known['section']}" if known.get("section") else ""
+                        )
+                        if known.get("merged_into"):
+                            fate += f" (into {known['merged_into']})"
+                        if known.get("meaning"):
+                            fate = f"meaning {known['meaning']} → {fate}"
                     print(f"    kept {f['item_key']} ({f['kind']}, flags {flags}) → {fate}")
                     if args.show_text:
                         print(f"      text:  {f['text']}\n      quote: {f['quote']}")
@@ -155,6 +174,25 @@ async def main(args: argparse.Namespace) -> int:
                 print("    no fact was extracted from this line")
             if any(r[0] <= piece.start_ms < r[1] for r in stats.get("excluded_ranges") or []):
                 print("    the line lies in an excluded range")
+    if args.out:
+        args.out.mkdir(parents=True, exist_ok=True)
+        record = {
+            "run_id": run_id,
+            "git": _git_sha(),
+            "input": args.input.name,
+            "input_sha256": hashlib.sha256(raw).hexdigest(),
+            "backend": produced.get("backend"),
+            "model_id": produced.get("model_id"),
+            "stats": stats,
+            "trace": produced["trace"],
+            # Text only when asked for: the record is local, never a log.
+            **({"lines": produced["lines"], "facts": produced["facts"]} if args.show_text else {}),
+        }
+        target = args.out / f"{args.input.stem}-{run_id}.json"
+        # "x": a run never overwrites the evidence of another.
+        with target.open("x", encoding="utf-8") as fh:
+            json.dump(record, fh, ensure_ascii=False, indent=1, default=str)
+        print(f"\nsaved          {target}")
     return 0
 
 
@@ -166,4 +204,5 @@ if __name__ == "__main__":
     ap.add_argument("--fidelity", action="store_true", help="with --multilingual")
     ap.add_argument("--find", default=None, help="regex over transcript lines")
     ap.add_argument("--show-text", action="store_true", help="print lines, facts and quotes")
+    ap.add_argument("--out", type=Path, default=None, help="save this run's record (new file)")
     sys.exit(asyncio.run(main(ap.parse_args())))

@@ -23,7 +23,12 @@ sys.modules["build_meeting_quality_dashboard"] = builder
 _spec.loader.exec_module(builder)
 
 DASHBOARD = REPO / "infra" / "grafana" / "dashboards" / "meeting-quality.json"
-MIGRATION = (REPO / "infra" / "postgres" / "migrations" / "0067_meeting_quality.sql").read_text()
+MIGRATION = "\n".join(
+    (REPO / "infra" / "postgres" / "migrations" / name).read_text()
+    for name in ("0067_meeting_quality.sql", "0081_note_instructions_reader.sql")
+)
+# Numbers-only Prometheus series the "Note instructions" row may read (labels: outcome, kind, reason).
+PROMETHEUS_SERIES = re.compile(r"\bmdx_note_instructions_[a-z_]+")
 CONTENT = (
     "title",
     "text",
@@ -41,6 +46,8 @@ CONTENT = (
     "snapshot_key",
     "requested_by",
     "requester_sub",
+    "profile",
+    "updated_by",
 )
 
 
@@ -56,6 +63,16 @@ def test_every_panel_reads_the_funnel_reader_datasource() -> None:
     d = json.loads(DASHBOARD.read_text())
     assert d["uid"] == "meeting-quality" and "admin" in d["tags"]
     for panel in d["panels"]:
+        if panel["type"] == "row":
+            continue
+        if panel["datasource"] == {"type": "prometheus"}:
+            # Compiler instruments only: counters and a histogram, no content label.
+            for target in panel["targets"]:
+                assert "rawSql" not in target and PROMETHEUS_SERIES.search(target["expr"])
+                assert set(re.findall(r"\bmdx_[a-z_]+", target["expr"])) == set(
+                    PROMETHEUS_SERIES.findall(target["expr"])
+                ), panel["title"]
+            continue
         assert panel["datasource"] == {"type": "postgres", "uid": "funnel"}, panel["title"]
         for target in panel["targets"]:
             assert target["datasource"]["uid"] == "funnel"

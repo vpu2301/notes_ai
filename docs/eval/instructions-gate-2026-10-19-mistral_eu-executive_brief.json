@@ -1,0 +1,70 @@
+{
+  "kind": "instructions-gate",
+  "backend": "mistral_eu",
+  "date": "2026-10-19",
+  "generated_at": "2026-10-19T08:23:36+00:00",
+  "git": "",
+  "host": {
+    "platform": "macOS-26.4.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "memory_bytes": "25769803776",
+    "cpu": "Apple M5"
+  },
+  "plain": "notes-pipeline-2026-10-19-mistral_eu-plain.json",
+  "instructed": "notes-pipeline-2026-10-19-mistral_eu-executive_brief.json",
+  "corpus": "tests/fixtures/eval/notes",
+  "prompt_version": "2026-10-18.6",
+  "instructions": {
+    "file": "executive_brief.json",
+    "profile_hash": "e61beffdf33116e44757589c661b8e7d581b76359444b2b9cd44de5a2531aa96"
+  },
+  "metrics": {
+    "key_fact_recall": {
+      "plain": 0.16,
+      "instructed": 0.2
+    },
+    "citation_precision": {
+      "plain": 1.0,
+      "instructed": 1.0
+    },
+    "judge_unsupported_rate": {
+      "plain": 0.625,
+      "instructed": 0.75
+    },
+    "summary_sentences_mean": {
+      "plain": 1.45,
+      "instructed": 1.18
+    },
+    "sections_mean": {
+      "plain": 3.09,
+      "instructed": 2.55
+    },
+    "words_per_minute": {
+      "plain": 46.898263027295286,
+      "instructed": 42.20843672456576
+    }
+  },
+  "gates": {
+    "citation_precision": true,
+    "judge_unsupported_rate": false
+  },
+  "compliance": {
+    "summary_sentences": {
+      "ok": 11,
+      "of": 11
+    },
+    "sections_off:topics": {
+      "ok": 11,
+      "of": 11
+    },
+    "sections_off:open_questions": {
+      "ok": 11,
+      "of": 11
+    },
+    "avoid": {
+      "ok": 11,
+      "of": 11
+    }
+  },
+  "passed": false
+}

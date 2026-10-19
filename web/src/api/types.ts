@@ -666,6 +666,8 @@ export interface SharedSection {
   text: string;
   /** Drives the page's fixed hierarchy; `other` collapses below the fold. */
   role: SharedSectionRole;
+  /** B4 — line key → verbatim | paraphrase | composed, for the marker beside each line. */
+  line_marks?: Record<string, string>;
 }
 
 export interface SharedNoteView {
@@ -914,6 +916,10 @@ export interface GlossaryTerm {
   in_hint?: boolean;
   /** The note the rename that added it happened in, when known. */
   source_note_id?: string | null;
+  /** Every "heard as" differs only by an article, an ending or capitals: likely a mistake. */
+  suspect?: "grammar_variant" | null;
+  /** What this save asked to learn that was grammar, not a mishearing: not stored. */
+  ignored_heard_as?: string[];
 }
 
 export interface GlossaryHint {
@@ -1466,6 +1472,91 @@ export interface AiSettings {
   /** Who writes notes right now (null where nothing is routed). */
   writer?: AiWriter | null;
   small_writer?: AiWriter | null;
+  /** N0 — how notes are worded, and the model parameters set by hand. */
+  writing_style?: WritingStyle;
+  model_params?: ModelParams;
+  /** What runs: the saved values with the model's own caps applied. */
+  model_params_effective?: ModelParams;
+  model_params_version?: number;
+  /** False: the saved values no longer validate; notes use the recommended ones. */
+  model_params_valid?: boolean;
+  model_params_limits?: Record<string, ModelParamLimit>;
+  /** Measured share of lines dropped per temperature; null until measured. */
+  model_params_measured?: { temperature?: Record<string, number | null> };
+}
+
+export type WritingStyle = "business" | "formal" | "informal" | "academic";
+
+export interface ModelParams {
+  temperature: number;
+  context_window_tokens: number | null;
+  max_output_tokens: number | null;
+  max_concurrency: number;
+  facts_per_window: number;
+  retries: "off" | "standard" | "thorough";
+  ask_temperature: number;
+  ask_max_tokens: number;
+}
+
+export interface ModelParamLimit {
+  min?: number;
+  max?: number;
+  step?: number;
+  default?: number | string | null;
+  options?: string[];
+  /** The model's configuration limits the value to this. */
+  cap?: number;
+  cap_source?: string;
+}
+
+// ── Note instructions (how this workspace wants its notes written) ──
+
+/** A request the writer will not follow; `message` is the server's sentence, shown as sent. */
+export interface AiInstructionsNotApplied {
+  text: string;
+  reason: string;
+  message: string;
+}
+
+/** Workspace, or a meeting type whose text extends it (N4). */
+export type InstructionsScope =
+  | "workspace"
+  | "client"
+  | "team"
+  | "sales"
+  | "one_on_one"
+  | "interview"
+  | "broadcast"
+  | "memo";
+
+export interface AiInstructions {
+  /** An `InstructionsScope`, or "note" for one note's own. */
+  scope: string;
+  /** 0: no instructions; notes are written as usual. */
+  version: number;
+  text: string;
+  /** The compiled dials; the card renders `understood`, never this. */
+  profile: Record<string, unknown>;
+  profile_hash: string;
+  compile_status: "compiled" | "failed";
+  compile_error_kind: string | null;
+  /** One sentence per dial that differs from usual, written by the server. */
+  understood: string[];
+  /** Passed to the writer verbatim as wording guidance. */
+  guidance: string[];
+  not_applied: AiInstructionsNotApplied[];
+  can_edit: boolean;
+  max_chars: number;
+  updated_at: string | null;
+  updated_by: string | null;
+  /** The parents' versions this text was compiled with: `{"workspace": 3}`. */
+  base_versions?: Record<string, number>;
+  /** The text this one extends; null for the workspace. */
+  extends?: { scope: string; version: number } | null;
+  /** Saved, but waiting for the recompile after its parent changed. */
+  stale?: boolean;
+  /** On the workspace view: every scope that has a text. */
+  scopes?: { scope: InstructionsScope; version: number; stale: boolean }[];
 }
 
 export interface AiSettingsUpdate {
@@ -1474,6 +1565,10 @@ export interface AiSettingsUpdate {
   generation_enabled?: boolean;
   monthly_budget_cents?: number;
   acknowledge?: { name: string; region: string }[];
+  writing_style?: WritingStyle;
+  /** Always the whole set: a partial object is refused. */
+  model_params?: ModelParams;
+  reset_model_params?: boolean;
 }
 
 // ── The document engine, as the client sees it ─────────────────────
@@ -1512,6 +1607,44 @@ export interface GenerationView {
   recording_type_source?: "user" | "classifier" | "rule" | "template" | null;
   /** The spoken language the run wrote in. */
   language?: string | null;
+  /** What produced the run (code, versions, flags as executed, models); absent from older servers. */
+  provenance?: GenerationProvenance | null;
+  /** The workspace's note instructions the run was written under; null when none. */
+  instructions?: { scope: string; version: number; fallback?: string | null } | null;
+  /** The version of the workspace's model settings that wrote it (0: the defaults). */
+  model_settings_version?: number | null;
+  /** The writing style that wrote it (`business`, …); null before N0. */
+  writing_style?: string | null;
+}
+
+export interface GenerationStageModel {
+  stage: string;
+  backend: string | null;
+  model_id: string | null;
+  calls: number;
+  failed: number;
+}
+
+export interface GenerationProvenance {
+  run_kind: string;
+  /** The worker's build; `pinned_build_sha` is the API's when it queued the run. */
+  build_sha?: string | null;
+  pinned_build_sha?: string | null;
+  prompt_version: string;
+  profile_version_id?: string | null;
+  algorithm_version?: string | null;
+  /** `snapshot`: pinned when queued; `deployment`: a run from before snapshots. */
+  flags_source?: "snapshot" | "deployment" | null;
+  multilingual_evidence?: boolean | null;
+  fidelity?: boolean | null;
+  final_check?: boolean | null;
+  /** Flags this worker's deployment sets differently from what the run was pinned with. */
+  flags_differ?: string[];
+  output_language?: string | null;
+  output_language_source?: string | null;
+  transcript_rev?: number | null;
+  stages?: GenerationStageModel[];
+  fallbacks?: { kind: string; backend: string; primary: string; reason: string | null }[];
 }
 
 export type ExcludedReason =
@@ -1553,15 +1686,30 @@ export interface GeneratedItem {
   placement: string;
   /** Item keys of the facts this line rests on. */
   cites?: string[];
-  certainty?: "fact" | "estimate" | "prediction" | "opinion" | "proposal" | "allegation" | null;
+  certainty?:
+    | "fact"
+    | "estimate"
+    | "prediction"
+    | "opinion"
+    | "proposal"
+    | "allegation"
+    | "reported"
+    | "unproven"
+    | "refuted"
+    | null;
   /** Whose position it is. */
   attributed_to?: string | null;
   /** For a sub-point, the row key of the bullet it sits under. */
   parent_key?: string | null;
+  /** B4 — what the line is: the speaker's words, one fact, or several. Null before B4. */
+  provenance?: "verbatim" | "paraphrase" | "composed" | null;
+  /** B4 — a claim row's verdict cell (the label and the speaker's clause). */
+  verdict?: string | null;
   /** A figure row's verified fields (every word in its quote). */
   figure?: { name: string; value: string; unit: string; qualifier: string } | null;
   /** Names respelled in this line; the quote keeps what was heard. */
-  corrections?: { surface: string; canonical: string; source: string }[];
+  /** `entity`: "person" only with evidence of a person; absent on older servers. */
+  corrections?: { surface: string; canonical: string; source: string; entity?: "person" | "term" }[];
   /** Dates the line names, resolved against the recording day. */
   mentions?: { text: string; date: string; time: string | null; direction: string }[];
 }
@@ -1694,6 +1842,33 @@ export interface ProfilePreview {
   language: string;
   /** Each stage's bundled task text: where an edit starts (never the platform contract). */
   bundled: Record<ProfileStage, string>;
+  /** Every call a run makes, resolved exactly for `flags`; empty while there are problems. */
+  calls?: ResolvedCall[];
+  flags?: PreviewFlags;
+  /** Placeholders each stage must keep (its bundled text uses them). */
+  required_variables?: Partial<Record<ProfileStage, string[]>>;
+}
+
+export type PreviewMode = "production" | "test";
+
+/** One call of a run and its exact system text (the request hash must equal `sha`). */
+export interface ResolvedCall {
+  call: string;
+  stage: string;
+  /** profile: the version's text · bundled · not_applied: edited but not sent here · code: read-only. */
+  source: "profile" | "bundled" | "not_applied" | "code";
+  sha: string;
+  system: string;
+}
+
+export interface PreviewFlags {
+  mode: PreviewMode;
+  multilingual_evidence?: boolean;
+  fidelity?: boolean;
+  final_check?: boolean;
+  small_model?: boolean;
+  bullets?: number;
+  profile_instructions_apply?: boolean;
 }
 
 export interface ModelCapability {
@@ -1707,6 +1882,18 @@ export interface ModelCapability {
   stages: ProfileStage[];
   supported: Partial<Record<"temperature" | "max_output_tokens" | "timeout_s", { min: number; max: number }>>;
   unsupported: Record<string, string>;
+}
+
+/** What a note generated now runs on in this deployment. */
+export interface AiRuntime {
+  build_sha: string | null;
+  multilingual_evidence: boolean;
+  /** Meaning checks and the final check before writing; needs multilingual evidence. */
+  fidelity: boolean;
+  prompt_version: string;
+  algorithm_version: string;
+  /** False: profile instructions are not used for new notes here (tests still use them). */
+  profile_instructions_apply: boolean;
 }
 
 export interface ModelCapabilities {
@@ -1725,7 +1912,10 @@ export interface ActivationRecord {
 }
 
 export interface ExperimentRequest {
+  /** Empty with `suite`. */
   sources: { note_id: string; transcript_rev: number }[];
+  /** "critical": the shipped critical cases instead of notes (activation asks for a pass). */
+  suite?: "critical";
   /** null = the bundled profile. */
   candidate_version_ids: (string | null)[];
   repetitions: number;
@@ -1737,6 +1927,8 @@ export interface ExperimentRequest {
 
 export interface ExperimentEstimate {
   runs: number;
+  /** About how many model requests the runs make together. */
+  requests?: number;
   /** null: a backend has no price — show "unknown", never a guess. */
   estimate_cents: number | null;
   token_cap: number;

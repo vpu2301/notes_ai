@@ -127,12 +127,22 @@ _SYSTEM: Final = (
     "- No quotation marks, no date or time, no trailing punctuation.\n"
     '- Do not start with "Meeting about", "Discussion about", "Note about" or the like '
     "unless it genuinely makes the title clearer.\n"
+    "{narrated}"
     "- Write the title in {language}, the language the people speak.\n"
     "- If the transcript has no real topic (greetings, a microphone test, silence), "
     "answer with an empty title.\n"
     'Answer only with JSON: {{"title": "..."}}\n\n'
     "{guard}"
 )
+
+
+def system_text(language: str, *, narrated: bool = False) -> str:
+    """The title call's system text for ``language``; ``narrated`` adds B2's rule."""
+    rule = f"- {prompts.TITLE_NARRATED}\n" if narrated else ""
+    return _SYSTEM.format(
+        language=language_name(language), guard=prompts.guard(language), narrated=rule
+    )
+
 
 # What a model sometimes wraps a title in, however it is asked.
 _PREFIX = re.compile(r"^\s*(title|titel|назва)\s*[:：-]\s*", re.IGNORECASE)
@@ -223,11 +233,13 @@ async def suggest(
     language: str,
     themes: Sequence[str] = (),
     facts: Sequence[str] = (),
+    narrated: bool = False,
 ) -> str | None:
-    """A title for this transcript, or None (not enough said, no topic, model failed). Never raises."""
+    """A title for this transcript, or None (not enough said, no topic, model failed). Never raises.
+    ``narrated`` (B2 T3): the one rule for a narrated recording's title."""
     if meaningful_word_count(result) < MIN_MEANINGFUL_WORDS:
         return None
-    system = _SYSTEM.format(language=language_name(language), guard=prompts.guard(language))
+    system = system_text(language, narrated=narrated)
     prompt = f"{prompts.DATA_OPEN}\n{sample(result)}\n{prompts.DATA_CLOSE}"
     found = context_block(themes, facts)
     if found:

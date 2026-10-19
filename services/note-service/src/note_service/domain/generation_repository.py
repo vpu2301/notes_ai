@@ -301,10 +301,10 @@ async def put_lines(
                 text, owner_label, due_text, due_date, explicit, confidence,
                 flags, quote, start_ms, end_ms, speaker_label, speaker_name,
                 placement, audience, cites, certainty, attributed_to, corrections, mentions,
-                parent_key, payload
+                parent_key, payload, provenance
             )
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::text[],$14,$15,$16,$17,$18,
-                    $19,$20,$21::text[],$22,$23,$24::jsonb,$25::jsonb,$26,$27::jsonb)
+                    $19,$20,$21::text[],$22,$23,$24::jsonb,$25::jsonb,$26,$27::jsonb,$28)
             ON CONFLICT (note_id, generation_id, item_key) DO NOTHING
             """,
             tenant_id,
@@ -334,6 +334,7 @@ async def put_lines(
             json.dumps(list(row.get("mentions") or [])[:8]),
             row.get("parent_key"),
             json.dumps(row["payload"]) if row.get("payload") else None,
+            row.get("provenance"),
         )
         if result.endswith(" 1"):
             written += 1
@@ -355,7 +356,8 @@ async def items_for_note(
         SELECT item_key, kind, section_key, text, owner_label, due_text, due_date,
                explicit, confidence, flags, quote, start_ms, end_ms,
                speaker_label, speaker_name, placement, audience,
-               cites, certainty, attributed_to, corrections, mentions, parent_key, payload
+               cites, certainty, attributed_to, corrections, mentions, parent_key, payload,
+               provenance
         FROM note_generated_items
         WHERE note_id = $1 AND placement IN ('written', 'suggested', 'evidence') {current}
         ORDER BY start_ms
@@ -435,3 +437,20 @@ async def stale_snapshots(
         limit,
     )
     return [(r["id"], r["snapshot_key"]) for r in rows]
+
+
+async def line_marks(conn: asyncpg.Connection, *, note_id: UUID) -> dict[str, str]:
+    """B4 — ``{item_key: provenance}`` of the current generation's written lines, for the
+    markers the PDF and the shared page draw. Keys and enum words only."""
+    rows = await conn.fetch(
+        """
+        SELECT item_key, provenance FROM note_generated_items
+        WHERE note_id = $1 AND placement = 'written' AND provenance IS NOT NULL
+          AND generation_id = (
+            SELECT id FROM note_generations WHERE note_id = $1
+            ORDER BY created_at DESC LIMIT 1
+          )
+        """,
+        note_id,
+    )
+    return {str(r["item_key"]): str(r["provenance"]) for r in rows}

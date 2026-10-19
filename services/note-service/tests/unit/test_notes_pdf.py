@@ -152,7 +152,9 @@ def test_pdf_200_with_watermark_on_request(
     async def _fetch_version(conn, *, version_id):  # noqa: ANN001
         return _version_row()
 
-    def _render(*, note, version, issuer_name, is_draft, language, section_names=None):  # noqa: ANN001
+    def _render(
+        *, note, version, issuer_name, is_draft, language, section_names=None, line_marks=None
+    ):  # noqa: ANN001
         captured["is_draft"] = is_draft
         captured["language"] = language
         # The native weasyprint stack is not installed in unit envs, so the
@@ -190,7 +192,9 @@ def test_pdf_clean_is_the_default(client: TestClient, monkeypatch: pytest.Monkey
     async def _fetch_version(conn, *, version_id):  # noqa: ANN001
         return _version_row()
 
-    def _render(*, note, version, issuer_name, is_draft, language, section_names=None):  # noqa: ANN001
+    def _render(
+        *, note, version, issuer_name, is_draft, language, section_names=None, line_marks=None
+    ):  # noqa: ANN001
         captured["is_draft"] = is_draft
         return b"%PDF-1.7 clean"
 
@@ -293,7 +297,9 @@ def test_pdf_200_for_finalized(client: TestClient, monkeypatch: pytest.MonkeyPat
     async def _fetch_version(conn, *, version_id):  # noqa: ANN001
         return _version_row()
 
-    def _render(*, note, version, issuer_name, is_draft, language, section_names=None):  # noqa: ANN001
+    def _render(
+        *, note, version, issuer_name, is_draft, language, section_names=None, line_marks=None
+    ):  # noqa: ANN001
         return b"%PDF-1.7 fake-bytes"
 
     monkeypatch.setattr(notes_pdf.repo, "fetch_note", _fetch_note)

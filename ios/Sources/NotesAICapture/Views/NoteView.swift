@@ -15,6 +15,8 @@ struct NoteView: View {
     /// "Switch…" from the not-in-this-workspace page.
     @State private var pickingWorkspace = false
     @State private var historyPresented = false
+    /// "Write this note differently…" (N4).
+    @State private var instructionsPresented = false
     /// Which speaker label is being renamed, and the name it starts from.
     @State private var renaming: SpeakerRename?
     /// The turn whose avatar was tapped ("Move this turn to").
@@ -127,6 +129,7 @@ struct NoteView: View {
             if old != nil, old != title { Task { await app.refreshNotes() } }
         }
         .task(id: model.version) { await model.loadItems() }
+        .task(id: "\(model.editable) \(model.jobId ?? "")") { await model.loadNoteInstructions() }
         .onDisappear { Task { await model.flush() } }
         .onChange(of: model.deleted) { _, deleted in
             // The note is gone; drop every local trace and go back home.
@@ -171,6 +174,10 @@ struct NoteView: View {
         .sheet(isPresented: $historyPresented) {
             HistorySheet(model: model) { historyPresented = false }
                 .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $instructionsPresented) {
+            NoteInstructionsSheet(model: model) { instructionsPresented = false }
+                .presentationDetents([.large])
         }
         .sheet(item: $model.evidenceRow) { row in
             EvidenceSheet(model: model, row: row) { model.evidenceRow = nil }
@@ -259,6 +266,11 @@ struct NoteView: View {
         items.append(.item("Share Markdown", symbol: "doc.plaintext", disabled: model.busy) {
             model.exportMarkdown()
         })
+        if model.canWriteDifferently {
+            items.append(.item("Write this note differently…", symbol: "wand.and.stars") {
+                instructionsPresented = true
+            })
+        }
         if app.capabilities.showsSpaces, !app.spaces.isEmpty {
             items.append(.separator)
             let current = app.spaceOf[model.noteId]
@@ -697,7 +709,7 @@ struct NoteView: View {
     /// "Also said" — the verified facts no line used, with their evidence.
     private func alsoSaidView(_ rows: [GeneratedItem]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Also said")
+            Text(NoteLabels.alsoSaid(language: model.generation?.language))
                 .font(.dsMeta)
                 .foregroundStyle(DS.muted)
             ForEach(rows) { row in
@@ -753,7 +765,7 @@ struct NoteView: View {
     /// What the recording was taken to be, and the passages left out; each range opens the transcript.
     @ViewBuilder
     private func generationFacts(_ generation: GenerationView) -> some View {
-        let label = generation.recordingTypeLabel
+        let label = generation.statusLabel
         let excluded = generation.isFinished && !generation.wroteNothing
             ? generation.shownExcluded : (items: [], more: 0)
         if label != nil || !excluded.items.isEmpty {

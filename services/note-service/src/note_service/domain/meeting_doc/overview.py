@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Final
 
 from . import support
@@ -21,7 +21,7 @@ TYPE_LABELS: Final[dict[str, dict[str, str]]] = {
         "sales_call": "Sales call",
         "interview": "Interview",
         "one_on_one": "One-on-one",
-        "podcast_broadcast": "Podcast episode",
+        "podcast_broadcast": "Broadcast",
         "lecture_webinar": "Talk",
         "voice_memo": "Voice memo",
         "presentation_demo": "Presentation",
@@ -32,7 +32,7 @@ TYPE_LABELS: Final[dict[str, dict[str, str]]] = {
         "sales_call": "Verkaufsgespräch",
         "interview": "Interview",
         "one_on_one": "Einzelgespräch",
-        "podcast_broadcast": "Podcast-Folge",
+        "podcast_broadcast": "Sendung",
         "lecture_webinar": "Vortrag",
         "voice_memo": "Sprachnotiz",
         "presentation_demo": "Präsentation",
@@ -43,7 +43,7 @@ TYPE_LABELS: Final[dict[str, dict[str, str]]] = {
         "sales_call": "Продажний дзвінок",
         "interview": "Інтерв'ю",
         "one_on_one": "Розмова один на один",
-        "podcast_broadcast": "Епізод подкасту",
+        "podcast_broadcast": "Передача",
         "lecture_webinar": "Лекція",
         "voice_memo": "Голосова нотатка",
         "presentation_demo": "Презентація",
@@ -64,12 +64,6 @@ _THEMES: Final[dict[str, str]] = {
     "uk": "Теми — {themes}.",
 }
 NARRATOR: Final[dict[str, str]] = {"en": "the narrator", "de": "Erzähler/in", "uk": "оповідач"}
-# A dash: not an adverb that moves the verb, and not a colon (see above).
-CONNECTIVES: Final[dict[str, tuple[str, str, str]]] = {
-    "en": ("First —", "Then —", "Finally —"),
-    "de": ("Zunächst —", "Anschließend —", "Schließlich —"),
-    "uk": ("Спочатку —", "Потім —", "Зрештою —"),
-}
 MAX_THEMES: Final = 5
 COMPOSED_MIN: Final = 3
 COMPOSED_MAX: Final = 6
@@ -100,9 +94,12 @@ def first_paragraph(
     guests: list[str] | None = None,
     themes: list[str] | None = None,
     others: list[str] | None = None,
+    named: bool = True,
 ) -> str:
-    """ "Podcast-Folge über Palantir. Es sprechen … Es geht um …". A gated model
-    framing replaces the first clause; speakers and themes are always code."""
+    """ "Sendung über Palantir. Es sprechen … Themen sind …". A gated model framing
+    replaces the first clause; speakers and themes are always code. ``named=False``
+    (nobody on the recording has a name): no sentence about who speaks — a role
+    word alone ("Es sprechen Erzähler/in.") tells the reader nothing."""
     types = _pick(TYPE_LABELS, language)
     assert isinstance(types, dict)
     kind = types.get(recording_type or "meeting") or types["meeting"]
@@ -121,7 +118,7 @@ def first_paragraph(
         + [f"{guest_label} {g}" for g in (guests or []) if g]
         + [w for w in (others or []) if w]
     )
-    if who:
+    if who and named:
         listed = ", ".join(who[:-1]) + f" {joiner} {who[-1]}" if len(who) > 1 else who[0]
         template = str(_pick(_SPEAKERS, language))
         parts.append(template.format(who=listed))
@@ -145,16 +142,45 @@ def _sentence(text: str) -> str:
     return (text[:1].upper() + text[1:] + ".") if text else ""
 
 
+_YEAR: Final = re.compile(
+    r"(?:\s*\b(?:im jahre?|in the year|in|im|seit|ab|von|bis|für|aus|nach|vor|of|since|from|"
+    r"until|у|в|з|до|для|після)\s+)?\b((?:19|20)\d\d)\b",
+    re.IGNORECASE,
+)
+
+
+def strip_foreign_year(text: str, recording_year: int | None) -> tuple[str, int]:
+    """A subject or framing without a year that is not the recording's ("Analyse der
+    US-Politik 2024" → "Analyse der US-Politik"), with its preposition; the count of
+    years removed. With no recording year nothing is compared, nothing removed."""
+    if recording_year is None or not text:
+        return text, 0
+    removed = 0
+
+    def keep_or_drop(match: re.Match[str]) -> str:
+        nonlocal removed
+        if int(match.group(1)) == recording_year:
+            return match.group(0)
+        removed += 1
+        return ""
+
+    out = _YEAR.sub(keep_or_drop, text)
+    if not removed:
+        return text, 0
+    out = re.sub(r"\s+([.,;:!?)])", r"\1", " ".join(out.split()))
+    return out.strip(), removed
+
+
 def composed_sentences(
     facts: list[VerifiedFact],
     *,
     language: str,
     known: frozenset[str] = frozenset(),
     key_ids: list[str] | None = None,
-    connectives: bool = True,
 ) -> list[tuple[str, list[str]]]:
-    """Ladder rung 3: 3–6 facts' texts in time order, joined by connectives, each citing its fact.
-    ``connectives=False`` (fidelity): no "First — / Then —": unrelated facts are no sequence."""
+    """Ladder rung 3: 3–6 facts' texts in time order as plain sentences, each citing
+    its fact. No connectives (unrelated facts are no sequence); a hedged fact carries
+    its certainty once, as a clause (:func:`support.certainty_clause`)."""
     usable = [
         f
         for f in facts
@@ -164,6 +190,9 @@ def composed_sentences(
         and PARAPHRASE_UNSUPPORTED not in f.flags
         and MEANING_UNVERIFIED not in f.flags
     ]
+    # A call to action ("write in the comments") is no overview while anything else is.
+    substantive = [f for f in usable if f.kind != "next_step"]
+    usable = substantive or usable
     if not usable:
         return []
     by_id = {f.item_key: f for f in usable}
@@ -183,16 +212,13 @@ def composed_sentences(
         while len(chosen) < COMPOSED_MIN and spare:
             chosen.append(spare.pop(0))
     chosen = sorted(chosen[:COMPOSED_MAX], key=lambda f: f.start_ms)
-    first, middle, last = CONNECTIVES.get(language) or CONNECTIVES["en"]
     out: list[tuple[str, list[str]]] = []
-    for n, fact in enumerate(chosen):
-        sentence = _sentence(fact.text)
-        if not sentence:
-            continue
-        if connectives and len(chosen) >= COMPOSED_MIN:
-            lead = first if n == 0 else last if n == len(chosen) - 1 else middle
-            sentence = f"{lead} {sentence}"
-        out.append((sentence, [fact.item_key]))
+    for fact in chosen:
+        sentence = _sentence(
+            support.certainty_clause(fact.certainty, fact.text, language, actor=fact.attributed_to)
+        )
+        if sentence:
+            out.append((sentence, [fact.item_key]))
     return out
 
 
@@ -258,21 +284,51 @@ def _spans(facts: list[VerifiedFact], minimum: int) -> list[list[VerifiedFact]]:
     return spans
 
 
+def chapter_heading(
+    facts: list[VerifiedFact],
+    language: str,
+    known: frozenset[str],
+    *,
+    common: frozenset[str] = frozenset(),
+    taken: Collection[str] = (),
+    max_words: int = support.HEADING_WORDS_MAX,
+) -> str:
+    """What a span of facts is about, with no timestamp and never a bare name: the
+    first clause of its most specific fact (:func:`support.noun_phrase`), the next
+    fact's when that heading is taken, the most named thing only when no fact has
+    three words. ``max_words``: a workspace's shorter heading dial."""
+    ranked = sorted(facts, key=lambda f: (-_specific(f, language, known), f.start_ms))
+    used = {t.casefold() for t in taken}
+    for fact in ranked:
+        heading = support.noun_phrase(fact.text, language, max_words=max_words)
+        if heading and heading.casefold() not in used:
+            return heading
+    name = _top_name(facts, language, known, common)
+    if not name:
+        runs = Counter(run for f in facts for run in support.capital_runs(f.text))
+        name = runs.most_common(1)[0][0] if runs else ""
+    return name
+
+
 def chapters(
     facts: list[VerifiedFact], *, language: str, known: frozenset[str] = frozenset()
 ) -> list[tuple[str, list[tuple[str, list[str], list[tuple[str, list[str]]]]], list[str]]]:
-    """Topics-shaped chapters ``[(title, bullets, fact ids)]``, headed "07:40 — Alex Karp"."""
+    """Topics-shaped chapters ``[(title, bullets, fact ids)]``, each headed by what
+    its span says (:func:`chapter_heading`), never by a timestamp."""
     usable = [f for f in facts if not f.evidence_only and f.figure is None and f.person is None]
     out: list[tuple[str, list[tuple[str, list[str], list[tuple[str, list[str]]]]], list[str]]] = []
     spans = _spans(usable, CHAPTER_MIN_FACTS)
     common = _common_names(spans, language, known)
+    taken: list[str] = []
     for span in spans:
         if len(span) < CHAPTER_MIN_FACTS:
             continue
         specific = [f for f in span if _specific(f, language, known) > 0]
         shown = specific if specific else span
-        name = _top_name(span, language, known, common)
-        title = f"{mmss(span[0].start_ms)} — {name}" if name else mmss(span[0].start_ms)
+        title = chapter_heading(span, language, known, common=common, taken=taken)
+        if not title:
+            title = mmss(span[0].start_ms)
+        taken.append(title)
         out.append(
             (
                 title,

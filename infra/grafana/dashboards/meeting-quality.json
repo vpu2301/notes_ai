@@ -641,6 +641,293 @@
         "type": "postgres",
         "uid": "funnel"
       }
+    },
+    {
+      "type": "row",
+      "title": "Note instructions",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 41,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [],
+      "id": 14,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "table",
+      "title": "Workspaces with note instructions",
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "-- Workspaces whose note instructions changed in the range, and whether the compile worked.\nSELECT t.name               AS \"Workspace\",\n       w.scope              AS \"Scope\",\n       w.version            AS \"Version\",\n       w.compile_status     AS \"Compile\",\n       coalesce(w.compile_error_kind, '—') AS \"Error kind\",\n       w.backend            AS \"Compiled by\",\n       w.updated_at         AS \"Updated\"\n  FROM workspace_note_instructions w\n  JOIN tenants t ON t.id = w.tenant_id\n WHERE $__timeFilter(w.updated_at)\n ORDER BY w.updated_at DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "id": 15,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Notes written under instructions",
+      "gridPos": {
+        "x": 12,
+        "y": 42,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "funnel"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "-- Per day: the share of notes written under instructions, and what the profile did.\nWITH gen AS (\n    SELECT DISTINCT ON (g.note_id)\n           g.note_id, g.status, g.backend, g.model_id, g.prompt_version, g.stats,\n           g.windows_failed, g.error_kind,\n           EXTRACT(EPOCH FROM (g.finished_at - g.created_at)) AS seconds\n      FROM note_generations g\n     ORDER BY g.note_id, g.created_at DESC\n)\nSELECT date_trunc('day', n.created_at)                                     AS time,\n       avg(CASE WHEN g.stats ? 'instructions' THEN 1.0 ELSE 0.0 END)       AS \"Written under instructions\",\n       avg((g.stats->'instructions_applied'->>'scale')::numeric)           AS \"Mean length scale\",\n       sum(coalesce((g.stats->'instructions_applied'->>'terms_replaced')::int, 0)) AS \"Terms replaced\"\n  FROM gen g JOIN notes n ON n.id = g.note_id\n WHERE $__timeFilter(n.created_at) AND g.status IN ('complete', 'partial')\n GROUP BY 1\n ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "showPoints": "always",
+            "pointSize": 6,
+            "lineWidth": 1,
+            "spanNulls": true
+          },
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(Written under instructions)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 16,
+      "datasource": {
+        "type": "postgres",
+        "uid": "funnel"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Instruction compiles by outcome (1 h)",
+      "gridPos": {
+        "x": 0,
+        "y": 49,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (increase(mdx_note_instructions_compiles_total[1h]))",
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "showPoints": "always",
+            "pointSize": 6,
+            "lineWidth": 1,
+            "spanNulls": true
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 17,
+      "datasource": {
+        "type": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Instruction compile p95",
+      "gridPos": {
+        "x": 12,
+        "y": 49,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(mdx_note_instructions_compile_seconds_bucket[1h])))",
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "showPoints": "always",
+            "pointSize": 6,
+            "lineWidth": 1,
+            "spanNulls": true
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 18,
+      "datasource": {
+        "type": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Not applied by reason (top 7)",
+      "gridPos": {
+        "x": 0,
+        "y": 56,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(7, sum by (reason) (increase(mdx_note_instructions_not_applied_total[1d])))",
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "showPoints": "always",
+            "pointSize": 6,
+            "lineWidth": 1,
+            "spanNulls": true
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 19,
+      "datasource": {
+        "type": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Previews refused by the hourly cap",
+      "gridPos": {
+        "x": 12,
+        "y": 56,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(mdx_note_instructions_previews_limited_total[1h]))",
+          "legendFormat": "__auto"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "showPoints": "always",
+            "pointSize": 6,
+            "lineWidth": 1,
+            "spanNulls": true
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 20,
+      "datasource": {
+        "type": "prometheus"
+      }
     }
   ]
 }

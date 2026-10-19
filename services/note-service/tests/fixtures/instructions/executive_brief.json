@@ -1,0 +1,24 @@
+{
+ "length": "short",
+ "summary_sentences": 4,
+ "sections_off": [
+  "topics",
+  "open_questions"
+ ],
+ "emphasis": [
+  "money",
+  "dates",
+  "decisions",
+  "risks"
+ ],
+ "avoid": [
+  "synergy",
+  "align",
+  "circle back"
+ ],
+ "guidance": [
+  "Write for a reader who has thirty seconds.",
+  "Use no adjectives."
+ ],
+ "not_applied": []
+}

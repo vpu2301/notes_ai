@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Final
 from uuid import UUID
@@ -63,6 +63,11 @@ class SettingsRow:
     updated_at: datetime | None = None
     # A Personal workspace has one member, its owner: nobody else to agree for them.
     personal: bool = False
+    # N0: the writing style and the hand-set model parameters (domain/model_params.py);
+    # `model_params` is the stored object, validated where it is used.
+    writing_style: str = "business"
+    model_params: dict[str, Any] = field(default_factory=dict)
+    model_params_version: int = 0
 
     @property
     def acknowledged_keys(self) -> set[tuple[str, str]]:
@@ -89,12 +94,20 @@ def _row(record: asyncpg.Record) -> SettingsRow:
         monthly_budget_cents=record["monthly_budget_cents"],
         updated_at=record["updated_at"],
         personal=record.get("kind") == "personal",
+        writing_style=str(record.get("writing_style") or "business"),
+        model_params=_json_object(record.get("model_params")),
+        model_params_version=int(record.get("model_params_version") or 0),
     )
+
+
+def _json_object(raw: Any) -> dict[str, Any]:
+    value = json.loads(raw) if isinstance(raw, str) else raw
+    return dict(value) if isinstance(value, dict) else {}
 
 
 _COLUMNS: Final = (
     "tenant_id, provider, tier, generation_enabled, acknowledged_processors, "
-    "monthly_budget_cents, updated_at"
+    "monthly_budget_cents, updated_at, writing_style, model_params, model_params_version"
 )
 
 
@@ -121,21 +134,30 @@ async def upsert(
     acknowledged: list[dict[str, Any]],
     monthly_budget_cents: int | None,
     updated_by: UUID,
+    writing_style: str = "business",
+    model_params: dict[str, Any] | None = None,
+    model_params_version: int = 0,
 ) -> SettingsRow:
+    """``writing_style``/``model_params``/``model_params_version`` are written as given:
+    the caller passes the stored values when it changes something else (N0)."""
     record = await conn.fetchrow(
         f"""
         INSERT INTO workspace_model_settings (
             tenant_id, provider, tier, generation_enabled,
-            acknowledged_processors, monthly_budget_cents, updated_by
+            acknowledged_processors, monthly_budget_cents, updated_by,
+            writing_style, model_params, model_params_version
         )
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9::jsonb, $10)
         ON CONFLICT (tenant_id) DO UPDATE SET
             provider = EXCLUDED.provider,
             tier = EXCLUDED.tier,
             generation_enabled = EXCLUDED.generation_enabled,
             acknowledged_processors = EXCLUDED.acknowledged_processors,
             monthly_budget_cents = EXCLUDED.monthly_budget_cents,
-            updated_by = EXCLUDED.updated_by
+            updated_by = EXCLUDED.updated_by,
+            writing_style = EXCLUDED.writing_style,
+            model_params = EXCLUDED.model_params,
+            model_params_version = EXCLUDED.model_params_version
         RETURNING {_COLUMNS}
         """,
         tenant_id,
@@ -145,6 +167,9 @@ async def upsert(
         json.dumps(acknowledged),
         monthly_budget_cents,
         updated_by,
+        writing_style,
+        json.dumps(model_params or {}),
+        model_params_version,
     )
     return _row(record)
 
@@ -291,6 +316,11 @@ class WorkspaceSettings:
         """What this workspace has agreed to, as of the last refresh; empty when nothing is cached."""
         row = self._rows.get(str(tenant_id))
         return row.acknowledged_keys if row else set()
+
+    def row(self, tenant_id: UUID) -> SettingsRow:
+        """The row as of the last refresh (the defaults when nothing is cached): the worker
+        reads the writing style and the model parameters from it (N0)."""
+        return self._rows.get(str(tenant_id)) or SettingsRow(tenant_id=tenant_id)
 
     def invalidate(self, tenant_id: UUID) -> None:
         self._cache.pop(str(tenant_id), None)

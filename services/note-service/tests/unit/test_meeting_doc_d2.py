@@ -119,7 +119,8 @@ def test_a_block_whose_call_fails_twice_is_a_chapter_and_the_rest_are_model_head
     assert stats["block_chapters"] == 1 and stats["blocks"] >= 3
     assert stats["block_failures"] == {"schema_invalid": 2}
     titles = [s.title or "" for s in document.sections if s.role == roles.TOPICS]
-    assert re.match(r"^00:00( — .+)?$", titles[0])
+    # B1 T2: the chapter is headed by its claim — no timestamp, never a bare name.
+    assert not re.match(r"^\d\d:\d\d", titles[0]) and len(titles[0].split()) >= 3
     assert any(t == "Peter Thiel und die Investoren in Kalifornien" for t in titles[1:])
 
 
@@ -154,7 +155,9 @@ def test_a_generic_heading_is_asked_again_then_takes_the_entity_fallback() -> No
     assert any(prompts.heading_retry("de") in s for s in systems)
     assert document.stats["headings_fallback"] == document.stats["blocks"]
     titles = [s.title or "" for s in document.sections if s.role == roles.TOPICS]
-    assert titles and all(re.match(r"^\d\d:\d\d — Peter Thiel$", t) for t in titles)
+    # B1 T2: the fallback heading is the block's claim about Peter Thiel, each one distinct.
+    assert titles and all("Peter Thiel" in t and not re.match(r"^\d\d:\d\d", t) for t in titles)
+    assert len({t.casefold() for t in titles}) == len(titles)
 
 
 def test_the_comparison_headings_are_accepted() -> None:
@@ -411,7 +414,7 @@ def test_r03s_first_paragraph_names_type_show_speakers_guest_and_themes() -> Non
         ],
         show=compose.show_name(turns),
     )
-    assert text.startswith("Podcast-Folge (Simplicissimus) über die Gründung von Palantir")
+    assert text.startswith("Sendung (Simplicissimus) über die Gründung von Palantir")
     assert "Erzähler/in und als Gast Felix Holtermann (Handelsblatt)" in text
     assert 25 <= len(text.split()) <= 60 and "Vortrag" not in text
     assert "Alex Karp" not in text.split("Themen")[0]  # a subject, never a speaker
@@ -467,7 +470,10 @@ def test_rung_1_follows_the_blocks_rung_2_names_their_top_facts_rung_3_is_code()
     provider = ScriptedProvider(overrides={"summary": summary})
     document = _run(_recording(40), provider)
     systems = [system for step, _p, system in provider.calls if step == "summary"]
-    assert "Die Teile der Aufnahme, in dieser Reihenfolge" in systems[0]
+    prompts_sent = [prompt for step, prompt, _s in provider.calls if step == "summary"]
+    # The run's parts travel with its data (P1-01: the system text is the resolver's).
+    assert "Die Teile der Aufnahme, in dieser Reihenfolge" in prompts_sent[0]
+    assert "Die Teile der Aufnahme" not in systems[0]
     assert prompts.strict_suffix("de") in systems[1]
     assert document.stats["summary_ladder"] == "composed"
     top = document.sections[0]

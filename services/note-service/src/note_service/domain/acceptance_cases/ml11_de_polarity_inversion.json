@@ -1,0 +1,92 @@
+{
+ "id": "ml11_de_polarity_inversion",
+ "sentinel": "F1-03 critical inversion: worse stays worse, fewer stays fewer, not approved stays not approved, opposes stays opposes — whatever the composer writes",
+ "meeting_type": "auto",
+ "output_language": "auto",
+ "result": {
+  "language": "de",
+  "result_rev": 1,
+  "turns": [
+   {
+    "speaker": "SPEAKER_1",
+    "name": null,
+    "start_ms": 0,
+    "end_ms": 24000,
+    "paragraphs": [
+     "Willkommen zur Lagebesprechung der Einkaufsleitung. Anna Keller, wie steht es um die Zulieferer im Süden? Der neue Branchenbericht ist ja seit gestern draußen."
+    ]
+   },
+   {
+    "speaker": "SPEAKER_2",
+    "name": null,
+    "start_ms": 24000,
+    "end_ms": 52000,
+    "paragraphs": [
+     "Die Lage der Zulieferer im Süden ist laut dem Bericht deutlich schlechter als im Vorjahr. Wir haben außerdem weniger Aufträge als geplant, rund dreißig statt fünfzig, und das trifft vor allem die kleinen Betriebe."
+    ]
+   },
+   {
+    "speaker": "SPEAKER_1",
+    "name": null,
+    "start_ms": 52000,
+    "end_ms": 66000,
+    "paragraphs": [
+     "Und der Ausbau in Ulm, über den wir im Sommer gesprochen haben?"
+    ]
+   },
+   {
+    "speaker": "SPEAKER_2",
+    "name": null,
+    "start_ms": 66000,
+    "end_ms": 84000,
+    "paragraphs": [
+     "Der Aufsichtsrat hat den Ausbau des Werks in Ulm am Montag nicht genehmigt. Wir legen im Januar einen kleineren Plan vor."
+    ]
+   },
+   {
+    "speaker": "SPEAKER_3",
+    "name": null,
+    "start_ms": 84000,
+    "end_ms": 100000,
+    "paragraphs": [
+     "From the partner side, to be clear: we oppose the merger with Brenner Logistik in its current form."
+    ],
+    "language": "en"
+   },
+   {
+    "speaker": "SPEAKER_1",
+    "name": null,
+    "start_ms": 100000,
+    "end_ms": 112000,
+    "paragraphs": [
+     "Danke. Dann halten wir fest, dass Anna Keller den kleineren Plan für Ulm bis Januar vorbereitet."
+    ]
+   }
+  ]
+ },
+ "assertions": {
+  "must_contain_any": [
+   [
+    "schlechter",
+    "verschlechtert"
+   ],
+   [
+    "nicht genehmigt",
+    "abgelehnt",
+    "nicht zugestimmt",
+    "nicht freigegeben"
+   ]
+  ],
+  "must_not_contain": [
+   "besser als im Vorjahr",
+   "verbessert",
+   "mehr Aufträge",
+   "hat den Ausbau des Werks in Ulm genehmigt",
+   "hat den Ausbau in Ulm genehmigt",
+   "Ausbau in Ulm wurde genehmigt",
+   "unterstützt die Fusion",
+   "unterstützen die Fusion",
+   "befürwortet die Fusion"
+  ]
+ }
+}

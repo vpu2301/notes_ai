@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -41,6 +41,8 @@ class VolumeBudget:
     """A profile's length (S3): fewer or more bullets, the same claims — a claim
     is kept whole or left out, never shortened."""
     scale: float = 1.0
+    """N2 — a writing profile's bullets-per-section range (default the engine's)."""
+    bullets: tuple[int, int] = BULLETS
 
     @property
     def target_words(self) -> int:
@@ -51,13 +53,16 @@ class VolumeBudget:
         """What one block's call is asked for; selection keeps to it."""
         body = max(0, self.target_words - ORIENTATION_WORDS)
         per_block = round(body / WORDS_PER_BULLET / max(1, self.blocks))
-        return max(BULLETS[0], min(BULLETS[1], per_block))
+        lo, hi = self.bullets
+        return max(lo, min(hi, per_block))
 
 
 @dataclass(frozen=True, slots=True)
 class Block:
     index: int
     facts: tuple[VerifiedFact, ...]
+    # The outline's standing title for this block (B2 T2); None on a time block.
+    title: str | None = None
 
     @property
     def span(self) -> tuple[int, int]:
@@ -130,24 +135,58 @@ def fallback_heading(
     known: frozenset[str],
     *,
     themes: Sequence[str] = (),
+    taken: Collection[str] = (),
+    max_words: int = support.HEADING_WORDS_MAX,
 ) -> str:
-    """``mm:ss — what it is about``: the brief's theme the block's facts carry best
-    (``themes``, fidelity) — content, never a voice — else its most named thing."""
+    """What a block is about, as a heading with no timestamp and never a bare name:
+    the brief's theme the block's facts carry best (``themes``, fidelity) — content,
+    never a voice — else the first clause of its most specific fact
+    (:func:`overview.chapter_heading`); ``taken`` headings are passed over;
+    ``max_words`` is the workspace's heading dial."""
     if not facts:
         return ""
-    stamp = overview.mmss(min(f.start_ms for f in facts))
+    used = {t.casefold() for t in taken}
     evidence = " ".join(f"{f.text} {f.quote}" for f in facts)
     scored = sorted(
         ((support.support_ratio(t, evidence, language), t) for t in themes if t.strip()),
         reverse=True,
     )
-    if scored and scored[0][0] >= THEME_SUPPORT:
-        return f"{stamp} — {scored[0][1].strip()}"
-    name = overview._top_name(list(facts), language, known)
-    if not name:
-        runs = Counter(run for f in facts for run in support.capital_runs(f.text))
-        name = runs.most_common(1)[0][0] if runs else ""
-    return f"{stamp} — {name}" if name else stamp
+    if scored and scored[0][0] >= THEME_SUPPORT and scored[0][1].strip().casefold() not in used:
+        return scored[0][1].strip()
+    heading = overview.chapter_heading(
+        list(facts), language, known, taken=taken, max_words=max_words
+    )
+    return heading or overview.mmss(min(f.start_ms for f in facts))
+
+
+def framing_words(language: str, *texts: str) -> frozenset[str]:
+    """The content stems of paragraph 1's subject, framing and themes: a fact made of
+    them only restates the framing (novelty 0)."""
+    return frozenset(w for t in texts for w in support.content_tokens(t, language))
+
+
+def novelty(fact: VerifiedFact, language: str, framing: frozenset[str]) -> int:
+    """0 when every content word of the fact is in the framing, else 1."""
+    words = set(support.content_tokens(fact.text, language))
+    return 0 if framing and words and words <= framing else 1
+
+
+def chapter_rank(
+    facts: Sequence[VerifiedFact],
+    language: str,
+    known: frozenset[str],
+    framing: frozenset[str] = frozenset(),
+) -> list[VerifiedFact]:
+    """The facts of a chapter in the order they are worth showing: the most specific
+    first, then the ones that add to the framing, then the earlier said."""
+    return sorted(
+        facts,
+        key=lambda f: (
+            -specificity(f, language, known),
+            -novelty(f, language, framing),
+            f.start_ms,
+        ),
+    )
 
 
 def quote_child(fact: VerifiedFact, speaker: str | None, language: str) -> str | None:
@@ -240,6 +279,16 @@ def _described(s: roles_table.Speaker, role_word: str | None, language: str = "e
     return f"{name} ({', '.join(bits)})" if bits and name else name
 
 
+def anyone_named(table: roles_table.RolesTable) -> bool:
+    """Whether a voice paragraph 1 would list has a real name (B1 T4)."""
+    return any(
+        roles_table.real_name(s.name)
+        for s in table.speakers.values()
+        if s.role in roles_table.ROLE_RANK
+        and (s.share >= LIST_MIN_SHARE or s.role != roles_table.PARTICIPANT)
+    )
+
+
 def speakers_of(
     table: roles_table.RolesTable, language: str
 ) -> tuple[list[str], list[str], list[str]]:
@@ -289,6 +338,38 @@ def speakers_of(
     return speakers, guests, others
 
 
+# Words that present somebody as taking part ("Interview mit …", "with guest …").
+_PARTICIPATION_CUE: Final = re.compile(
+    r"(?<!\w)(?i:mit|with|featuring|zu gast|gast|gäste|guests?|begrüßt|spricht mit|"
+    r"talks? to|з|із|зі|гість|гості|розмова з)\s+"
+    r"((?:[A-ZÄÖÜА-ЯІЇЄҐ][\w'’.\-]*)(?:\s+[A-ZÄÖÜА-ЯІЇЄҐ][\w'’.\-]*){0,2})"
+)
+
+# Generic company, not a name: "Podcast mit Gästen".
+_GENERIC_COMPANY: Final = frozenset(
+    {"gäste", "gästen", "gast", "experten", "expertinnen", "expertin", "experte", "guests",
+     "guest", "experts", "expert", "гостями", "експертами"}
+)  # fmt: skip
+
+
+def framing_participants_ok(framing: str, table: roles_table.RolesTable) -> bool:
+    """F2-01 — the model's framing names nobody as taking part whom the roles table has
+    not accepted: "Gespräch mit Midterm-Wahlen" is refused (and the type stands alone)."""
+    accepted = {
+        w.casefold()
+        for s in table.speakers.values()
+        if s.role in roles_table.ROLE_RANK and s.name
+        for w in s.name.split()
+    }
+    for match in _PARTICIPATION_CUE.finditer(framing):
+        named = match.group(1)
+        if named.casefold() in _GENERIC_COMPANY:
+            continue
+        if not any(w.casefold() in accepted for w in named.split()):
+            return False
+    return True
+
+
 def orientation_p1(
     *,
     language: str,
@@ -309,6 +390,7 @@ def orientation_p1(
         guests=guests,
         others=others,
         themes=list(themes),
+        named=anyone_named(table),
     )
     if show and not framing.strip():
         labels = overview.TYPE_LABELS.get(language, overview.TYPE_LABELS["en"])
@@ -463,6 +545,75 @@ def segment(
         if SOURCE_UNIFORM in sources:
             source = f"{source}+{SOURCE_UNIFORM}"
     return Segmentation(tuple(cuts), source)
+
+
+SOURCE_OUTLINE: Final = "outline"
+
+
+def _median_ms(facts: Sequence[VerifiedFact]) -> int:
+    times = sorted(f.start_ms for f in facts)
+    return times[len(times) // 2]
+
+
+def blocks_from_outline(
+    facts: Sequence[VerifiedFact], sections: Sequence[tuple[str, Sequence[str]]]
+) -> tuple[list[Block], dict[str, int]] | None:
+    """Blocks from the outline step's assignment (B2 T2), validated by code: an id is
+    used once (the first section wins, unknown ids are ignored); an unassigned fact joins
+    the section whose facts are nearest in time; a section with fewer than
+    ``MIN_BLOCK_FACTS`` facts is merged into the nearest by median time. Blocks keep the
+    outline's order and each one's title; facts inside a block run in time order. None
+    when nothing could be assigned."""
+    by_id = {f.item_key: f for f in facts}
+    groups: list[tuple[str, list[VerifiedFact]]] = []
+    placed: set[str] = set()
+    unknown = 0
+    for title, ids in sections:
+        own: list[VerifiedFact] = []
+        for fact_id in ids:
+            if fact_id not in by_id:
+                unknown += 1
+                continue
+            if fact_id in placed:
+                continue
+            placed.add(fact_id)
+            own.append(by_id[fact_id])
+        groups.append((title.strip(), own))
+    filled = [g for g in groups if g[1]]
+    if not filled:
+        return None
+    unassigned = 0
+    for fact in facts:
+        if fact.item_key in placed:
+            continue
+        unassigned += 1
+        nearest = min(filled, key=lambda g: abs(_median_ms(g[1]) - fact.start_ms))
+        nearest[1].append(fact)
+    merged = 0
+    while len(filled) > 1:
+        small = [k for k, g in enumerate(filled) if len(g[1]) < MIN_BLOCK_FACTS]
+        if not small:
+            break
+        k = small[0]
+        others = [j for j in range(len(filled)) if j != k]
+        j = min(others, key=lambda j: abs(_median_ms(filled[j][1]) - _median_ms(filled[k][1])))
+        keep, gone = (j, k) if len(filled[j][1]) >= len(filled[k][1]) else (k, j)
+        title = filled[keep][0]
+        facts_merged = filled[keep][1] + filled[gone][1]
+        first = min(keep, gone)
+        filled = [g for n, g in enumerate(filled) if n not in (keep, gone)]
+        filled.insert(first, (title, facts_merged))
+        merged += 1
+    blocks = [
+        Block(n, tuple(sorted(own, key=lambda f: (f.start_ms, f.item_key))), title=title or None)
+        for n, (title, own) in enumerate(filled)
+    ]
+    return blocks, {
+        "sections": len(blocks),
+        "unassigned": unassigned,
+        "merged": merged,
+        "unknown": unknown,
+    }
 
 
 def blocks_at(facts: Sequence[VerifiedFact], segmentation: Segmentation) -> tuple[list[Block], int]:

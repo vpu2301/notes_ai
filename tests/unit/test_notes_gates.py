@@ -63,6 +63,12 @@ def test_every_committed_checklist_names_a_meeting_and_known_checks() -> None:
         "guest_line",
         "chapters_min",
         "overview",
+        "headings_must_not_match",
+        "framing_must_not_contain",
+        "claims_row",
+        # The original generation's numbers and the sentinel of a regression case (B1)
+        "original_generation",
+        "sentinel",
         # Codes pinned per check
         "codes",
         # Lint findings allowed per code
@@ -521,7 +527,7 @@ def test_the_r03_checks_read_the_overview_the_guest_and_the_chapters() -> None:
         (notes_assert.ASSERTIONS / "r03_de_palantir_podcast.assertions.json").read_text("utf-8")
     )
     framing = (
-        "Podcast-Folge über Palantir. Es sprechen Erzähler/in und als Gast Felix Holtermann "
+        "Sendung über Palantir. Es sprechen Erzähler/in und als Gast Felix Holtermann "
         "(Büroleiter beim Handelsblatt). Themen sind Thiel, Karp und Überwachung."
     )
     top = f"{framing}\n\nZunächst — Palantir wird 2004 gegründet."

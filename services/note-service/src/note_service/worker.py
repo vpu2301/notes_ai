@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import logging
 import signal
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from .collaboration_metrics import rehome_total
 from .config import settings
 from .domain import experiments
 from .domain.note_move import REHOME_JOB_KIND
+from .jobs import recompile_instructions
 from .jobs.evaluate_note import EvaluationDeps, handle_evaluate
 from .jobs.generate_note import GenerationDeps, handle_generate, mark_dead
 from .jobs.rehome_media import handle_rehome, mark_failed
@@ -122,6 +124,10 @@ class _Providers:
             self._cache[resolved.name] = provider
         return provider
 
+    def fallbacks(self) -> list[dict[str, Any]]:
+        """Env overrides this process resolved to their fallback, and why (F1-01 provenance)."""
+        return [o.log_fields() for o in self._load().active_overrides() if o.is_fallback]
+
     def backend_of(self, workspace_id: str) -> tuple[str, int]:
         return self._resolve(workspace_id).name, COLD_START_SECONDS
 
@@ -169,6 +175,13 @@ async def run() -> None:
         multilingual_evidence=settings.note_multilingual_evidence,
         fidelity=settings.note_fidelity,
         provider_named=providers.named,
+        build_sha=settings.build_sha,
+        fallbacks=providers.fallbacks,
+        note_instructions=settings.note_instructions_enabled,
+        # N0: the row the probe hook refreshed before this run (style, model parameters).
+        settings_row=state.workspace_model_settings.row
+        if state.workspace_model_settings is not None
+        else None,
         coverage_retry_budget_s_per_hour=settings.note_coverage_retry_budget_s_per_hour,
         shadow_percent=(
             settings.note_generation_shadow_percent
@@ -231,6 +244,7 @@ async def run() -> None:
         provider_for=providers.get,
         provider_named=providers.named,
         costs=CostTable.load(settings.models_config),
+        fallbacks=providers.fallbacks,
     )
 
     async def _evaluate(ctx: JobContext) -> dict[str, Any] | None:
@@ -248,6 +262,17 @@ async def run() -> None:
                 only_from=experiments.ACTIVE,
             )
 
+    # N4: the meeting-type note instructions, recompiled after the workspace text changed.
+    async def _compiler_for(tenant_id: UUID) -> Any:
+        return await state.note_instructions_compiler.for_workspace(str(tenant_id))
+
+    recompile_deps = SimpleNamespace(app_pool=app_pool, compiler_for=_compiler_for)
+
+    async def _recompile(ctx: JobContext) -> dict[str, Any] | None:
+        return await recompile_instructions.handle_recompile(
+            recompile_deps, tenant_id=UUID(str(ctx.job.tenant_id)), payload=dict(ctx.job.payload)
+        )
+
     queue = JobQueue(jobs_pool)
     runner = JobRunner(
         queue,
@@ -255,6 +280,8 @@ async def run() -> None:
             JOB_KIND: HandlerSpec(run=_run, backend=_backend, probe=_probe, on_dead=_on_dead),
             REHOME_JOB_KIND: HandlerSpec(run=_rehome, on_dead=_rehome_dead),
             experiments.JOB_KIND: HandlerSpec(run=_evaluate, on_dead=_evaluate_dead),
+            # A dead recompile leaves the rows stale: the worker writes with the workspace text.
+            recompile_instructions.JOB_KIND: HandlerSpec(run=_recompile),
         },
         worker_id=settings.registry_environ().get("HOSTNAME") or "note-worker",
         ledger=UsageLedger(CostTable.load(settings.models_config)),

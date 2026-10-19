@@ -19,6 +19,7 @@ from .. import audit_kinds
 from ..config import settings
 from ..deps import get_state, requires
 from ..domain import access
+from ..domain import generation_repository as gen_repo
 from ..domain import notes_repository as repo
 from ..domain.branding import load_tenant_branding
 from ..domain.pdf import render_note_pdf
@@ -77,6 +78,11 @@ async def get_note_pdf(
         section_names = await _resolve_section_names(conn, content=version.content)
 
         branding = await load_tenant_branding(conn, tenant_id=str(claims.tid))
+        # B4: the marker beside each written line (fail-safe: no marks).
+        try:
+            marks = await gen_repo.line_marks(conn, note_id=note_id)
+        except Exception:  # noqa: BLE001
+            marks = {}
 
     is_draft = variant == "draft"
     language = lang or "en"
@@ -89,6 +95,7 @@ async def get_note_pdf(
         is_draft=is_draft,
         language=language,
         section_names=section_names,
+        line_marks=marks,
     )
 
     await state.audit_writer.write_event(

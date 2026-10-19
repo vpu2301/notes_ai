@@ -52,7 +52,10 @@ HEADLINE = (
     ("number_date_error_rate", "TR-04 num/date err"),
     ("entity_consistency", "TR-05 consistency"),
     ("codeswitch_coverage", "TR-06 code-switch"),
+    ("codeswitch_wer", "TR-06 foreign WER"),
     ("translated_segments", "TR-06 translated"),
+    ("loop_events", "TR-02 loops"),
+    ("rediscover_rate", "B3 re-decode rate"),
     ("nonspeech_marked", "TR-07 marked"),
     ("word_ts_median_ms", "TR-08 ts median ms"),
     ("word_ts_p90_ms", "TR-08 ts p90 ms"),
@@ -380,10 +383,21 @@ async def run(args: argparse.Namespace) -> int:
         )
         row["gate_unavailable"] = dict(diags.gate_unavailable)
         row["language_id"] = diags.language_id
+        # Sprint B3: loops the guard found, and the segment-level language check's counts.
+        row["loop_events"] = len(diags.loops)
+        row["loop_outcomes"] = dict(Counter(e.outcome for e in diags.loops))
+        row["segments_decoded"] = diags.segment_language.segments
+        row["segment_lid_suspects"] = diags.segment_language.suspects
+        row["segment_lid_switched"] = diags.segment_language.switched
+        row["segment_lid"] = diags.segment_language.model_dump()
+        row["other_language_chunks"] = diags.other_language_chunks
         rows[rec.id] = row
         print(
             f"  {rec.id:<12} {rec.language} wer={_fmt(row['wer'])} halluc={row['halluc_chars']}"
-            f" artefacts={row['artefact_hits']} rtf={_fmt(row['rtf'])}",
+            f" artefacts={row['artefact_hits']} rtf={_fmt(row['rtf'])}"
+            f" foreign_wer={_fmt(asr_scoring.wer_of({'ref_words': row['codeswitch_ref_words'], 'sub': row['codeswitch_errors'], 'del': 0, 'ins': 0}))}"
+            f" loops={row['loop_events']} redecode={row['segment_lid_suspects']}/{row['segments_decoded']}"
+            f" switched={row['segment_lid_switched']}",
             flush=True,
         )
     if args.draft:

@@ -49,6 +49,12 @@ PINNED: dict[str, str] = {
     "2026-10-18.1": "cf074b7122798aa41bef5a67f158eb105b8454537728fc2915c42e68761513c0",  # Multilingual evidence (dev only, superseded by 2026-10-18.2 before release)
     "2026-10-18.2": "818baef94d26c0b6e0d4555aebc6b620546cd25c8f3d8447545c6902126b1c09",  # Multilingual evidence + fidelity before 05-prompt-instructions (dev only, superseded before release)
     "2026-10-18.3": "d5c30b2c51f360cfcd5dd0dbc8ebbfcb7242f1716fedaee6c04e3506592cb4b1",  # 05-prompt-instructions.md: common + stage task texts over the builders, verifier/dedup contracts (flag off sends 2026-10-01.3)
+    "2026-10-18.4": "eef5a8c0c897080550d8937dab6cf26a4aa1cb3a4c8745e943320b2a207af743",  # F2: participant check contract + schema, recovery suffix (fidelity only; flag off sends 2026-10-01.3)
+    "2026-10-18.5": "aea94b7ec673f399a24e8ccf9eeac627a7ec525abf7f6f4425410000749129d2",  # 04 prompt pack: code-owned context rule (participants, inserts) and entity rule (grammar is no correction)
+    "2026-10-18.6": "bbf20fe4faabb78a1b8cc4c12155f1238491e32ff718649296559bb4a405d16a",  # N2: the FORM style block (preamble, rule, dial lines) for workspace note instructions
+    "2026-10-19.1": "e6d2891583a8ba8537ec51e0363dd27352c7adb04d8b7781c6190e1c5e2b6cd6",  # N0: the writing-style lines (formal, informal, academic) at the head of the FORM block
+    "2026-10-19.2": "e76f378aa0aa05bfc182a9afe1d657d1a45af6b7998699bdafbcbaf5cecf56c7",  # concept rev: the plain/formal register lines removed; the instructions' style uses N0's lines
+    "2026-10-19.3": "1e7470b543dd13a939473daa99ef1bfd0b540c59fda72550d928f47f44f90f05",  # Sprint B2: narrated addenda (extract/context/block/summary/title), the outline step, certainties reported/unproven/refuted
 }
 
 FIXTURE_DIRS = (EVAL_FIXTURES, REPO / "tests" / "fixtures" / "meeting_doc")
@@ -96,6 +102,9 @@ def test_the_examples_are_the_invented_company_in_every_language() -> None:
         systems = prompts.extract_system(language) + prompts.extract_prompt("", language)
         systems += prompts.summary_system(language) + prompts.context_system(language)
         systems += prompts.block_system(language)
+        # B2: the narrated addenda and the outline step show their own examples.
+        systems += prompts.extract_system(language, narrated=True)
+        systems += prompts.block_system(language, narrated=True) + prompts.outline_system(language)
         for sentence in table.values():
             # One source of truth: every example is shown by some prompt.
             assert sentence in systems, (language, sentence)

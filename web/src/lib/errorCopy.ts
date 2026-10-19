@@ -135,6 +135,11 @@ const COPY: Record<string, string> = {
   budget_exceeded:
     "This workspace has used its AI budget for the month, so this note was not written up. Your recording and your own notes are untouched.",
   generation_in_progress: "This note is already being written.",
+  // Note instructions (Settings › Data & AI › Note writing).
+  not_available: "This isn't available in this workspace yet.",
+  text_too_long: "The instructions are too long. Shorten them and try again.",
+  too_many_previews: "Too many checks this hour. Try again in a little while.",
+  scope_unknown: "That kind of meeting doesn't have its own instructions.",
   too_many_generations: "This note has been rewritten as often as it can be today.",
   no_transcript: "This note was not made from a recording, so there is nothing to write it from.",
   note_cancelled: "This note was cancelled and cannot be written again.",
@@ -149,6 +154,10 @@ const COPY: Record<string, string> = {
     "Another admin changed which version is active since you opened this page. Reload and decide again.",
   evaluation_required:
     "This version has not passed an evaluation yet, so it stays a draft. Test it against your notes first.",
+  acceptance_required:
+    "This version has not passed the critical cases on the current service version, so it stays a draft. Run the critical cases for it first.",
+  missing_variable: "A placeholder this stage needs was removed. Put it back, or use the bundled instructions.",
+  missing_section: "The Write notes instructions must keep all five named sections.",
   transcript_not_shared: "You can see that note but not its transcript, so it cannot be used for a test.",
   source_revision_conflict: "A transcript changed since you chose it. Choose it again.",
   experiment_budget:

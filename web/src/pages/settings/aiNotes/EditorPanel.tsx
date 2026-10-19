@@ -3,18 +3,23 @@ import { previewDraft, saveVersion } from "../../../api/aiNotes";
 import { ApiError } from "../../../api/http";
 import type {
   ModelCapability,
+  PreviewFlags,
+  PreviewMode,
   ProfileConfig,
   ProfileProblem,
   ProfileStage,
   PromptProfile,
+  ResolvedCall,
   StageParams,
 } from "../../../api/types";
 import { Segmented } from "../../../components/Segmented";
 import { useToast } from "../../../components/Toaster";
 import { messageFor } from "../../../lib/errorCopy";
 import {
+  CALL_LABELS,
   LANGUAGES,
   LENGTHS,
+  SOURCE_LABELS,
   STAGE_HELP,
   STAGE_LABELS,
   STAGES,
@@ -30,6 +35,14 @@ const PARAMS: { key: keyof StageParams; label: string; step: string }[] = [
   { key: "max_output_tokens", label: "Output tokens (max)", step: "64" },
   { key: "timeout_s", label: "Timeout (s)", step: "5" },
 ];
+
+/** An emptied stage means "use the bundled instructions" (null), never an empty override. */
+function withBlanksBundled(config: ProfileConfig): ProfileConfig {
+  const stages = Object.fromEntries(
+    Object.entries(config.stages).map(([k, v]) => [k, v !== null && v !== undefined && !v.trim() ? null : v]),
+  ) as ProfileConfig["stages"];
+  return { ...config, stages };
+}
 
 /**
  * Edit a profile as a new version. The browser keeps the unsaved draft (it survives a
@@ -64,6 +77,10 @@ export function EditorPanel({
   const [bundled, setBundled] = useState<Partial<Record<ProfileStage, string>>>({});
   const [effective, setEffective] = useState<Partial<Record<ProfileStage, string>> | null>(null);
   const [previewLanguage, setPreviewLanguage] = useState<"en" | "de" | "uk">("en");
+  const [previewMode, setPreviewMode] = useState<PreviewMode>("production");
+  const [calls, setCalls] = useState<ResolvedCall[]>([]);
+  const [flags, setFlags] = useState<PreviewFlags | null>(null);
+  const [required, setRequired] = useState<Partial<Record<ProfileStage, string[]>>>({});
   const [busy, setBusy] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
 
@@ -74,12 +91,15 @@ export function EditorPanel({
   }, [config, dirty, profile.id, baseVersionId]);
 
   const refresh = useCallback(
-    async (language: string) => {
+    async (language: string, mode: PreviewMode) => {
       try {
-        const preview = await previewDraft(config, language);
+        const preview = await previewDraft(withBlanksBundled(config), language, mode);
         setProblems(preview.problems);
         setEffective(preview.effective);
         setBundled(preview.bundled);
+        setCalls(preview.calls ?? []);
+        setFlags(preview.flags ?? null);
+        setRequired(preview.required_variables ?? {});
       } catch (err) {
         toast.error(messageFor(err));
       }
@@ -89,12 +109,14 @@ export function EditorPanel({
 
   // The bundled texts are where an edit starts: loaded once with the first preview.
   useEffect(() => {
-    void refresh(previewLanguage);
-    // Only on mount and when the preview language changes; edits preview on request.
+    void refresh(previewLanguage, previewMode);
+    // Only on mount and when the preview language or mode changes; edits preview on request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewLanguage]);
+  }, [previewLanguage, previewMode]);
 
   const text = config.stages[stage];
+  // Emptied by hand: the bundled instructions apply (saved as null), and the field says so.
+  const emptied = text !== null && text !== undefined && !text.trim();
   const shown = text ?? bundled[stage] ?? "";
   const stageProblems = problems.filter((p) => p.field.startsWith(`stages.${stage}`));
   const modelName = config.models[stage] ?? null;
@@ -114,7 +136,7 @@ export function EditorPanel({
   const save = async () => {
     setBusy(true);
     try {
-      const saved = await saveVersion(profile.id, config);
+      const saved = await saveVersion(profile.id, withBlanksBundled(config));
       dropDraft(profile.id);
       setProblems([]);
       toast.success(`Saved as version ${saved.version_number}. It is not active — test it, then activate.`);
@@ -194,7 +216,8 @@ export function EditorPanel({
 
       <label className="field">
         <span>
-          {STAGE_LABELS[stage]} instructions {text === null || text === undefined ? "(bundled)" : "(edited)"}
+          {STAGE_LABELS[stage]} instructions{" "}
+          {text === null || text === undefined ? "(bundled)" : emptied ? "(empty: bundled will be used)" : "(edited)"}
         </span>
         <textarea
           className="input ai-stage-text"
@@ -206,6 +229,17 @@ export function EditorPanel({
           onChange={(e) => setStageText(e.target.value)}
         />
       </label>
+      {emptied && (
+        <p className="help" role="status">
+          This stage is empty, so it will use the bundled instructions — nothing is sent empty.
+        </p>
+      )}
+      {(required[stage] ?? []).length > 0 && (
+        <p className="help">
+          Keep {(required[stage] ?? []).map((v) => `{{${v}}}`).join(", ")}: the bundled text uses{" "}
+          {(required[stage] ?? []).length === 1 ? "it" : "them"}, and the version is refused without.
+        </p>
+      )}
       <div className="ai-stage-meta">
         <span id={`ai-stage-${stage}-count`} className={shown.length > maxChars ? "danger-text" : "help"}>
           {shown.length.toLocaleString()} / {maxChars.toLocaleString()} characters
@@ -219,7 +253,7 @@ export function EditorPanel({
           disabled={text === null || text === undefined}
           onClick={() => setStageText(null)}
         >
-          Restore bundled text
+          Use bundled instructions
         </button>
         <button className="btn sm ghost" type="button" aria-expanded={showDiff} onClick={() => setShowDiff((v) => !v)}>
           {showDiff ? "Hide changes" : "Changes against the base version"}
@@ -315,8 +349,17 @@ export function EditorPanel({
         ))}
 
       <details className="ai-preview">
-        <summary>Effective instructions (what this stage would send)</summary>
+        <summary>Effective instructions (exactly what each call sends)</summary>
         <div className="ai-preview-head">
+          <Segmented
+            label="Preview for"
+            options={[
+              { value: "production", label: "New notes here" },
+              { value: "test", label: "Test runs" },
+            ]}
+            value={previewMode}
+            onChange={setPreviewMode}
+          />
           <Segmented
             label="Preview language"
             options={[
@@ -327,19 +370,69 @@ export function EditorPanel({
             value={previewLanguage}
             onChange={setPreviewLanguage}
           />
-          <button className="btn sm" type="button" onClick={() => void refresh(previewLanguage)}>
+          <button className="btn sm" type="button" onClick={() => void refresh(previewLanguage, previewMode)}>
             Refresh preview
           </button>
         </div>
+        {flags && (
+          <p className="help" data-testid="ai-preview-flags">
+            {flags.profile_instructions_apply === false
+              ? "New notes here run the previous engine: this version's instructions are not sent, and no line is checked before saving."
+              : `Multilingual evidence on · meaning checks ${flags.fidelity ? "on" : "off"} · final check ${
+                  flags.final_check ? "on" : "off"
+                }`}
+            {flags.small_model ? " · small-model profile (bullets and heading in separate calls)" : ""}
+          </p>
+        )}
         <p className="help">
-          Platform rules (how noise and other languages are handled, and that the transcript is
-          data, not instructions) are always added by the service. A preview is not a test:
-          nothing has run on this configuration.
+          The same resolver feeds this preview, test runs and new notes; each run records the
+          hash of every request it sent, to compare with these. The service always adds the
+          contract (output format, and that the transcript is data, not instructions). A
+          preview is not a test: nothing has run on this configuration.
         </p>
-        <pre className="ai-preview-text" aria-label={`Effective ${STAGE_LABELS[stage]} instructions`}>
-          {effective?.[stage] ?? "Fix the problems above to see the preview."}
-        </pre>
+        {calls.length === 0 ? (
+          <pre className="ai-preview-text" aria-label={`Effective ${STAGE_LABELS[stage]} instructions`}>
+            {effective?.[stage] ?? "Fix the problems above to see the preview."}
+          </pre>
+        ) : (
+          <>
+            {calls
+              .filter((c) => c.stage === stage)
+              .map((c) => (
+                <PreviewCall key={c.call} call={c} />
+              ))}
+            <details className="ai-preview-code">
+              <summary>Code-owned rules (read-only)</summary>
+              <p className="help">
+                Common rules, conversation context, merging repeated points and the participant
+                check are owned by the service and versioned with it. They cannot be changed in
+                Settings.
+              </p>
+              {calls
+                .filter((c) => c.source === "code")
+                .map((c) => (
+                  <PreviewCall key={c.call} call={c} />
+                ))}
+            </details>
+          </>
+        )}
       </details>
     </section>
+  );
+}
+
+function PreviewCall({ call }: { call: ResolvedCall }) {
+  return (
+    <div className="ai-preview-call">
+      <div className="ai-preview-call-h">
+        <strong>{CALL_LABELS[call.call] ?? call.call}</strong>
+        <span className="help">
+          {SOURCE_LABELS[call.source] ?? call.source} · sha {call.sha.slice(0, 12)}
+        </span>
+      </div>
+      <pre className="ai-preview-text" aria-label={`${CALL_LABELS[call.call] ?? call.call} instructions`}>
+        {call.system}
+      </pre>
+    </div>
   );
 }

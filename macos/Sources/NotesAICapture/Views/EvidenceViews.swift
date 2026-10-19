@@ -17,6 +17,11 @@ struct LineEvidenceView: View {
             if let chip = row.chipLabel {
                 EvidenceChip(text: chip, tone: .neutral)
             }
+            // B4: "Wörtlich" / "Paraphrase" / "Aus 2 Aussagen" — muted, in the note's language.
+            if let mark = row.provenanceLabel(language: model.generation?.language) {
+                EvidenceChip(text: mark, tone: .neutral)
+                    .help("What this line is")
+            }
             ForEach(row.respelled, id: \.surface) { c in
                 EvidenceChip(text: c.canonical, tone: .accent)
                     .help("heard as: \(c.surface)")
@@ -70,6 +75,13 @@ private struct EvidencePopover: View {
             if let chip = row.chipLabel {
                 EvidenceChip(text: chip, tone: .neutral)
             }
+            // B4: the claim row's verdict, the presenter's own words.
+            if let verdict = row.verdict, !verdict.isEmpty {
+                Text(verdict)
+                    .font(.ds(12, .semibold))
+                    .foregroundStyle(DS.text2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text("“\(row.quote)”")
                 .font(.ds(13))
                 .foregroundStyle(DS.text1)
@@ -77,7 +89,10 @@ private struct EvidencePopover: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 10) {
-                Text(row.timeText + (row.speakerName.map { " · \($0)" } ?? ""))
+                Text(
+                    (row.provenanceLabel(language: model.generation?.language).map { "\($0) · " } ?? "")
+                        + row.timeText + (row.speakerName.map { " · \($0)" } ?? "")
+                )
                     .font(.dsMono(11))
                     .foregroundStyle(DS.muted)
                 Spacer(minLength: 0)

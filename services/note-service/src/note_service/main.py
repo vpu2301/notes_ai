@@ -19,6 +19,7 @@ from .main_deps import build_state, teardown_state
 from .middleware import AnonymousCorsMiddleware, RequestIDMiddleware
 from .routers import (
     ai_experiments,
+    ai_instructions,
     ai_profiles,
     ai_settings,
     audio_clips,
@@ -26,6 +27,7 @@ from .routers import (
     calendar,
     glossary,
     health,
+    note_instructions,
     notes,
     notes_ask,
     notes_audio,
@@ -210,6 +212,8 @@ def create_app() -> FastAPI:
     app.include_router(spaces.router)
     app.include_router(glossary.router)
     app.include_router(ai_settings.router)
+    app.include_router(ai_instructions.router)
+    app.include_router(note_instructions.router)
     app.include_router(ai_profiles.router)
     app.include_router(ai_experiments.router)
     app.include_router(billing.router)

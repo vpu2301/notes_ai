@@ -20,11 +20,12 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from audit import Severity
 from auth import Claims
@@ -33,7 +34,7 @@ from db import tenant_connection
 from .. import audit_kinds
 from ..config import settings as app_settings
 from ..deps import get_state, requires
-from ..domain import access, experiments, generation_service
+from ..domain import acceptance, access, experiments, generation_service
 from ..domain import ai_settings as settings_rules
 from ..domain import generation_repository as gen_repo
 from ..domain import notes_repository as repo
@@ -57,7 +58,11 @@ class SourceRef(BaseModel):
 class StartExperimentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    sources: list[SourceRef] = Field(min_length=1, max_length=experiments.MAX_SOURCES)
+    """Notes to compare on; empty with ``suite``."""
+    sources: list[SourceRef] = Field(default_factory=list, max_length=experiments.MAX_SOURCES)
+    """P1-04: ``critical`` runs the shipped critical cases instead of notes (no access to
+    any note needed): the evidence activation asks for."""
+    suite: Literal["critical"] | None = None
     """Candidate profile versions in order; null = the bundled profile."""
     candidate_version_ids: list[UUID | None] = Field(
         min_length=1, max_length=experiments.MAX_CANDIDATES
@@ -69,6 +74,12 @@ class StartExperimentRequest(BaseModel):
     """The client's key for this request: a retry with it returns the first experiment.
     In the body, not a header — the service's CORS allows no custom headers."""
     idempotency_key: str = Field(min_length=8, max_length=200)
+
+    @model_validator(mode="after")
+    def _sources_or_suite(self) -> StartExperimentRequest:
+        if bool(self.sources) == bool(self.suite):
+            raise ValueError("give notes in sources, or a suite — one of them")
+        return self
 
 
 class RunView(BaseModel):
@@ -232,7 +243,10 @@ async def _prepare(
                         "processors": missing,
                     },
                 )
-        notes = [await _readable_source(conn, claims, s.note_id) for s in body.sources]
+        if body.suite:
+            notes: list[Any] = []
+        else:
+            notes = [await _readable_source(conn, claims, s.note_id) for s in body.sources]
         for note in notes:
             if note.source_asr_job_id is None:
                 raise HTTPException(
@@ -246,11 +260,17 @@ async def _prepare(
 
         roles_of = [await _role_map(conn, note_id=n.id) for n in notes]
 
-    # Outside the transaction, with the caller's bearer: asr-service authorises the read.
-    transcripts = [
-        await _fetch_transcript(n.source_asr_job_id, auth_header=auth_header) for n in notes
-    ]
-    for ref, transcript in zip(body.sources, transcripts, strict=True):
+    if body.suite:
+        # The shipped critical cases: synthetic transcripts, nobody's note.
+        transcripts = [c.result for c in acceptance.cases()]
+        roles_of = [({}, None) for _c in acceptance.cases()]
+        notes = [SimpleNamespace(meeting_type=c.meeting_type) for c in acceptance.cases()]
+    else:
+        # Outside the transaction, with the caller's bearer: asr-service authorises the read.
+        transcripts = [
+            await _fetch_transcript(n.source_asr_job_id, auth_header=auth_header) for n in notes
+        ]
+    for ref, transcript in zip(body.sources, transcripts if not body.suite else [], strict=True):
         if int(transcript.get("result_rev") or 1) != ref.transcript_rev:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
@@ -329,6 +349,8 @@ async def start_experiment(
                     "role_by_key": role_by_key,
                     "template_family": template_code,
                     "meeting_type": getattr(note, "meeting_type", None),
+                    # A suite case: the evaluator checks the produced note against it.
+                    **({"case_id": acceptance.cases()[index].id} if body.suite else {}),
                 }
             ).encode("utf-8"),
             tenant_id=claims.tid,
@@ -340,8 +362,12 @@ async def start_experiment(
             config,
             version_id=str(version.id) if version else None,
             version_hash=version.content_hash if version else None,
+            # A test run always takes the new path (the profile texts apply only on it),
+            # whatever normal notes here run on; run_kind labels it, the view says which.
             multilingual=True,
             fidelity=True,
+            run_kind="experiment",
+            build_sha=app_settings.build_sha,
             language_hint=body.output_language if body.output_language != "auto" else "en",
             models={
                 stage: (
@@ -406,6 +432,17 @@ async def start_experiment(
                         "snapshot_key": experiments.source_key(claims.tid, experiment_id, i),
                     }
                     for i, ref in enumerate(body.sources)
+                ]
+                if not body.suite
+                else [
+                    {
+                        "case_id": c.id,
+                        "suite": body.suite,
+                        "suite_version": acceptance.suite_version(),
+                        "transcript_rev": 1,
+                        "snapshot_key": experiments.source_key(claims.tid, experiment_id, i),
+                    }
+                    for i, c in enumerate(acceptance.cases())
                 ],
                 candidates=[str(v) if v else None for v in body.candidate_version_ids],
                 repetitions=body.repetitions,
@@ -439,7 +476,8 @@ async def start_experiment(
             audit_kinds.AI_EXPERIMENT_STARTED,
             experiment.id,
             {
-                "sources": len(body.sources),
+                "sources": len(body.sources) if not body.suite else len(acceptance.cases()),
+                "suite": body.suite,
                 "candidates": len(candidates),
                 "repetitions": body.repetitions,
                 "cost_known": reservation.cents is not None,
@@ -452,6 +490,8 @@ class EstimateView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     runs: int
+    """About how many model requests the runs make together."""
+    requests: int = 0
     """None when a bound backend has no price: shown as unknown, never guessed."""
     estimate_cents: float | None
     token_cap: int
@@ -472,6 +512,7 @@ async def estimate_experiment(
     prepared = await _prepare(get_state(), claims, body, request.headers.get("authorization") or "")
     return EstimateView(
         runs=prepared.reservation.runs,
+        requests=prepared.reservation.requests,
         estimate_cents=prepared.reservation.cents,
         token_cap=prepared.reservation.tokens,
         cost_known=prepared.reservation.cents is not None,
@@ -482,6 +523,11 @@ async def estimate_experiment(
                 "languages": _languages(t),
             }
             for ref, t in zip(body.sources, prepared.transcripts, strict=True)
+        ]
+        if not body.suite
+        else [
+            {"case_id": c.id, "transcript_rev": 1, "languages": _languages(c.result)}
+            for c in acceptance.cases()
         ],
     )
 
@@ -532,11 +578,18 @@ async def list_experiments(
 
 
 async def _view(conn: Any, claims: Claims, experiment: experiments.Experiment) -> ExperimentView:
-    readable = [await _can_read(conn, claims, UUID(s["note_id"])) for s in experiment.sources]
+    # A suite case is shipped with the service: readable by every admin, never re-labelled.
+    readable = [
+        True if "case_id" in s else await _can_read(conn, claims, UUID(s["note_id"]))
+        for s in experiment.sources
+    ]
     planned = await experiments.runs(conn, experiment_id=experiment.id)
     # Versions never change; a source does when its transcript was re-labelled since.
     stale = False
     for source in experiment.sources:
+        if "case_id" in source:
+            stale = stale or source.get("suite_version") != acceptance.suite_version()
+            continue
         latest = await gen_repo.latest_for_note(conn, note_id=UUID(source["note_id"]))
         if latest is not None and latest.transcript_rev != source["transcript_rev"]:
             stale = True
@@ -546,7 +599,11 @@ async def _view(conn: Any, claims: Claims, experiment: experiments.Experiment) -
         # Which notes, and which revision: references, never content.
         sources=[
             {
-                "note_id": s["note_id"],
+                **(
+                    {"case_id": s["case_id"], "suite": s.get("suite")}
+                    if "case_id" in s
+                    else {"note_id": s["note_id"]}
+                ),
                 "transcript_rev": s["transcript_rev"],
                 "readable": readable[i],
             }
@@ -622,7 +679,7 @@ async def get_artifact(
         if run is None or not run.artifact_key:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="run not found")
         source = experiment.sources[run.source_index]
-        if not await _can_read(conn, claims, UUID(source["note_id"])):
+        if "case_id" not in source and not await _can_read(conn, claims, UUID(source["note_id"])):
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="run not found")
     raw = await state.transcripts_store.get(
         key=run.artifact_key, tenant_id=claims.tid, aad=run.id.bytes

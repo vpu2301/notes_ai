@@ -42,9 +42,12 @@ _BRACE: Final = re.compile(r"\{\{|\}\}")
 # What a saved version was written against. A version from another contract or
 # algorithm cannot be activated or rolled back to: it would run on code it never saw.
 CONTRACT_VERSION: Final = prompts.PROMPT_VERSION
-ALGORITHM_VERSION: Final = "2026-10-18.fidelity"
+# F1: the final check before writing. A version saved for the fidelity algorithm runs
+# unchanged on it (same stages, same texts); a job pinned to it before F1 runs without it.
+ALGORITHM_VERSION: Final = "2026-10-18.final-check"
+FIDELITY_ALGORITHM: Final = "2026-10-18.fidelity"
 COMPATIBLE_CONTRACTS: Final[frozenset[str]] = frozenset({CONTRACT_VERSION})
-COMPATIBLE_ALGORITHMS: Final[frozenset[str]] = frozenset({ALGORITHM_VERSION})
+COMPATIBLE_ALGORITHMS: Final[frozenset[str]] = frozenset({FIDELITY_ALGORITHM, ALGORITHM_VERSION})
 
 
 def schema_version() -> str:
@@ -186,6 +189,44 @@ def variables_in(text: str) -> list[str]:
     return [m.group(1) for m in _SLOT.finditer(text)]
 
 
+# The composition parser's named subsections (``prompts.Task.composing``): each operation
+# (summary, topic bullets, heading) gets GENERAL plus its own; all must be there, once.
+SECTIONS: Final[tuple[str, ...]] = (
+    "GENERAL",
+    "SUMMARY SUBTASK",
+    "TOPIC/BULLET SUBTASK",
+    "HEADING SUBTASK",
+    "CHRONOLOGY",
+)
+_HEADING_LIKE: Final = re.compile(r"^[A-Z][A-Z /-]{3,}$", re.M)
+
+
+def required_variables(stage: str) -> frozenset[str]:
+    """The variables a stage's text must keep: those its bundled text uses (P1-01) —
+    composition writes in {{output_language}}, so a replacement must say so too."""
+    return frozenset(variables_in(bundled_text(stage)))
+
+
+def _section_problems(where: str, text: str) -> list[Problem]:
+    """A composition text keeps every named subsection exactly once; a heading-like
+    line that is not one of them is named (a typo silently merges two subtasks)."""
+    found = _HEADING_LIKE.findall(text)
+    problems = [
+        Problem(where, "unknown_section", f"{line!r} is not one of {list(SECTIONS)}")
+        for line in found
+        if line not in SECTIONS
+    ]
+    for name in SECTIONS:
+        count = found.count(name)
+        if count == 0:
+            problems.append(
+                Problem(where, "missing_section", f"add a line {name!r} and its instructions")
+            )
+        elif count > 1:
+            problems.append(Problem(where, "duplicate_section", f"{name!r} appears {count} times"))
+    return problems
+
+
 def validate(
     config: ProfileConfig, available: list[Capability], *, context_tokens: int | None = None
 ) -> list[Problem]:
@@ -201,7 +242,14 @@ def validate(
             continue
         where = f"stages.{stage}"
         if not text.strip():
-            problems.append(Problem(where, "empty", "empty text; use null for the bundled text"))
+            problems.append(
+                Problem(
+                    where,
+                    "empty",
+                    "an empty text would send nothing; choose 'Use bundled instructions' "
+                    "(null) instead",
+                )
+            )
         if len(text) > MAX_STAGE_CHARS:
             problems.append(
                 Problem(where, "too_long", f"{len(text)} characters; at most {MAX_STAGE_CHARS}")
@@ -217,6 +265,17 @@ def validate(
                 )
         if len(_BRACE.findall(text)) != 2 * len(variables_in(text)):
             problems.append(Problem(where, "unbalanced_braces", "a {{ or }} without its pair"))
+        for name in sorted(required_variables(stage) - set(variables_in(text))):
+            problems.append(
+                Problem(
+                    where,
+                    "missing_variable",
+                    f"keep {{{{{name}}}}}: the bundled text uses it, and without it this "
+                    "stage no longer knows it",
+                )
+            )
+        if stage == "composition" and text.strip():
+            problems.extend(_section_problems(where, text))
         if context_tokens is not None and len(text) // 3 > context_tokens // 4:
             problems.append(
                 Problem(
@@ -285,17 +344,146 @@ def stage_overrides(config: ProfileConfig) -> dict[str, str]:
     }
 
 
+# ── The resolver: every system text a run sends (P1-01) ─────────────
+# One function for the preview, the experiment snapshot and the production snapshot: the
+# exact flags, language, model profile and length in; every call's system text out, built
+# by the same prompt builders with the same arguments the pipeline uses.
+
+# Where each call's text comes from: an editable stage, or code (read-only in Settings).
+CALL_STAGE: Final[dict[str, str]] = {
+    "extraction": "extraction",
+    "context": "context",
+    "composition.topic": "composition",
+    "composition.bullets": "composition",
+    "composition.heading": "composition",
+    "composition.summary": "composition",
+    "verification.meaning": "verification",
+    "verification.final": "verification",
+    "deduplication": "deduplication",
+    "participants": "participants",
+}
+# Which metered stage sends it (``stats.calls``): the binding it runs on.
+CALL_METER: Final[dict[str, str]] = {
+    "extraction": "extraction",
+    "context": "composition",
+    "composition.topic": "composition",
+    "composition.bullets": "composition",
+    "composition.heading": "composition",
+    "composition.summary": "composition",
+    "verification.meaning": "verification",
+    "verification.final": "final_check",
+    "deduplication": "verification",
+    "participants": "verification",
+}
+# The topic call's "{bullets}" when nothing else is known (the run's own value is in its stats).
+DEFAULT_BULLETS: Final = 4
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedCall:
+    """One call a run makes. ``source``: ``profile`` (the version's text is in it),
+    ``bundled`` (an editable stage left at its bundled text), ``not_applied`` (the version
+    edits it, but with multilingual evidence off no profile text is sent), ``code``."""
+
+    call: str
+    stage: str
+    meter: str
+    source: str
+    system: str
+
+    @property
+    def sha(self) -> str:
+        return _sha(self.system)
+
+
+def resolve(
+    config: ProfileConfig,
+    *,
+    language: str,
+    multilingual: bool,
+    fidelity: bool,
+    small: bool = False,
+    bullets: int = DEFAULT_BULLETS,
+    style: str = "",
+    heading_max_words: int = 8,
+) -> list[ResolvedCall]:
+    """Every call's system text for these inputs, in pipeline order. ``small``: the bound
+    extraction model's small-model profile (bullets and heading in separate calls).
+    ``style`` / ``heading_max_words``: a workspace's note instructions (N2) — the FORM block
+    after the compose prompts and the heading length, exactly as the pipeline adds them."""
+    overrides = stage_overrides(config)
+    task = prompts.task(language, config.length, overrides=overrides) if multilingual else None
+    fidelity = fidelity and multilingual
+    texts: list[tuple[str, str]] = [
+        (
+            "extraction",
+            prompts.extract_system(language, noise=not small, multilingual=multilingual, task=task),
+        ),
+        ("context", prompts.with_style(prompts.context_system(language, task=task), style)),
+    ]
+    if small:
+        texts += [
+            (
+                "composition.bullets",
+                prompts.with_style(
+                    prompts.block_bullets_system(language, bullets, task=task), style
+                ),
+            ),
+            (
+                "composition.heading",
+                prompts.with_style(
+                    prompts.heading_range(
+                        prompts.block_heading_system(language, task=task), heading_max_words
+                    ),
+                    style,
+                ),
+            ),
+        ]
+    else:
+        texts.append(
+            (
+                "composition.topic",
+                prompts.with_style(
+                    prompts.heading_range(
+                        prompts.block_system(language, bullets, task=task), heading_max_words
+                    ),
+                    style,
+                ),
+            )
+        )
+    texts.append(
+        (
+            "composition.summary",
+            prompts.with_style(prompts.summary_system(language, task=task), style),
+        )
+    )
+    if task is not None:
+        texts.append(("verification.meaning", prompts.meaning_check_system(language, task=task)))
+    if task is not None and fidelity:
+        texts += [
+            ("deduplication", prompts.deduplication_system(language, task=task)),
+            ("participants", prompts.participants_system(language, task=task)),
+            ("verification.final", prompts.meaning_check_system(language, task=task)),
+        ]
+    out: list[ResolvedCall] = []
+    for call, system in texts:
+        stage = CALL_STAGE[call]
+        if stage not in STAGES:
+            source = "code"
+        elif stage in overrides:
+            source = "profile" if multilingual else "not_applied"
+        else:
+            source = "bundled"
+        out.append(ResolvedCall(call, stage, CALL_METER[call], source, system))
+    return out
+
+
 def effective_instructions(
     config: ProfileConfig, stage: str, *, language: str, small: bool = False
 ) -> str:
-    """The full system text a stage sends for ``language``: what the preview shows and
-    what a generation runs — the same functions."""
-    task = prompts.task(language, config.length, overrides=stage_overrides(config))
-    if stage == "extraction":
-        return prompts.extract_system(language, noise=not small, multilingual=True, task=task)
-    if stage == "composition":
-        return prompts.summary_system(language, task=task)
-    return prompts.meaning_check_system(language, task=task)
+    """A stage's first call on the path a test run takes (multilingual and fidelity on)."""
+    calls = resolve(config, language=language, multilingual=True, fidelity=True, small=small)
+    return next(c.system for c in calls if c.stage == stage)
 
 
 def _sha(text: str) -> str:
@@ -317,10 +505,30 @@ def content_hash(config: ProfileConfig) -> str:
     return _sha(blob)
 
 
-def prompt_hashes(config: ProfileConfig, *, language: str) -> dict[str, str]:
-    """sha256 of every stage's effective system text for ``language``."""
+def prompt_hashes(
+    config: ProfileConfig,
+    *,
+    language: str,
+    multilingual: bool = True,
+    fidelity: bool = True,
+    small: bool = False,
+    bullets: int = DEFAULT_BULLETS,
+    style: str = "",
+    heading_max_words: int = 8,
+) -> dict[str, str]:
+    """sha256 of every call's system text for these exact inputs (:func:`resolve`)."""
     return {
-        stage: _sha(effective_instructions(config, stage, language=language)) for stage in STAGES
+        c.call: c.sha
+        for c in resolve(
+            config,
+            language=language,
+            multilingual=multilingual,
+            fidelity=fidelity,
+            small=small,
+            bullets=bullets,
+            style=style,
+            heading_max_words=heading_max_words,
+        )
     }
 
 
@@ -349,12 +557,17 @@ def snapshot(
     fidelity: bool,
     language_hint: str,
     models: dict[str, dict[str, Any]],
+    build_sha: str = "",
+    run_kind: str = "generation",
 ) -> dict[str, Any]:
     """Everything a queued generation runs with, fixed at enqueue: the version, its
     hashes, the code's contract/schema/algorithm, the flags, the language policy, the
     length and the backend each stage was resolved to. Counts and names, no transcript.
-    ``language_hint`` is the language prompt hashes are computed for."""
+    ``language_hint`` is the language prompt hashes are computed for. ``build_sha``: the
+    code that pinned it; ``run_kind``: ``generation`` or ``experiment`` (labelled apart)."""
     return {
+        "run_kind": run_kind,
+        "build_sha": build_sha or None,
         "profile_version_id": version_id,
         "content_hash": version_hash or content_hash(config),
         "contract_version": CONTRACT_VERSION,
@@ -366,7 +579,9 @@ def snapshot(
         "output_language": config.output_language,
         "length": config.length,
         "stages": {s: config.stages.get(s) is not None for s in STAGES},
-        "prompt_hashes": prompt_hashes(config, language=language_hint),
+        "prompt_hashes": prompt_hashes(
+            config, language=language_hint, multilingual=multilingual, fidelity=fidelity
+        ),
         "config": config.model_dump(mode="json"),
         "models": models,
     }

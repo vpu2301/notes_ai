@@ -172,12 +172,16 @@ def api(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
 
     store = _Repo()
     store.install(monkeypatch)
-    evidence = {"problem": None}
+    evidence = {"problem": None, "critical": None}
 
     async def _evidence(conn: Any, *, experiment_id: UUID, version_id: UUID) -> Any:
         return evidence["problem"]
 
+    async def _critical(conn: Any, *, version_id: UUID, suite_version: str) -> Any:
+        return evidence["critical"]
+
     monkeypatch.setattr(ai_profiles.experiments, "evidence_problem", _evidence)
+    monkeypatch.setattr(ai_profiles.experiments, "acceptance_problem", _critical)
     monkeypatch.setattr(ai_profiles, "tenant_connection", _conn)
     monkeypatch.setattr(ai_profiles, "_capabilities", _caps)
     app = create_app()
@@ -234,6 +238,29 @@ def test_v2_saved_while_v1_stays_active(api: Any) -> None:
     assert (
         api.client.get("/v1/ai/prompt-profiles").json()["active"]["profile_version_id"] == v1["id"]
     )
+
+
+def test_a_version_that_failed_the_critical_cases_stays_a_draft(api: Any) -> None:
+    pid = _profile(api)
+    v1 = api.client.post(
+        f"/v1/ai/prompt-profiles/{pid}/versions", json={"config": EXTRACTION}
+    ).json()
+    api.evidence["critical"] = (
+        "the critical cases failed: ml11_de_polarity_inversion: must_not_contain[0]"
+    )
+    r = api.client.post(
+        f"/v1/ai/prompt-profiles/{pid}/activate",
+        json={"version_id": v1["id"], "expected_active_revision": 0, "evaluation_ref": EVAL},
+    )
+    assert r.status_code == 409 and r.json()["code"] == "acceptance_required"
+    assert "ml11" in r.json()["detail"]
+    assert api.client.get("/v1/ai/prompt-profiles").json()["active"]["profile_version_id"] is None
+    api.evidence["critical"] = None
+    ok = api.client.post(
+        f"/v1/ai/prompt-profiles/{pid}/activate",
+        json={"version_id": v1["id"], "expected_active_revision": 0, "evaluation_ref": EVAL},
+    )
+    assert ok.status_code == 200
 
 
 def test_an_invalid_draft_is_422_with_every_problem_named(api: Any) -> None:
@@ -416,16 +443,66 @@ def test_a_rollback_to_a_version_that_was_active_needs_no_new_evidence(api: Any)
 
 
 def test_a_draft_preview_validates_and_resolves_without_saving(api: Any) -> None:
+    from note_service.domain import prompt_profiles as profiles
+
+    composition = profiles.bundled_text("composition").replace(
+        "Write clear, concise notes in {{output_language}}.", "Short, in {{output_language}}."
+    )
     body = {
-        "config": {
-            "stages": {"composition": "Short, in {{output_language}}.", "extraction": "{{x}}"}
-        },
+        "config": {"stages": {"composition": composition, "extraction": "{{x}}"}},
         "language": "de",
-    }  # noqa: E501
+    }
     r = api.client.post("/v1/ai/prompt-profiles/preview", json=body).json()
     assert {(p["field"], p["code"]) for p in r["problems"]} == {
         ("stages.extraction", "unknown_variable")
     }
     assert "Short, in German." in r["effective"]["composition"]
     assert "extraction" not in r["effective"]  # never a preview of an invalid stage
+    assert r["calls"] == []  # a draft with problems resolves no calls
+    assert r["required_variables"]["composition"] == ["output_language"]
     assert api.repo.versions == {}
+
+
+def test_a_valid_draft_resolves_every_call_for_the_mode(api: Any) -> None:
+    from note_service.domain import prompt_profiles as profiles
+
+    body = {"config": {"stages": {"extraction": "List the claims."}}, "language": "de"}
+    test = api.client.post("/v1/ai/prompt-profiles/preview", json=body).json()
+    calls = {c["call"]: c for c in test["calls"]}
+    assert test["flags"]["mode"] == "test" and test["flags"]["fidelity"] is True
+    assert (
+        calls["extraction"]["source"] == "profile"
+        and "List the claims." in calls["extraction"]["system"]
+    )
+    assert calls["context"]["source"] == "code" and "verification.final" in calls
+    expected = profiles.prompt_hashes(
+        profiles.ProfileConfig(stages={"extraction": "List the claims."}), language="de"
+    )
+    assert {c: v["sha"] for c, v in calls.items()} == expected
+    # Production here runs the previous engine: the text is shown as not sent.
+    prod = api.client.post(
+        "/v1/ai/prompt-profiles/preview", json={**body, "mode": "production"}
+    ).json()
+    assert prod["flags"]["profile_instructions_apply"] is False
+    assert {c["call"]: c["source"] for c in prod["calls"]}["extraction"] == "not_applied"
+
+
+def test_a_composition_edit_must_keep_its_sections_and_variable() -> None:
+    from note_service.domain import prompt_profiles as profiles
+
+    broken = (
+        profiles.bundled_text("composition")
+        .replace("SUMMARY SUBTASK", "SUMARY SUBTASK")
+        .replace("{{output_language}}", "German")
+    )
+    codes = {
+        (p.code, p.detail.split(":")[0])
+        for p in profiles.validate(profiles.ProfileConfig(stages={"composition": broken}), [])
+    }
+    assert ("missing_variable", "keep {{output_language}}") in codes
+    assert any(c == "missing_section" for c, _d in codes)
+    assert any(c == "unknown_section" for c, _d in codes)
+    assert (
+        profiles.validate(profiles.ProfileConfig(stages={"composition": "   "}), [])[0].code
+        == "empty"
+    )

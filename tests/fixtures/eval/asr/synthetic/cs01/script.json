@@ -1,0 +1,44 @@
+{
+  "language": "de",
+  "utterances": [
+    {
+      "speaker": "Erzähler",
+      "language": "de",
+      "text": "Im Stadtrat von Quillhaven wird nächste Woche über den neuen Haushalt abgestimmt. Die Mehrheit ist knapp, und beide Seiten werben um die wenigen Stimmen, die noch offen sind."
+    },
+    {
+      "speaker": "Erzähler",
+      "language": "de",
+      "text": "Der Bürgermeister hat am Montag vor der Presse erklärt, wie er die Lage einschätzt."
+    },
+    {
+      "speaker": "Clip",
+      "language": "en",
+      "text": "We are going to win this vote, and we are going to win it clearly, because the people of this town want their streets repaired and their schools open.",
+      "pause_before_ms": 150
+    },
+    {
+      "speaker": "Erzähler",
+      "language": "de",
+      "text": "Die Opposition sieht das anders. Sie wirft dem Rathaus vor, die Kosten für das neue Schwimmbad kleinzurechnen und die Schulden der Stadt zu verschweigen.",
+      "pause_before_ms": 150
+    },
+    {
+      "speaker": "Erzähler",
+      "language": "de",
+      "text": "Ihre Sprecherin hat auf die Vorwürfe mit einem Satz geantwortet, der seither in der Stadt diskutiert wird."
+    },
+    {
+      "speaker": "Clip",
+      "language": "en",
+      "text": "The numbers in this budget are not real, and everyone in that room knows it. We will not vote for a plan that hides the cost from the people who have to pay for it.",
+      "pause_before_ms": 150
+    },
+    {
+      "speaker": "Erzähler",
+      "language": "de",
+      "text": "Ob die Abstimmung wie geplant stattfindet, entscheidet sich am Donnerstag. Wir berichten weiter.",
+      "pause_before_ms": 150
+    }
+  ]
+}

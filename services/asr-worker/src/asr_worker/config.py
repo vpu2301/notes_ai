@@ -87,6 +87,18 @@ class Settings(BaseSettings):
     )
     # Known artefact phrase dropped when no_speech ≥ this (or VAD share below the G1 share).
     asr_gate_artefact_no_speech: float = Field(default=0.5, alias="MDX_ASR_GATE_ARTEFACT_NO_SPEECH")
+    # G2 near-repeats (Sprint B3 T3): grams match at this SequenceMatcher ratio; 1.0 = exact only.
+    asr_loop_fuzzy_ratio: float = Field(
+        default=0.8, alias="MDX_ASR_LOOP_FUZZY_RATIO", ge=0.0, le=1.0
+    )
+    # Segment-level language check (Sprint B3 T2): a decoded segment whose words are mostly
+    # another language's (or whose avg_logprob is far below the recording's median) is decoded
+    # again in that language and kept when the decoder is surer. Works for pinned languages too.
+    asr_segment_lid_enabled: bool = Field(default=True, alias="MDX_ASR_SEGMENT_LID_ENABLED")
+    asr_segment_lid_min_ms: int = Field(default=3000, alias="MDX_ASR_SEGMENT_LID_MIN_MS", ge=0)
+    asr_segment_lid_foreign_share: float = Field(
+        default=0.6, alias="MDX_ASR_SEGMENT_LID_FOREIGN_SHARE", ge=0.0, le=1.0
+    )
 
     # ── Shadow ASR engine ───────────────────────────────────────────────
     # Backend name from config/models.yaml; empty = off. Only numeric differences are kept.

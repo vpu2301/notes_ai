@@ -89,7 +89,7 @@ def test_a_misheard_name_is_spelled_right_in_the_line_and_left_alone_in_the_quot
     assert "Fabian Reinbold" in fact.text and "Reinbolt" not in fact.text
     assert fact.quote == quote  # byte for byte
     assert fact.corrections == (
-        entities.Correction("Fabian Reinbolt", "Fabian Reinbold", "candidate"),
+        entities.Correction("Fabian Reinbolt", "Fabian Reinbold", "candidate", "person"),
     )
     assert verify.ENTITY_CORRECTED in fact.flags
     # A corrected name is not a new name: no paraphrase flag for it.

@@ -53,6 +53,8 @@ FIRST_PERSON: Final = "first_person"
 DESCRIPTIVE: Final = "descriptive"
 # The text opens with a pronoun: evidence, never a line.
 SUBJECT_UNRESOLVED: Final = "subject_unresolved"
+# An "introduction" the participant check found introduces nobody taking part: evidence only.
+INTRODUCTION_REJECTED: Final = "introduction_rejected"
 # Restated in another language than its line was spoken in: the meaning check is
 # still to run (pending), or could not decide (unverified, kept for review).
 MEANING_PENDING: Final = "meaning_pending"
@@ -114,6 +116,16 @@ class Person:
     standing: str = "presenter"
     """The words said between role and organisation ("beim", "with")."""
     joiner: str = ""
+    """F2-01 — what the name denotes (``person``, ``event``, ``institution``, ``topic``,
+    ``unknown``), kept apart from how they take part (``host``, ``guest``, ``interviewee``,
+    ``quoted``, ``unknown``)."""
+    entity: str = "person"
+    participation: str = "unknown"
+    """``lexical``: a cue right before a person-shaped name establishes it; ``pending``: only
+    the participant check can (until then, nobody); ``checked``: it did."""
+    evidence: str = "lexical"
+    """The diarizer label the introduced person speaks under, when something links them."""
+    speaker: str | None = None
 
 
 @dataclass(slots=True)
@@ -162,11 +174,17 @@ class VerifiedFact:
     source_language: str | None = None
     """Item keys of the facts merged into this one: every line citing it cites them too."""
     also: tuple[str, ...] = ()
+    """F2-03: what the meaning check made of it — a verdict, ``repaired``, or why nothing
+    was decided (``budget``, ``unavailable``, ``malformed``, ``foreign_lines``); None when
+    it was not sent. A budget or provider failure is never a contradiction."""
+    meaning: str | None = None
 
     @property
     def evidence_only(self) -> bool:
         """Evidence behind other lines, never a line itself (copied or first-person text);
         figures and introductions are written from their fields, so they are exempt."""
+        if INTRODUCTION_REJECTED in self.flags:
+            return True
         if self.figure is not None or self.person is not None:
             return False
         return (
@@ -800,8 +818,14 @@ def verify_facts(
         elif kind == schema.INTRODUCTION:
             following = _next_line_same_speaker(window, turn)
             person, cleared = verify_introduction(
-                spoken, language=language, context=f"{turn.text} {following}"
+                spoken,
+                language=language,
+                context=f"{turn.text} {following}",
+                known=name_candidates | {t.term for t in glossary if t.kind == "person"},
             )
+            if person is not None and person.evidence == INTRO_PENDING and not fidelity:
+                # Only the participant check (fidelity) can establish a weak introduction.
+                person = None
             if person is None:
                 # The words were said; only the kind is wrong.
                 kind = schema.KEY_POINT
@@ -1294,18 +1318,75 @@ def verify_figure(
 
 
 # "my name is", "I'm", "ich bin", "мене звати": the speaker is the person.
-_SELF_INTRO: Final = re.compile(
-    r"\b(?:my name is|i am|i'm|i’m|this is me|ich bin|ich heiße|ich heisse|mein name ist|"
-    r"мене звати|моє ім'я|моє імʼя)\b|(?<![\w'’ʼ])я\s",
-    re.IGNORECASE,
+# F2-01: a cue counts only right before the name, in its sentence (up to five words of
+# role between: "bei uns ist die Ökonomin Anna Müller"). Strong cues introduce whoever
+# follows; weak ones ("das ist", "this is", "це") as often name a thing or a place.
+# "my name is" names; "ich bin" may be followed by a capitalised noun ("ich bin Lehrerin").
+_CUE_NAMING: Final = r"my name is|ich heiße|ich heisse|mein name ist|мене звати|моє ім['’ʼ]я"
+_CUE_SELF: Final = r"i am|i'm|i’m|this is me|ich bin|я"
+_CUE_OTHER: Final = (
+    r"joined by|with me (?:today )?(?:is|are)|with us (?:today )?(?:is|are)|let me introduce|"
+    r"introducing|please welcome|welcome|meet|bei uns (?:ist|sind)|zu gast (?:ist|sind)|"
+    r"(?:ich )?begrüße|wir begrüßen|mit mir (?:ist|sind)|im studio (?:ist|sind)|"
+    r"знайомтеся|зі мною|у нас в гостях|в гостях"
 )
+_CUE_WEAK: Final = r"this is|das ist|hier ist|це"
+_CUE_BEFORE: Final = {
+    kind: re.compile(rf"(?:^|[\s,;:–—-])(?:{cues})\s+(?:[^\s.!?]+\s+){{0,5}}$", re.IGNORECASE)
+    for kind, cues in (
+        ("naming", _CUE_NAMING),
+        ("self", _CUE_SELF),
+        ("other", _CUE_OTHER),
+        ("weak", _CUE_WEAK),
+    )
+}
+_CUE_AFTER: Final = re.compile(
+    r"^[\s,]*(?:herzlich willkommen|willkommen|welcome|ласкаво просимо)\b", re.IGNORECASE
+)
+_SENTENCE_END: Final = re.compile(r"[.!?…]")
+# A name never opens with an article: "Das Repräsentantenhaus" is a thing.
+ARTICLES: Final = frozenset(
+    {"der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer",
+     "eines", "the", "a", "an"}
+)  # fmt: skip
+_NAME_PARTICLES: Final = frozenset({"von", "van", "de", "der", "den", "zu", "da", "di", "la", "le"})
+
+INTRO_LEXICAL: Final = "lexical"
+INTRO_PENDING: Final = "pending"
+INTRO_CHECKED: Final = "checked"
 
 
-_OTHER_INTRO: Final = re.compile(
-    r"\b(?:this is|meet|joined by|with me (?:is|today)|let me introduce|introducing|"
-    r"das ist|hier ist|begrüße|mit mir ist|це|знайомтеся|зі мною)\b",
-    re.IGNORECASE,
-)
+def person_shaped(name: str) -> bool:
+    """Could be somebody's name: no article first, no digit, every word capitalised but
+    name particles ("von der Leyen"), at most five words."""
+    words = name.split()
+    if not words or len(words) > 5 or _DIGITS_RE.search(name):
+        return False
+    if words[0].casefold() in ARTICLES:
+        return False
+    return all(
+        w[:1].isupper() or (i and w.casefold() in _NAME_PARTICLES) for i, w in enumerate(words)
+    )
+
+
+def intro_cue(name: str, said: str) -> str | None:
+    """``naming``, ``self``, ``other`` or ``weak``: the cue that introduces ``name`` where it is said —
+    right before it in its sentence (or "…, herzlich willkommen" right after); None when
+    no cue touches the name, wherever else in the line one stands."""
+    found: str | None = None
+    for match in re.finditer(rf"(?<!\w){re.escape(name)}(?!\w)", said):
+        before = _SENTENCE_END.split(said[: match.start()])[-1]
+        after = said[match.end() :]
+        for kind in ("naming", "self", "other", "weak"):
+            if _CUE_BEFORE[kind].search(before):
+                if kind != "weak":
+                    return kind
+                found = found or kind
+        if _CUE_AFTER.match(after):
+            return "other"
+    return found
+
+
 _DIGITS_RE: Final = re.compile(r"\d")
 
 
@@ -1354,17 +1435,28 @@ def _field_said(value: str | None, quote: str) -> str:
 
 
 def verify_introduction(
-    fact: schema.Fact, *, language: str = "en", context: str = ""
+    fact: schema.Fact,
+    *,
+    language: str = "en",
+    context: str = "",
+    known: frozenset[str] = frozenset(),
 ) -> tuple[Person | None, int]:
     """``(person, fields cleared)``: the name must be whole in the quote or its line
-    (``context``); an unsaid role/organisation/qualifier word clears that field."""
+    (``context``) and person-shaped, with an introduction cue right before it (F2-01: a
+    cue elsewhere in the line introduces nobody). A strong cue before a full name (or a
+    ``known`` one) establishes it; anything weaker is ``pending`` — only the participant
+    check can make it somebody. An unsaid role/organisation/qualifier word clears that field."""
     said = f"{fact.quote} {context}"
     name = _field_said(fact.name, said)
-    if not name or not any(w[:1].isupper() for w in name.split()):
+    if not name or not person_shaped(name):
         return None, 0
-    # Somebody must be introduced in the line; a product named in a welcome is not.
-    if not (_SELF_INTRO.search(said) or _OTHER_INTRO.search(said)) or _DIGITS_RE.search(name):
+    cue = intro_cue(name, said)
+    if cue is None:
         return None, 0
+    folded = {k.casefold() for k in known}
+    established = cue == "naming" or (
+        cue != "weak" and (len(name.split()) >= 2 or name.casefold() in folded)
+    )
     fields = {
         "role": _field_said(fact.role, said),
         "organisation": _field_said(fact.organisation, said),
@@ -1378,8 +1470,9 @@ def verify_introduction(
             role=fields["role"],
             organisation=fields["organisation"],
             qualifier=fields["qualifier"],
-            self_introduction=bool(_SELF_INTRO.search(said)),
+            self_introduction=cue in ("naming", "self"),
             joiner=_joiner(fields["role"], fields["organisation"], said),
+            evidence=INTRO_LEXICAL if established else INTRO_PENDING,
         ),
         cleared,
     )

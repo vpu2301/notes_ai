@@ -10,7 +10,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Final
 
-from .verify import Person, VerifiedFact
+from .verify import ARTICLES, Person, VerifiedFact
 from .windows import Turn
 
 NARRATOR: Final = "narrator"
@@ -55,6 +55,9 @@ HOSTING_FIRST_PERSON: Final = 0.3  # below: narrating; at or above: hosting
 # Two voices this close in share, nobody introduced: both participants.
 TIE_SHARE_RATIO: Final = 0.8
 ADVERT_INSIDE: Final = 0.8  # share of a label's speech inside advert passages
+# A minor voice speaking another language than the recording's, introduced by nobody,
+# in a broadcast: an inserted clip (a quoted speaker), never a guest (F2-01).
+FOREIGN_CLIP_SHARE: Final = 0.8
 
 # A voice that presents or narrates: these recording types.
 BROADCAST: Final = frozenset({"podcast_broadcast", "lecture_webinar", "presentation_demo"})
@@ -102,8 +105,12 @@ def first_person(text: str) -> bool:
 
 
 def real_name(name: str | None) -> str | None:
+    """A name a person may have: not a diarizer label, not letterless, not led by an
+    article ("Das Repräsentantenhaus" is a thing)."""
     name = (name or "").strip()
     if not name or _DEFAULT_NAME.match(name) or not any(ch.isalpha() for ch in name):
+        return None
+    if name.split()[0].casefold() in ARTICLES:
         return None
     return name
 
@@ -126,11 +133,14 @@ def build(
     count: dict[str, int] = {}
     first: dict[str, int] = {}
     in_advert: dict[str, int] = {}
+    foreign: dict[str, int] = {}
     names: dict[str, str] = {}
     for turn in turns:
         label = turn.speaker_label or ""
         length = max(0, turn.end_ms - turn.start_ms)
         speech[label] = speech.get(label, 0) + length
+        # `Turn.language` is set only where it is not the recording's.
+        foreign[label] = foreign.get(label, 0) + (length if turn.language else 0)
         count[label] = count.get(label, 0) + 1
         first[label] = first.get(label, 0) + (1 if first_person(turn.text) else 0)
         in_advert[label] = in_advert.get(label, 0) + _inside(turn.start_ms, turn.end_ms, adverts)
@@ -176,6 +186,15 @@ def build(
             # The diarizer's catch-all is trailer voices and sound bites,
             # never a person taking part.
             role = CLIP
+        elif (
+            broadcast
+            and person is None
+            and label != dominant
+            and share < GUEST_MIN_SHARE
+            and speech[label]
+            and foreign[label] / speech[label] >= FOREIGN_CLIP_SHARE
+        ):
+            role = CLIP
         elif table.ambiguous:
             role = PARTICIPANT
         elif label == dominant and (broadcast or interview):
@@ -210,29 +229,35 @@ def _introductions(
     speech: dict[str, int],
     count: dict[str, int],
 ) -> dict[str, Person]:
-    """Label → the verified introduction that names it. A self-introduction
-    names its own speaker; one speaker introducing another ("Das ist Felix",
-    "with us today is …") names the next other voice that talks enough to
-    be a guest."""
+    """Label → the verified introduction that names it (F2-01: only with a link). A
+    self-introduction names its own speaker. One speaker introducing another names a
+    voice only when something links them: the participant check's line (``speaker``),
+    else a handover — the very next turn is another voice, in the recording's language,
+    that talks enough to be a guest. Following an introduction is not, by itself, a link;
+    a quoted person, or a name that is not a person, names no voice."""
     out: dict[str, Person] = {}
+    ordered = sorted(turns, key=lambda t: t.start_ms)
     for fact in sorted(facts, key=lambda f: f.start_ms):
         person = fact.person
-        if person is None or not fact.speaker_label:
+        if person is None or not fact.speaker_label or person.entity != "person":
+            continue
+        if person.participation == "quoted":
             continue
         if person.self_introduction:
             out.setdefault(fact.speaker_label, person)
             continue
-        for turn in turns:
-            label = turn.speaker_label or ""
+        label = person.speaker
+        if label is None:
+            following = next((t for t in ordered if t.start_ms >= fact.end_ms), None)
             if (
-                turn.start_ms >= fact.start_ms
-                and label
-                and label != fact.speaker_label
-                and label not in out
-                and count.get(label, 0) >= GUEST_MIN_TURNS
+                following is not None
+                and following.language is None
+                and (following.speaker_label or "") != fact.speaker_label
+                and count.get(following.speaker_label or "", 0) >= GUEST_MIN_TURNS
             ):
-                out[label] = person
-                break
+                label = following.speaker_label
+        if label and label != fact.speaker_label and label not in out:
+            out[label] = person
     return out
 
 

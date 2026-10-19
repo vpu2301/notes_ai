@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import functools
 import json
 import sys
 import time
@@ -23,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import REPO, load_registry, registry_env, write_report  # noqa: E402
+from _common import REPO, Paced, load_registry, registry_env, write_report  # noqa: E402
 from notes_gold import fact_text  # noqa: E402
 from notes_scoring import (  # noqa: E402, F401 — re-exported for the harness tests
     COMPOSED,
@@ -240,11 +241,25 @@ def _fact_dict(fact: Any) -> dict[str, Any]:
 
 
 async def run_pipeline(
-    meeting: dict[str, Any], provider: Any, *, multilingual: bool = False, fidelity: bool = False
+    meeting: dict[str, Any],
+    provider: Any,
+    *,
+    multilingual: bool = False,
+    fidelity: bool = False,
+    instructions: dict[str, str] | None = None,
+    length: str = "standard",
+    output_language: str | None = None,
+    profile: Any = None,
+    params: Any = None,
+    writing_style: str = "business",
 ) -> dict[str, Any]:
     """The engine, exactly as the worker runs it: the result view the
     worker snapshots, the template's roles, the meeting's date and the
-    ASR's name candidates. ``multilingual``: as with MDX_NOTE_MULTILINGUAL_EVIDENCE."""
+    ASR's name candidates. ``multilingual``: as with MDX_NOTE_MULTILINGUAL_EVIDENCE;
+    ``fidelity``: as with MDX_NOTE_FIDELITY, the final check before writing included.
+    ``instructions`` (a profile's stage texts), ``length`` and ``output_language`` (forced,
+    else the meeting's) as a pinned profile gives them to the worker. ``profile``: a
+    workspace's ``WritingProfile`` (N2), applied where the worker applies it."""
     from types import SimpleNamespace
 
     from note_service.domain.glossary import Term
@@ -264,7 +279,7 @@ async def run_pipeline(
     if multilingual:
         # The worker's resolution (jobs.generate_note): settled once for the whole run.
         language, _source = pipeline.resolve_output_language(
-            result, explicit=meeting.get("output_language")
+            result, explicit=output_language or meeting.get("output_language")
         )
     started = time.monotonic()
     # Every model call of this meeting, from the provider's usage records.
@@ -274,9 +289,11 @@ async def run_pipeline(
     # Classify what the pipeline will read (adverts cut).
     turns = windows.prepare_turns(turns).turns
     # The window size follows the backend's context, as in the worker.
-    built = windows.build_windows(
-        turns, max_chars=windows.window_chars(getattr(provider, "context_window", None))
+    # N0: the windows follow the workspace's context window (capped), as in the worker.
+    context = getattr(params, "context_window_tokens", None) or getattr(
+        provider, "context_window", None
     )
+    built = windows.build_windows(turns, max_chars=windows.window_chars(context))
     recording_type, source = await _recording_type(
         provider,
         meeting=SimpleNamespace(meeting_type=meeting_type, calendar_context={}),
@@ -305,13 +322,29 @@ async def run_pipeline(
         output_language=language,
         multilingual=multilingual,
         fidelity=fidelity,
+        final=fidelity,
+        instructions=instructions,
+        length=length,
+        profile=profile,
+        params=params,
+        writing_style=writing_style,
+        max_concurrency=getattr(params, "max_concurrency", 4),
     )
     # The worker's linter on every output: the eval scores what the writer receives.
+    known = frozenset({*(gold.get("speakers") or {}).values()})
     document = await doclint.enforce(
         document,
         regenerate=document.regenerator,
-        known=frozenset({*(gold.get("speakers") or {}).values()}),
+        known=known,
+        profile=profile,
+        writing_style=writing_style,
     )
+    # The worker's final check (F1-02), after the last rewrite.
+    document = await pipeline.finalize(document)
+    if profile is not None:
+        from note_service.domain import note_instructions
+
+        note_instructions.apply_terminology(document, profile, known=known)
     # The worker's title step (jobs.generate_note._title_context).
     from note_service.domain import note_title
     from note_service.jobs.generate_note import _title_context
@@ -339,6 +372,8 @@ async def run_pipeline(
                 "text": line.text,
                 "fact_ids": list(line.fact_ids),
                 "dates": [m.iso() for m in line.dates],
+                # B4: verbatim | paraphrase | composed, by the render rule.
+                "provenance": getattr(line, "provenance", None),
             }
             for key, line in document.lines
         ],
@@ -380,7 +415,14 @@ async def run_pipeline(
         "evidence": "facts",
         # The sections as written, for notes_assert (content: never in a report).
         "sections": [
-            {"section_key": s.section_key, "title": s.title, "role": s.role, "text": s.text}
+            {
+                "section_key": s.section_key,
+                "title": s.title,
+                "role": s.role,
+                "text": s.text,
+                # N2: what instructions_gate.py checks the code dials on (local only).
+                "lines": [{"kind": ln.kind, "text": ln.text} for ln in s.lines],
+            }
             for s in document.sections
         ],
         "language": language,
@@ -714,6 +756,10 @@ async def judge(
 
 
 _STAT_KEYS = (
+    # N2: what a writing profile did (numbers and booleans only).
+    "instructions_applied",
+    "length_scale",
+    "target_words",
     "facts_kept",
     "facts_dropped_quote",
     "facts_dropped_noise",
@@ -770,7 +816,76 @@ _STAT_KEYS = (
     "blocks_merged_small",
     "salient_appended",
     "salient_skipped_full",
+    # B2 T1: why the gate dropped lines and why block calls failed, per generation.
+    "lines_unsupported",
+    "block_failures",
+    "topics_failure",
+    "summary_fallback",
+    "outline",
 )
+
+
+def _recall(rows: list[dict[str, Any]]) -> float | None:
+    """Micro-averaged ``key_fact_recall`` over rows carrying ``[hits, total]``."""
+    hits = total = 0
+    for r in rows:
+        pair = r.get("key_fact_recall")
+        if isinstance(pair, list) and len(pair) == 2:
+            hits += pair[0]
+            total += pair[1]
+    return round(hits / total, 3) if total else None
+
+
+def cell_rollup(all_runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Per language × family over every run (B2 T1): how often the model path wrote
+    the summary and the blocks, and the gate's reasons. Numbers only."""
+    from note_service.domain.meeting_doc import types as _types
+
+    cells: dict[str, list[dict[str, Any]]] = {}
+    for run in all_runs:
+        for row in run["meetings"]:
+            if row.get("failed"):
+                continue
+            stats = row.get("stats") or {}
+            family = _types.family_for_recording_type(stats.get("recording_type")).meeting_type
+            cells.setdefault(f"{row.get('language', '?')}/{family}", []).append(row)
+    out: dict[str, dict[str, Any]] = {}
+    for cell, rows in sorted(cells.items()):
+        n = len(rows)
+        ladders = Counter(r.get("summary_ladder") or "none" for r in rows)
+        reasons: Counter[str] = Counter()
+        failures: Counter[str] = Counter()
+        for r in rows:
+            reasons.update((r.get("stats") or {}).get("lines_unsupported") or {})
+            failures.update((r.get("stats") or {}).get("block_failures") or {})
+        chaptered = sum(1 for r in rows if ((r.get("stats") or {}).get("block_chapters") or 0) > 0)
+        model_path = sum(
+            1
+            for r in rows
+            if r.get("summary_ladder") == "model"
+            and not ((r.get("stats") or {}).get("block_chapters") or 0)
+        )
+        out[cell] = {
+            "n": n,
+            "meetings": sorted({r["meeting"] for r in rows}),
+            "summary_ladder": dict(ladders),
+            "chaptered": chaptered,
+            "model_path_share": round(model_path / n, 3),
+            "fallback_share": round(1 - model_path / n, 3),
+            "block_chapters_mean": round(
+                sum((r.get("stats") or {}).get("block_chapters") or 0 for r in rows) / n, 2
+            ),
+            "facts_kept_mean": round(
+                sum((r.get("stats") or {}).get("facts_kept") or 0 for r in rows) / n, 1
+            ),
+            "facts_dropped_paraphrase": sum(
+                (r.get("stats") or {}).get("facts_dropped_paraphrase") or 0 for r in rows
+            ),
+            "lines_unsupported": dict(sorted(reasons.items())),
+            "block_failures": dict(sorted(failures.items())),
+            "key_fact_recall": _recall(rows),
+        }
+    return out
 
 
 LOCAL = REPO / "scripts" / "eval" / "local"
@@ -799,6 +914,18 @@ def save_note(folder: Path, meeting_id: str, text: str) -> None:
     (folder / f"{meeting_id}.md").write_text(text + "\n", encoding="utf-8")
 
 
+def save_structure(folder: Path, meeting_id: str, sections: list[dict[str, Any]]) -> None:
+    """The note's sections, roles and lines beside its text (``<id>.sections.json``), for
+    instructions_gate.py's code-dial checks. Same rule: only under ``scripts/eval/local/``."""
+    folder = folder.resolve()
+    if not folder.is_relative_to(LOCAL.resolve()):
+        raise SystemExit(f"--save-notes must be under {LOCAL}")
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{meeting_id}.sections.json").write_text(
+        json.dumps(sections, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+    )
+
+
 async def main(
     arm: str,
     backend_name: str,
@@ -810,9 +937,27 @@ async def main(
     judge_lines: Path | None = None,
     label: str | None = None,
     sq1_baseline: Path | None = None,
+    instructions: Path | None = None,
+    model_params_file: Path | None = None,
+    style: str = "business",
 ) -> int:
     sys.path.insert(0, str(ENGINE_SRC))
     from models import ProviderError, build_chat_provider
+
+    profile = None
+    applied = None
+    if instructions is not None:
+        from note_service.domain import note_instructions
+
+        # Validated like a stored profile; the report carries the file name and hash only.
+        profile = note_instructions.WritingProfile.model_validate_json(
+            instructions.read_text("utf-8")
+        )
+        label = label or instructions.stem
+        applied = {
+            "file": instructions.name,
+            "profile_hash": note_instructions.canonical_hash(profile),
+        }
 
     if not corpus.is_dir():
         print(f"corpus not found: {corpus}", file=sys.stderr)
@@ -825,7 +970,8 @@ async def main(
 
     registry = load_registry()
     resolved = registry.backend(backend_name, expect_kind="chat")
-    provider = build_chat_provider(resolved)
+    # A rate limit is waited out, never scored as the model's answer.
+    provider = Paced(build_chat_provider(resolved))
     print(
         f"arm={arm} backend={resolved.name} model={resolved.model_id} "
         f"processor={resolved.processor.name if resolved.processor else '-'}"
@@ -840,7 +986,30 @@ async def main(
         except Exception as exc:  # noqa: BLE001 — a judge that cannot start is a null column
             print(f"judge unavailable ({type(exc).__name__}); column will be null")
 
+    # N0: a workspace's model parameters and writing style, capped as the worker caps them.
+    from note_service.domain import model_params as mp
+
+    tuned = model_params_file is not None or style != "business"
+    params = mp.DEFAULT
+    if tuned:
+        params = mp.effective(
+            mp.ModelParams.model_validate_json(model_params_file.read_text("utf-8"))
+            if model_params_file is not None
+            else mp.DEFAULT,
+            context_window=resolved.caps.context_window,
+            max_concurrency=resolved.caps.max_concurrency,
+        )
+        label = label or (model_params_file.stem if model_params_file is not None else style)
     runner = run_pipeline if arm == "pipeline" else run_single_pass
+    if profile is not None or tuned:
+        if arm != "pipeline":
+            print(
+                "--instructions, --model-params and --style need the pipeline arm", file=sys.stderr
+            )
+            return EXIT_NO_CORPUS
+        runner = functools.partial(
+            run_pipeline, profile=profile, params=params if tuned else None, writing_style=style
+        )
     all_runs: list[dict[str, Any]] = []
     failed = False
     for run_index in range(runs):
@@ -871,6 +1040,13 @@ async def main(
             # What a reader gets: sections written, bullets rendered.
             row["sections"] = len(produced.get("sections") or [])
             row["bullets"] = sum(1 for ln in produced["lines"] if ln.get("kind") == "bullet")
+            # N2: the form a writing profile changes.
+            row["summary_sentences"] = sum(
+                1 for ln in produced["lines"] if ln.get("kind") == "summary"
+            )
+            row["topic_sections"] = sum(
+                1 for s in produced.get("sections") or [] if s.get("role") == "topics"
+            )
             stats = produced.get("stats") or {}
             row["stats"] = {k: stats[k] for k in _STAT_KEYS if k in stats}
             if judge_ok:
@@ -890,6 +1066,8 @@ async def main(
             audit_rows.append(audit)
             if save_notes is not None and run_index == 0:
                 save_note(save_notes, meeting["id"], produced.get("note_text", ""))
+                if arm == "pipeline":
+                    save_structure(save_notes, meeting["id"], produced.get("sections") or [])
             types.append(meeting.get("recording_type") or meeting.get("meeting_type"))
             print(
                 f"  {meeting['id']:<26} {row['seconds']:6.1f}s  windows={row['windows']} "
@@ -918,6 +1096,11 @@ async def main(
             else None
         )
         summary["meetings_scored"] = len(audit_rows)
+        scored = [r for r in rows if not r.get("failed")]
+        for key in ("summary_sentences", "sections", "topic_sections"):
+            summary[f"{key}_mean"] = (
+                round(sum(r.get(key, 0) for r in scored) / len(scored), 2) if scored else None
+            )
         summary["meetings_failed"] = sum(1 for r in rows if r.get("failed"))
         if judge_provider is not None:
             summary.update(
@@ -937,9 +1120,12 @@ async def main(
     await provider.aclose()
     if judge_provider is not None:
         await judge_provider.aclose()
+    from note_service.domain.meeting_doc import pipeline as _pipeline
+
     report = {
         "arm": arm,
         "backend": resolved.name,
+        "force_fallbacks": bool(_pipeline.FORCE_FALLBACKS),
         "model_id": resolved.model_id,
         "processor": resolved.processor.model_dump() if resolved.processor else None,
         "judge_model_id": judge_model,
@@ -948,8 +1134,20 @@ async def main(
         "small_model_profile": bool(resolved.caps.small_model),
         "context_window": resolved.caps.context_window,
         "label": label,
+        # N2: the writing profile this arm ran under — its file and hash, never its dials.
+        "instructions": applied,
+        # N0: the parameter set and style this arm ran with — a hash and a file name.
+        "model_params": {
+            "hash": mp.canonical_hash(params, style),
+            "file": model_params_file.name if model_params_file is not None else None,
+            "style": style,
+        }
+        if tuned
+        else None,
         "meetings": len(meetings),
         "runs": all_runs,
+        # B2 T1: language × family cells over every run.
+        "by_cell": cell_rollup(all_runs),
         # docs/eval/error-taxonomy.md — which defect each metric measures.
         "metric_codes": {k: list(v) for k, v in METRIC_CODES.items()},
     }
@@ -1027,12 +1225,41 @@ if __name__ == "__main__":
         help="SQ1 report of the same arm: SQ2's unsupported gate may not exceed its rate",
     )
     ap.add_argument(
+        "--instructions",
+        type=Path,
+        default=None,
+        help="a WritingProfile JSON (N2): the run writes under it, as a workspace would",
+    )
+    ap.add_argument(
+        "--model-params",
+        type=Path,
+        default=None,
+        help="a ModelParams JSON (N0): the workspace's model parameters for this arm",
+    )
+    ap.add_argument(
+        "--style",
+        choices=["business", "formal", "informal", "academic"],
+        default="business",
+        help="the workspace's writing style (N0)",
+    )
+    ap.add_argument(
         "--label",
         default=None,
         help="suffix for the report file name (the local bake-off writes one report per candidate)",
     )
+    ap.add_argument(
+        "--force-fallbacks",
+        action="store_true",
+        help="B1: every summary rung and block call fails — the fallbacks measured on their own",
+    )
     args = ap.parse_args()
     ENTITY_MODEL_TIER = args.entity_model_tier
+    if args.force_fallbacks:
+        sys.path.insert(0, str(ENGINE_SRC))
+        from note_service.domain.meeting_doc import pipeline as _pipeline
+
+        _pipeline.FORCE_FALLBACKS = True
+        args.label = f"{args.label}-fallbacks" if args.label else "fallbacks"
     sys.exit(
         asyncio.run(
             main(
@@ -1046,6 +1273,9 @@ if __name__ == "__main__":
                 args.judge_lines,
                 args.label,
                 args.sq1_baseline,
+                args.instructions,
+                args.model_params,
+                args.style,
             )
         )
     )

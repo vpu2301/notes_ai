@@ -205,3 +205,36 @@ tests:
               description: |
                 The linter could not repair them; they were written in their fallback form. Break it down by code with mdx_note_generation_lint_total{outcome="unresolved_note"}.
                 Runbook: docs/runbooks/notes.md#document-lint
+
+  - interval: 1m
+    name: an occasional failed instructions compile is normal
+    input_series:
+      - series: 'mdx_note_instructions_compiles_total{outcome="compiled",kind="save"}'
+        values: "0+9x80"
+      - series: 'mdx_note_instructions_compiles_total{outcome="failed",kind="save"}'
+        values: "0+1x80"
+    alert_rule_test:
+      - eval_time: 75m
+        alertname: NoteInstructionsCompileFailures
+        exp_alerts: []
+
+  - interval: 1m
+    name: a third of instructions compiles failing fires
+    input_series:
+      - series: 'mdx_note_instructions_compiles_total{outcome="compiled",kind="preview"}'
+        values: "0+2x90"
+      - series: 'mdx_note_instructions_compiles_total{outcome="failed",kind="preview"}'
+        values: "0+1x90"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: NoteInstructionsCompileFailures
+        exp_alerts: []
+      - eval_time: 80m
+        alertname: NoteInstructionsCompileFailures
+        exp_alerts:
+          - exp_labels: {severity: warn, team: notes}
+            exp_annotations:
+              summary: "More than a fifth of note-instruction compiles failed in the last hour"
+              description: |
+                Saved instructions are falling back to plain notes. Check note-service logs for note_instructions.compile_failed (error_kind) and whether the writing model is degraded.
+                Runbook: docs/runbooks/notes.md#note-instructions

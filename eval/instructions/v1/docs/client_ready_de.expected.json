@@ -1,0 +1,17 @@
+{
+ "length": "standard",
+ "terminology": [
+  {
+   "use": "Mandant",
+   "instead_of": "Kunde"
+  },
+  {
+   "use": "Projektleitung",
+   "instead_of": "PM"
+  },
+  {
+   "use": "Lieferobjekt",
+   "instead_of": "Deliverable"
+  }
+ ]
+}

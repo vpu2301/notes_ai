@@ -360,7 +360,10 @@ export function ComparePanel({
                   <th scope="col">Models used (calls)</th>
                   <th scope="col">Tokens</th>
                   <th scope="col">Meaning checks</th>
+                  <th scope="col">Final check</th>
                   <th scope="col">Unverified / fallback</th>
+                  <th scope="col">Clean comparison</th>
+                  <th scope="col">Profile hash</th>
                   <th scope="col">Cost</th>
                 </tr>
               </thead>
@@ -368,7 +371,10 @@ export function ComparePanel({
                 {experiment.runs.map((r) => (
                   <tr key={r.id}>
                     <th scope="row">{identityVisible ? candidateName(r) : "hidden"}</th>
-                    <td>{r.source_index + 1}</td>
+                    <td>
+                      {r.source_index + 1}
+                      <span className="help"> (rev {experiment.sources[r.source_index]?.transcript_rev ?? "?"})</span>
+                    </td>
                     <td>{r.repetition}</td>
                     <td>
                       {r.state}
@@ -391,8 +397,27 @@ export function ComparePanel({
                         .join(", ") || "—"}
                     </td>
                     <td>
+                      {(() => {
+                        const f = r.metrics.final_check as Record<string, number | boolean> | undefined;
+                        if (!f || !f.ran) return "not run";
+                        return `${f.supported ?? 0} supported, ${f.repaired ?? 0} repaired, ${f.restored ?? 0} restored, ${
+                          f.unverified ?? 0
+                        } held for review`;
+                      })()}
+                    </td>
+                    <td>
                       {r.metrics.meaning_unverified ?? 0}
                       {r.metrics.summary_fallback || r.metrics.topics_fallback ? " · fallback" : ""}
+                    </td>
+                    <td>
+                      {r.metrics.clean === undefined
+                        ? "—"
+                        : r.metrics.clean
+                          ? "yes"
+                          : `no — ${((r.metrics.unclean_reasons as string[] | undefined) ?? []).join("; ")}`}
+                    </td>
+                    <td>
+                      {identityVisible ? String((r.config as { content_hash?: string }).content_hash ?? "").slice(0, 10) : "hidden"}
                     </td>
                     <td>{experiment.cost_known ? moneyOrUnknown(r.cost_cents) : "unknown"}</td>
                   </tr>

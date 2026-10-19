@@ -1,0 +1,11 @@
+{
+ "terminology": [
+  {
+   "use": "Kunde",
+   "instead_of": "Mandant"
+  }
+ ],
+ "avoid": [
+  "Synergie"
+ ]
+}

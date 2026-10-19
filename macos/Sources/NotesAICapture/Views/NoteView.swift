@@ -13,6 +13,8 @@ struct NoteView: View {
     @State private var commentsShown = false
     @State private var confirmMarkDone = false
     @State private var reviewingSpellings = false
+    /// "Write this note differently…" (N4).
+    @State private var instructionsPresented = false
     /// Which speaker label is being renamed inline, and the text so far.
     @State private var editingSpeaker: String?
     @State private var speakerDraft = ""
@@ -21,6 +23,11 @@ struct NoteView: View {
     @FocusState private var askFocused: Bool
     /// Which section is open in its editor; only one at a time.
     @State private var editingSection: String?
+    // The section navigator (right edge): the current section, the one hovered in its list,
+    // and the scroll view's height (for the end of the note).
+    @State private var navActive: String?
+    @State private var navHovered: String?
+    @State private var navViewHeight: CGFloat = 600
 
     /// The capture this note came from, when it is one of this Mac's.
     private let capture: RecentCapture?
@@ -73,6 +80,7 @@ struct NoteView: View {
             if old != nil, old != title { Task { await app.refreshNotes() } }
         }
         .task(id: model.version) { await model.loadItems() }
+        .task(id: "\(model.editable) \(model.jobId ?? "")") { await model.loadNoteInstructions() }
         .onChange(of: model.deleted) { _, deleted in
             // The note is gone; drop every local trace and go back home.
             if deleted { app.noteDeleted(model.noteId) }
@@ -100,6 +108,9 @@ struct NoteView: View {
                     },
                     onClose: { shareRoute = nil })
             }
+        }
+        .sheet(isPresented: $instructionsPresented) {
+            NoteInstructionsSheet(model: model) { instructionsPresented = false }
         }
         .onChange(of: app.pendingClientShare, initial: true) { _, pending in
             // The menu-bar popover's "Share with client…" lands here.
@@ -223,6 +234,11 @@ struct NoteView: View {
         items.append(.item("Download Markdown", symbol: "doc.plaintext", disabled: model.busy) {
             model.exportMarkdown()
         })
+        if model.canWriteDifferently {
+            items.append(.item("Write this note differently…", symbol: "wand.and.stars") {
+                instructionsPresented = true
+            })
+        }
         if app.capabilities.showsSpaces, !app.spaces.isEmpty {
             items.append(.separator)
             let current = app.spaceOf[model.noteId]
@@ -268,6 +284,27 @@ struct NoteView: View {
                 .padding(.horizontal, 40)
                 .padding(.top, 28)
                 .padding(.bottom, 24)
+            }
+            .coordinateSpace(name: Self.noteScroll)
+            .background(GeometryReader { geo in
+                Color.clear.onAppear { navViewHeight = geo.size.height }
+                    .onChange(of: geo.size.height) { _, h in navViewHeight = h }
+            })
+            .onPreferenceChange(SectionTopsKey.self) { tops in
+                navActive = SectionNavView.current(navItems, tops: tops, viewHeight: navViewHeight)
+            }
+            .overlay(alignment: .trailing) {
+                SectionNavView(items: navItems, active: navActive, hovered: $navHovered) { key in
+                    navHovered = nil
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        // A transcript mark scrolls to its turn (id = start ms); a section to its block.
+                        if key.hasPrefix("t"), let ms = Int(key.dropFirst()) {
+                            proxy.scrollTo(ms, anchor: .top)
+                        } else {
+                            proxy.scrollTo("sec-\(key)", anchor: .top)
+                        }
+                    }
+                }
             }
             .onChange(of: model.chat.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("ask-end", anchor: .bottom) }
@@ -692,7 +729,7 @@ struct NoteView: View {
                     }
                     if let extra = alsoSaid[block.key], !extra.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Also said")
+                            Text(NoteLabels.alsoSaid(language: model.generation?.language))
                                 .font(.dsMeta)
                                 .foregroundStyle(DS.muted)
                             ForEach(extra) { row in
@@ -711,7 +748,46 @@ struct NoteView: View {
                         .padding(.top, 6)
                     }
                 }
+                .id("sec-\(block.key)")
+                // The section navigator: where this section starts, and a tint while its
+                // heading is hovered in the list.
+                .background(
+                    RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
+                        .fill(DS.accentSoft)
+                        .padding(-8)
+                        .opacity(navHovered == block.key ? 1 : 0)
+                )
+                .background(navTop(block.key))
             }
+        }
+    }
+
+    /// What the navigator lists: the headed sections on the notes tab, marks along the
+    /// recording's time on the transcript tab.
+    private var navItems: [SectionNavView.Item] {
+        if model.tab == .transcript { return transcriptNavItems }
+        guard model.tab == .notes else { return [] }
+        return model.visibleBlocks.compactMap { block in
+            guard let title = block.title, !title.isEmpty else { return nil }
+            return SectionNavView.Item(key: block.key, title: title)
+        }
+    }
+
+    /// Timed turns only (the plain-text fallback has no times).
+    private var transcriptNavItems: [SectionNavView.Item] {
+        guard model.jobId != nil, model.transcriptError == nil, let turns = model.turns else { return [] }
+        return SectionNavView.transcriptItems(turns) { turn in
+            model.diarized ? turn.speaker.map { model.name(for: $0) } : nil
+        }
+    }
+
+    private static let noteScroll = "noteScroll"
+
+    /// Where a navigator place starts, for the current-place rule.
+    private func navTop(_ key: String) -> some View {
+        GeometryReader { geo in
+            Color.clear.preference(key: SectionTopsKey.self,
+                                   value: [key: geo.frame(in: .named(Self.noteScroll)).minY])
         }
     }
 
@@ -738,7 +814,7 @@ struct NoteView: View {
     /// Under the status line: what the recording was taken to be, and the passages left out ("Not included: …"). Each range opens the transcript there.
     @ViewBuilder
     private func generationFacts(_ generation: GenerationView) -> some View {
-        let label = generation.recordingTypeLabel
+        let label = generation.statusLabel
         let excluded = generation.isFinished && !generation.wroteNothing
             ? generation.shownExcluded : (items: [], more: 0)
         if label != nil || !excluded.items.isEmpty {
@@ -818,6 +894,7 @@ struct NoteView: View {
 
     @ViewBuilder
     private var transcript: some View {
+        let navMarks = Set(transcriptNavItems.map(\.key))
         VStack(alignment: .leading, spacing: 18) {
             if model.jobId == nil || (model.transcriptError != nil && !model.textTurns.isEmpty) {
                 ForEach(model.textTurns) { turn in
@@ -918,6 +995,7 @@ struct NoteView: View {
                     .accessibilityElement(children: .contain)
                     .accessibilityAddTraits(model.selectedTurnIds.contains(turn.id) ? .isSelected : [])
                     .animation(.easeOut(duration: 0.2), value: model.highlightedTurnId)
+                    .background { if navMarks.contains("t\(turn.id)") { navTop("t\(turn.id)") } }
                     .id(turn.id)
                 }
                 ForEach(model.trailingMarkers) { marker in
@@ -939,6 +1017,7 @@ struct NoteView: View {
     private func turnTint(_ turn: TranscriptTurn) -> Color {
         if model.selectedTurnIds.contains(turn.id) { return DS.accent.opacity(0.1) }
         if model.highlightedTurnId == turn.id { return DS.accent.opacity(0.16) }
+        if navHovered == "t\(turn.id)" { return DS.accentSoft }
         return .clear
     }
 

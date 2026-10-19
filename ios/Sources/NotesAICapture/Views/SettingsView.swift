@@ -22,6 +22,7 @@ struct SettingsView: View {
                             vocabulary
                             connectorsRow
                             dataRow
+                            writingRow
                             account
                         }
                         // Last: the server is set once and left alone.
@@ -47,6 +48,8 @@ struct SettingsView: View {
                     ConnectorsView(calendar: app.calendar, google: app.googleCalendar, store: app.connectors)
                 case .dataAI:
                     DataAndAIView()
+                case .writing:
+                    NoteWritingView()
                 case .account:
                     AccountView()
                 case .general:
@@ -163,6 +166,34 @@ struct SettingsView: View {
                         .font(.ds(15, .medium))
                         .foregroundStyle(DS.text1)
                     Text("Who processes your meetings, and what it costs")
+                        .font(.dsMeta)
+                        .foregroundStyle(DS.muted)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.dsSymbol(12, .semibold))
+                    .foregroundStyle(DS.muted)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .dsCard(padding: 14)
+    }
+
+    /// How notes are worded. Read-only here; changed on the web.
+    private var writingRow: some View {
+        NavigationLink(value: AppState.SettingsTab.writing) {
+            HStack(spacing: 12) {
+                Image(systemName: "text.quote")
+                    .font(.dsSymbol(14, .medium))
+                    .foregroundStyle(DS.accentText)
+                    .frame(width: 32, height: 32)
+                    .background(RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous).fill(DS.accentSoft))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Note writing")
+                        .font(.ds(15, .medium))
+                        .foregroundStyle(DS.text1)
+                    Text("Style, instructions and model behaviour")
                         .font(.dsMeta)
                         .foregroundStyle(DS.muted)
                 }

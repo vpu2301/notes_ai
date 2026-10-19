@@ -10,15 +10,38 @@ import type {
 export const STAGES: ProfileStage[] = ["extraction", "composition", "verification"];
 
 export const STAGE_LABELS: Record<ProfileStage, string> = {
-  extraction: "Extraction",
-  composition: "Composition",
-  verification: "Verification",
+  extraction: "Extract facts",
+  composition: "Write notes",
+  verification: "Verify meaning",
 };
 
 export const STAGE_HELP: Record<ProfileStage, string> = {
   extraction: "Reads the transcript in parts and lists what was said, each point with its quote.",
-  composition: "Writes the summary from the verified points.",
-  verification: "Checks that each restated point means what its quote says.",
+  composition:
+    "Writes the summary, the topic bullets and their headings from the verified points. Keep its named sections (GENERAL, SUMMARY SUBTASK, TOPIC/BULLET SUBTASK, HEADING SUBTASK, CHRONOLOGY): each call gets GENERAL plus its own.",
+  verification:
+    "Checks that each restated point, and every written line before the note is saved, means what was said.",
+};
+
+/** What a call of the run is, in words. */
+export const CALL_LABELS: Record<string, string> = {
+  extraction: "Extract facts",
+  context: "Understand the conversation",
+  "composition.topic": "Write topic bullets and heading",
+  "composition.bullets": "Write topic bullets (small model)",
+  "composition.heading": "Write a topic heading (small model)",
+  "composition.summary": "Write the summary",
+  "verification.meaning": "Verify a point's meaning",
+  "verification.final": "Final check of every written line",
+  deduplication: "Merge repeated points",
+  participants: "Check who takes part",
+};
+
+export const SOURCE_LABELS: Record<string, string> = {
+  profile: "this version's text",
+  bundled: "bundled text",
+  not_applied: "edited, but not sent here",
+  code: "code-owned, read-only",
 };
 
 export const LANGUAGES = [

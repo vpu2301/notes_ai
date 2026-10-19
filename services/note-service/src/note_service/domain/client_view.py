@@ -22,6 +22,8 @@ CLIENT_ROLES: Final[tuple[str, ...]] = (
     types.DECISIONS,
     types.TOPICS,
     types.SPECIFICATIONS,
+    # B4: relayed claims with the speaker's verdict are not internal.
+    types.CLAIMS,
     types.REQUESTS,
     types.ACTION_ITEMS,
     types.OPEN_QUESTIONS,

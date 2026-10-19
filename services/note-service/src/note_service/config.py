@@ -217,6 +217,18 @@ class Settings(BaseSettings):
     # Meaning checks on high-risk claims, one repair, attribution by holder, merges that keep
     # conditions. Needs multilingual evidence on; OFF restores the S1 composition only.
     note_fidelity: bool = Field(default=False, alias="MDX_NOTE_FIDELITY")
+    # Note instructions (Sprint N1): routes and (from N2) the worker's use of the profile.
+    # Off by default; dev compose and staging set it on, production stays off until N5.
+    note_instructions_enabled: bool = Field(default=False, alias="MDX_NOTE_INSTRUCTIONS_ENABLED")
+    note_instructions_max_chars: int = Field(default=8000, alias="MDX_NOTE_INSTRUCTIONS_MAX_CHARS")
+    note_instructions_previews_per_hour: int = Field(
+        default=30, alias="MDX_NOTE_INSTRUCTIONS_PREVIEWS_PER_HOUR"
+    )
+    note_instructions_compile_timeout_s: float = Field(
+        default=20.0, alias="MDX_NOTE_INSTRUCTIONS_COMPILE_TIMEOUT_S"
+    )
+    # The commit this image was built from (Dockerfile ARG BUILD_SHA); shown with every run.
+    build_sha: str = Field(default="", alias="MDX_BUILD_SHA")
     # `none` shows plans and changes nothing; `manual` changes the plan at once; `stripe` later.
     billing_provider: Literal["none", "manual"] = Field(
         default="none", alias="MDX_BILLING_PROVIDER"

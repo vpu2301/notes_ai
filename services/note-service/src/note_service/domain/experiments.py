@@ -65,6 +65,15 @@ class Estimate:
     cents: float | None
     tokens: int
     runs: int
+    """About how many model requests (P1-03: shown before starting); an estimate."""
+    requests: int = 0
+
+
+# Request estimate: an extraction and a meaning check per window of transcript, plus the
+# per-run calls (classify, context, topics, summary, final check, merge, participants, title).
+WINDOW_CHARS_ESTIMATE: Final = 8_000
+REQUESTS_PER_WINDOW: Final = 2
+REQUESTS_PER_RUN: Final = 10
 
 
 def estimate(
@@ -79,9 +88,24 @@ def estimate(
     runs = candidates * len(source_chars) * repetitions
     per_source = [int(chars * TOKENS_PER_CHAR) + TOKENS_PER_RUN for chars in source_chars]
     tokens = candidates * repetitions * sum(per_source)
+    requests = (
+        candidates
+        * repetitions
+        * sum(
+            -(-chars // WINDOW_CHARS_ESTIMATE) * REQUESTS_PER_WINDOW + REQUESTS_PER_RUN
+            for chars in source_chars
+        )
+    )
     if cents_per_1k is None:
-        return Estimate(cents=None, tokens=min(tokens, runs * UNPRICED_TOKENS_PER_RUN), runs=runs)
-    return Estimate(cents=round(tokens / 1000 * cents_per_1k, 4), tokens=tokens, runs=runs)
+        return Estimate(
+            cents=None,
+            tokens=min(tokens, runs * UNPRICED_TOKENS_PER_RUN),
+            runs=runs,
+            requests=requests,
+        )
+    return Estimate(
+        cents=round(tokens / 1000 * cents_per_1k, 4), tokens=tokens, runs=runs, requests=requests
+    )
 
 
 def price_per_1k(costs: Any, backends: list[str]) -> float | None:
@@ -459,6 +483,45 @@ async def evidence_problem(
             if run_id in ids and finding.get("label") in CRITICAL_FINDINGS:
                 return f"a reviewer found {finding['label'].replace('_', ' ')} in this version's output"
     return None
+
+
+async def acceptance_problem(
+    conn: asyncpg.Connection, *, version_id: UUID, suite_version: str
+) -> str | None:
+    """P1-04 — None when ``version_id`` passed the critical cases on this code
+    (``suite_version``): a completed suite experiment, every run of the version done and
+    every case's checks passed. Else what is missing or what failed, for the admin."""
+    ran_elsewhere = False
+    for experiment in await recent(conn, limit=50):
+        if not experiment.sources or not all("case_id" in s for s in experiment.sources):
+            continue
+        if str(version_id) not in experiment.candidates:
+            continue
+        if any(s.get("suite_version") != suite_version for s in experiment.sources):
+            ran_elsewhere = True
+            continue
+        if experiment.state != "completed":
+            continue
+        candidate = experiment.candidates.index(str(version_id))
+        mine = [
+            r
+            for r in await runs(conn, experiment_id=experiment.id)
+            if r.candidate_index == candidate
+        ]
+        failed = sorted(
+            {
+                f"{(r.metrics.get('acceptance') or {}).get('case', '?')}: "
+                + ", ".join((r.metrics.get("acceptance") or {}).get("failures") or ["no result"])
+                for r in mine
+                if r.state != "done" or not (r.metrics.get("acceptance") or {}).get("passed")
+            }
+        )
+        if mine and not failed:
+            return None
+        return "the critical cases failed: " + "; ".join(failed)
+    if ran_elsewhere:
+        return "the critical cases ran on other code or instructions; run them again"
+    return "run the critical cases for this version first"
 
 
 async def recent(conn: asyncpg.Connection, *, limit: int = 20) -> list[Experiment]:

@@ -97,9 +97,12 @@ import { messageFor } from "../lib/errorCopy";
 import { pickableNames, segmentIndicesOf, speakerInitials, speakerTint } from "../lib/speakers";
 import { SpeakerRoster, useOnline } from "../components/SpeakerRoster";
 import { NameSuggestionChip } from "../components/NameSuggestionChip";
+import { alsoSaidLabel } from "../i18n/note";
 import { copyText, movedAnnouncement } from "../i18n/speakers";
 import { ShareDialog } from "../components/ShareDialog";
 import { CommentsPanel, NOTE_ANCHOR, useComments, type CommentAnchor } from "../components/CommentsPanel";
+import { SectionNav } from "../components/SectionNav";
+import { NoteInstructionsSheet } from "../components/NoteInstructionsSheet";
 import { PresenceAvatars } from "../components/PresenceAvatars";
 import { canCommentNote, canEditNote, canManageNote, readOnlyStrip } from "../lib/noteLevel";
 import { Skeleton } from "../components/Skeleton";
@@ -1462,6 +1465,8 @@ export function NoteEditorPage() {
   const [templateName, setTemplateName] = useState<string | null>(null);
   /** What the latest generation took the recording to be. */
   const [recordingType, setRecordingType] = useState<string | null>(null);
+  /** The language the latest generation wrote in; its labels follow it, not the viewer's locale. */
+  const [noteLanguage, setNoteLanguage] = useState<string | null>(null);
   /** A moment to open the transcript at ("Not included" link). */
   const [seek, setSeek] = useState<{ ms: number; key: number } | null>(null);
 
@@ -1502,6 +1507,9 @@ export function NoteEditorPage() {
   const [askReset, setAskReset] = useState(0);
   const [chatCount, setChatCount] = useState(0);
   const [showComments, setShowComments] = useState(false);
+  // N4 — "Write this note differently…"; a rewrite remounts the status line on the new run.
+  const [writingDifferently, setWritingDifferently] = useState(false);
+  const [generationKey, setGenerationKey] = useState(0);
   const [commentAnchor, setCommentAnchor] = useState<CommentAnchor>(NOTE_ANCHOR);
   // Comments need a server that knows levels (W3); an older one sends no `my_level`.
   const commentsEnabled = note !== null && note.my_level !== undefined && note.status !== "cancelled";
@@ -1904,7 +1912,7 @@ export function NoteEditorPage() {
   const lineExtra: LineExtra | undefined = generated
     ? (raw) => {
         const row = genByKey.get(lineKey(raw));
-        return row ? <LineEvidence noteId={noteId} row={row} rowsByKey={genByKey} /> : null;
+        return row ? <LineEvidence noteId={noteId} row={row} rowsByKey={genByKey} language={noteLanguage} /> : null;
       }
     : undefined;
   const alsoSaid = generated && detail === "detailed" ? uncitedBySection(genRows, shownContent) : null;
@@ -2044,6 +2052,14 @@ export function NoteEditorPage() {
     { label: "Download PDF", icon: <DownloadIcon size={14} />, onClick: () => void onPdf() },
     { label: "Download Markdown", icon: <FileDownIcon size={14} />, onClick: onMarkdown },
   );
+  if (editable && jobId) {
+    menu.push({
+      label: "Write this note differently…",
+      icon: <SparkleIcon size={14} />,
+      sep: true,
+      onClick: () => setWritingDifferently(true),
+    });
+  }
   if (!viewing && !guest && spaces.length > 0) {
     const current = spaceOf[noteId];
     spaces.forEach((sp, i) => {
@@ -2299,11 +2315,15 @@ export function NoteEditorPage() {
           <div className="doc-body">
             {/* Never blocks the page. */}
             <GenerationStatus
+              key={generationKey}
               noteId={noteId}
               canGenerate={editable && jobId !== null}
               canRegenerate={editable}
               onFinished={load}
-              onView={(view) => setRecordingType(view?.recording_type ?? null)}
+              onView={(view) => {
+                setRecordingType(view?.recording_type ?? null);
+                setNoteLanguage(view?.language ?? null);
+              }}
               onSeek={
                 jobId
                   ? (ms) => {
@@ -2364,7 +2384,7 @@ export function NoteEditorPage() {
                     />
                     {alsoSaid && (alsoSaid.get(block.key)?.length ?? 0) > 0 && (
                       <div className="also-said">
-                        <span className="muted">Also said</span>
+                        <span className="muted">{alsoSaidLabel(noteLanguage)}</span>
                         <ul className="rt-list">
                           {(alsoSaid.get(block.key) ?? []).map((row) => (
                             <li key={row.item_key}>
@@ -2381,6 +2401,13 @@ export function NoteEditorPage() {
                 </section>
               );
             })}
+            {!showComments && !showVersions && (
+              <SectionNav
+                items={blocks
+                  .filter((block) => block.title)
+                  .map((block) => ({ id: `sec-${block.key}`, title: block.title as string }))}
+              />
+            )}
           </div>
         )}
 
@@ -2416,6 +2443,14 @@ export function NoteEditorPage() {
             </button>
           ))}
         </aside>
+      )}
+
+      {writingDifferently && (
+        <NoteInstructionsSheet
+          noteId={noteId}
+          onClose={() => setWritingDifferently(false)}
+          onRewritten={() => setGenerationKey((k) => k + 1)}
+        />
       )}
 
       {showComments && commentsEnabled && (
