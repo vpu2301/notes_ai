@@ -27,12 +27,14 @@ from .jobs.rehome_media import handle_rehome, mark_failed
 logger = logging.getLogger(__name__)
 
 JOB_KIND = "note.generate"
-# The lease must outlive a merely slow window, or the job is re-delivered while it runs.
+# The lease must outlive a merely slow call, or the job is re-delivered while it runs.
 LEASE_SECONDS = 120
 # Cold start on a backend that scales from zero; the runner decides between waiting and failing.
 COLD_START_SECONDS = 180
 # Mostly waiting on the model; the provider's `max_concurrency` is the real cap.
 BATCH = 2
+# The one chat operation a generation makes.
+WRITE_OPERATION = "write"
 
 
 class _Providers:
@@ -43,68 +45,41 @@ class _Providers:
         # The process's one registry, built and probed by `build_state()`.
         self._registry: Registry | None = registry
         self._cache: dict[str, Any] = {}
-        self._shadow_cache: dict[str, Any] = {}
         # Called synchronously by the registry, so it answers from a cache `warm()` fills per job.
         self._settings = settings_source
 
-    def _resolve(self, workspace_id: str, operation: str = "summarize") -> Any:
+    def _load(self) -> Registry:
         if self._registry is None:
             from .domain.model_routing import load_registry
 
             # `validate=False`: an unrelated (ASR) misconfiguration must not stop notes.
             self._registry = load_registry(self._settings)
-        return self._registry.resolve(workspace_id, operation)
+        return self._registry
 
-    async def shadow(self, workspace_id: str) -> Any:
-        """The candidate backend for this workspace, or None: a workspace only shadows
-        onto a processor its admin has acknowledged (real meetings on other hardware)."""
-        name = settings.note_generation_shadow_backend
-        if not name:
-            return None
-        try:
-            self._resolve(workspace_id)  # ensures the registry is loaded
-            assert self._registry is not None  # noqa: S101 — just loaded above
-            resolved = self._registry.backend(name, expect_kind="chat")
-        except Exception:  # noqa: BLE001
-            logger.warning("note_worker.shadow_backend_unknown", extra={"backend": name})
-            return None
-
-        processor = resolved.processor
-        if processor is not None and self._settings is not None:
-            agreed = self._settings.acknowledged(UUID(workspace_id))
-            if (
-                processor.name.strip().casefold(),
-                processor.region.strip().casefold(),
-            ) not in agreed:
-                return None
-
-        provider = self._shadow_cache.get(resolved.name)
-        if provider is None:
-            provider = build_chat_provider(resolved)
-            # The metric labels the run by backend.
-            with contextlib.suppress(AttributeError):
-                provider.backend_name = resolved.name
-            self._shadow_cache[resolved.name] = provider
-            logger.info("note_worker.shadow_provider_ready", extra=resolved.log_fields())
-        return provider
+    def _resolve(self, workspace_id: str) -> Any:
+        return self._load().resolve(workspace_id, WRITE_OPERATION)
 
     async def warm(self, tenant_id: UUID) -> None:
         """Read this workspace's settings before anything resolves (probe hook, before the handler)."""
         if self._settings is not None:
             await self._settings.refresh(tenant_id)
 
-    async def get(self, workspace_id: str, operation: str = "summarize") -> Any:
-        """The provider for one operation; one instance per backend name."""
-        resolved = self._resolve(workspace_id, operation)
+    async def get(self, workspace_id: str) -> Any:
+        """The workspace's writer; one instance per backend name."""
+        resolved = self._resolve(workspace_id)
         provider = self._cache.get(resolved.name)
         if provider is None:
             provider = build_chat_provider(resolved)
+            # The metric labels the run by backend.
+            with contextlib.suppress(AttributeError):
+                provider.backend_name = resolved.name
             self._cache[resolved.name] = provider
-            logger.info(
-                "note_worker.provider_ready",
-                extra={"operation": operation, **resolved.log_fields()},
-            )
+            logger.info("note_worker.provider_ready", extra=resolved.log_fields())
         return provider
+
+    def fallbacks(self) -> list[dict[str, Any]]:
+        """Env overrides this process resolved to their fallback, and why (provenance)."""
+        return [o.log_fields() for o in self._load().active_overrides() if o.is_fallback]
 
     def backend_of(self, workspace_id: str) -> tuple[str, int]:
         return self._resolve(workspace_id).name, COLD_START_SECONDS
@@ -113,13 +88,12 @@ class _Providers:
         await (await self.get(workspace_id)).probe()
 
     async def aclose(self) -> None:
-        for provider in (*self._cache.values(), *self._shadow_cache.values()):
+        for provider in self._cache.values():
             try:
                 await provider.aclose()
             except Exception:  # noqa: BLE001 — shutdown must not raise
                 logger.debug("note_worker.provider_close_failed", exc_info=True)
         self._cache.clear()
-        self._shadow_cache.clear()
 
 
 async def run() -> None:
@@ -146,16 +120,14 @@ async def run() -> None:
         app_pool=app_pool,
         transcripts_store=transcripts,
         provider_for=providers.get,
-        # classify/title/entities resolve on their own routing row.
-        operation_provider_for=providers.get,
-        shadow_provider_for=providers.shadow,
-        entity_model_tier=settings.note_entity_model_tier,
-        coverage_retry_budget_s_per_hour=settings.note_coverage_retry_budget_s_per_hour,
-        shadow_percent=(
-            settings.note_generation_shadow_percent
-            if settings.note_generation_shadow_backend
-            else 0
-        ),
+        build_sha=settings.build_sha,
+        fallbacks=providers.fallbacks,
+        note_instructions=settings.note_instructions_enabled,
+        check_enabled=settings.note_check_enabled,
+        # N0: the row the probe hook refreshed before this run (style, model parameters).
+        settings_row=state.workspace_model_settings.row
+        if state.workspace_model_settings is not None
+        else None,
     )
 
     async def _run(ctx: JobContext) -> dict[str, Any] | None:

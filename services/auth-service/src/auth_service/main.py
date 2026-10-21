@@ -177,7 +177,6 @@ def create_app() -> FastAPI:
         title="Auth Service",
         description="Identity, tenant, and audit-read service.",
         version="0.2.0",
-        openapi_version="3.1.0",
         lifespan=_lifespan,
         docs_url="/docs",
         redoc_url="/redoc",

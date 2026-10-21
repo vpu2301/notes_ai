@@ -13,7 +13,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 
-from .meeting_doc.agenda import agenda_lines
+from .agenda import agenda_lines
 
 logger = logging.getLogger(__name__)
 

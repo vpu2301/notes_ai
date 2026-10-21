@@ -1,0 +1,13 @@
+{
+ "length": "long",
+ "terminology": [
+  {
+   "use": "revenue",
+   "instead_of": "sales"
+  }
+ ],
+ "avoid": [
+  "basically",
+  "stuff"
+ ]
+}

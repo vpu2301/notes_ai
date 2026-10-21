@@ -2,7 +2,14 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { EntityCorrection } from "../src/api/types";
-import { correctionsBanner, unifiedFromTitle, unifiedParts } from "../src/lib/corrections";
+import {
+  asTranscribedLabel,
+  correctionsBanner,
+  heardAsTitle,
+  noteCorrectionParts,
+  unifiedFromTitle,
+  unifiedParts,
+} from "../src/lib/corrections";
 
 const api = vi.hoisted(() => ({ decideCorrection: vi.fn(), listCorrections: vi.fn(), rememberTerm: vi.fn() }));
 vi.mock("../src/api/asr", () => ({ decideCorrection: api.decideCorrection, listCorrections: api.listCorrections }));
@@ -96,5 +103,25 @@ describe("the review sheet", () => {
     render(<EntityReviewSheet jobId="j" corrections={[corr()]} rev={1} online={false} onChanged={() => undefined} onClose={() => undefined} />);
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
     expect(screen.getByText("Offline — reviewing needs a connection.")).toBeInTheDocument();
+  });
+});
+
+describe("the note's respellings over the transcript (Sprint A3)", () => {
+  const quill = { surface: "Quilhaven", canonical: "Quillhaven", source: "glossary", count: 2 };
+
+  it("substitutes the note's spelling for the heard one, whole words only", () => {
+    const parts = noteCorrectionParts("In Quilhaven, not Quilhavens.", [quill]);
+    expect(parts.map((p) => p.text)).toEqual(["In ", "Quillhaven", ", not Quilhavens."]);
+    expect(parts[1]?.heard).toBe(quill);
+  });
+
+  it("leaves a paragraph alone without respellings", () => {
+    expect(noteCorrectionParts("Nothing here.", [])).toEqual([{ text: "Nothing here." }]);
+  });
+
+  it("names what was heard in the note's language", () => {
+    expect(heardAsTitle(quill, "de")).toBe("gehört als: Quilhaven");
+    expect(heardAsTitle(quill, "uk")).toBe("почуто як: Quilhaven");
+    expect(asTranscribedLabel("en")).toBe("Show as transcribed");
   });
 });

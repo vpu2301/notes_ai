@@ -19,10 +19,10 @@ from typing import Any
 import yaml
 
 REPO = Path(__file__).resolve().parents[2]
-PROMPTS = REPO / "services/note-service/src/note_service/domain/meeting_doc/prompts.py"
+PROMPTS = REPO / "services/note-service/src/note_service/domain/prompts.py"
 EVAL = REPO / "docs" / "eval"
 WAIVERS = EVAL / "routing-waivers.yaml"
-CHAT_OPERATIONS = ("understand", "summarize", "classify", "title", "entities")
+CHAT_OPERATIONS = ("write", "ask")
 REAL_CORPUS = "eval/notes/v2"
 ROUTED_ENVS = ("staging", "prod")
 

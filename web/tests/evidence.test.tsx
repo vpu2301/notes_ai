@@ -43,6 +43,20 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+/** P3 — a row as the writer stores it: the turns it cites travel with it. */
+const ROW_P3: GeneratedItem = {
+  ...ROW,
+  kind: "bullet",
+  certainty: null,
+  attributed_to: null,
+  corrections: [],
+  cites: ["turn:12", "turn:41"],
+  cited_turns: [
+    { turn: 12, start_ms: 45_000, end_ms: 52_000, speaker: "Fabian Reinbold", text: "das Aus für die Rente mit 63 wird wohl abgeschwächt" },
+    { turn: 41, start_ms: 754_000, end_ms: 760_000, speaker: "Anna Keller", text: "die Koalition will das noch im Herbst beschließen" },
+  ],
+};
+
 describe("evidence on a generated line", () => {
   it("opens the quote, the moment and the speaker", () => {
     render(<LineEvidence noteId="n1" row={ROW} />);
@@ -52,6 +66,55 @@ describe("evidence on a generated line", () => {
     expect(dialog).toHaveTextContent("00:45 · Fabian Reinbold");
     expect(dialog).toHaveTextContent("and 1 more");
     fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("lists every cited turn with its time highlighted, the first in full (P3)", () => {
+    render(<LineEvidence noteId="n1" row={ROW_P3} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show where this came from" }));
+    const dialog = screen.getByRole("dialog", { name: "Evidence" });
+    const items = dialog.querySelectorAll(".evidence-turns li");
+    expect(items).toHaveLength(2);
+    expect(items[0]!.querySelector("mark")).toHaveTextContent("00:45");
+    expect(items[0]).toHaveTextContent("Fabian Reinbold");
+    expect(items[1]!.querySelector("mark")).toHaveTextContent("12:34");
+    expect(items[1]).toHaveTextContent("die Koalition will das noch im Herbst beschließen");
+    expect(dialog).not.toHaveTextContent("and 1 more");
+    expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+  });
+
+  it("says when the time named no turn exactly (nearest match)", () => {
+    render(<LineEvidence noteId="n1" row={{ ...ROW_P3, cite_nearest: true }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show where this came from" }));
+    expect(screen.getByRole("dialog", { name: "Evidence" })).toHaveTextContent("Nearest match");
+  });
+
+  it("marks a line without a cite as having no reference, and opens nothing", () => {
+    render(<LineEvidence noteId="n1" row={{ ...ROW_P3, cites: [], cited_turns: [] }} />);
+    expect(screen.getByRole("img", { name: "No reference" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Show where this came from/ })).toBeNull();
+  });
+
+  it("shows the check call's mark and reason, and the words are untouched", () => {
+    render(
+      <RichText
+        text={`- ${ROW_P3.text}`}
+        lineExtra={() => <LineEvidence noteId="n1" row={{ ...ROW_P3, check: "unsupported", check_reason: "not said" }} />}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: /not found in the transcript/i });
+    expect(toggle.className).toContain("unsupported");
+    expect(screen.getByRole("listitem")).toHaveTextContent(ROW_P3.text);
+    fireEvent.click(toggle);
+    expect(screen.getByRole("note")).toHaveTextContent("Not found in the transcript — not said");
+  });
+
+  it("opens the transcript at the first cited moment", () => {
+    const seeks: number[] = [];
+    render(<LineEvidence noteId="n1" row={ROW_P3} onSeek={(ms) => seeks.push(ms)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show where this came from" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show in transcript" }));
+    expect(seeks).toEqual([45_000]);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -172,22 +235,80 @@ describe("names in the note", () => {
     expect(marked).toEqual(["Emil"]);
   });
 
-  it("accept adds a glossary term, then records the choice", async () => {
+  const SAVED = {
+    id: "t1",
+    term: "Fabian Reinbold",
+    kind: "person",
+    heard_as: ["Fabian Reinbolt"],
+    created_at: "2026-10-18T10:00:00Z",
+    can_delete: true,
+  };
+
+  /** `glossary`: what GET /v1/glossary holds; `save`: the POST answer (status, body). */
+  function glossaryServer(glossary: unknown[], save: [number, unknown]) {
     const calls: string[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
-        calls.push(`${init?.method} ${new URL(url).pathname} ${init?.body ?? ""}`);
-        return respond(200, { item_key: ROW.item_key, version_number: 1, line: null, id: "t", term: "x" });
+        const method = init?.method ?? "GET";
+        const path = new URL(url).pathname;
+        calls.push(`${method} ${path} ${init?.body ?? ""}`);
+        if (path === "/v1/glossary" && method === "GET") return respond(200, glossary);
+        if (path === "/v1/glossary" && method === "POST") return respond(save[0], save[1]);
+        if (path.startsWith("/v1/glossary/") && method === "DELETE") return new Response(null, { status: 204 });
+        return respond(200, { item_key: ROW.item_key, version_number: 1, line: null, id: "x" });
       }),
     );
+    return calls;
+  }
+
+  it("accept shows the term as saved only from the server's answer, then records the choice", async () => {
+    const calls = glossaryServer([], [201, SAVED]);
     render(<CorrectionsPanel noteId="n1" rows={[ROW]} version={1} onChanged={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "Accept" }));
-    expect(await screen.findByText("Added to the glossary")).toBeInTheDocument();
-    expect(calls[0]).toContain("POST /v1/glossary");
-    expect(calls[0]).toContain('"heard_as":["Fabian Reinbolt"]');
-    expect(calls[1]).toContain(`PATCH /v1/notes/n1/items/by-key/${ROW.item_key}`);
-    expect(calls[1]).toContain("correction_accepted");
+    expect(await screen.findByText("In the glossary")).toBeInTheDocument();
+    const post = calls.find((c) => c.startsWith("POST /v1/glossary"))!;
+    expect(post).toContain('"heard_as":["Fabian Reinbolt"]');
+    // No evidence of a person: saved as a term, never typed as a name.
+    expect(post).toContain('"kind":"term"');
+    await waitFor(() => expect(calls.some((c) => c.includes("correction_accepted"))).toBe(true));
+    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+  });
+
+  it("a person correction is saved as a person", async () => {
+    const calls = glossaryServer([], [201, SAVED]);
+    const person = { ...ROW, corrections: [{ ...ROW.corrections![0]!, entity: "person" as const }] };
+    render(<CorrectionsPanel noteId="n1" rows={[person]} version={1} onChanged={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    await screen.findByText("In the glossary");
+    expect(calls.find((c) => c.startsWith("POST"))).toContain('"kind":"person"');
+  });
+
+  it("a failed save never says it was added, and offers another go", async () => {
+    const calls = glossaryServer([], [500, { status: 500, detail: "boom" }]);
+    render(<CorrectionsPanel noteId="n1" rows={[ROW]} version={1} onChanged={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    expect(await screen.findByText(/Not saved/)).toBeInTheDocument();
+    expect(screen.queryByText("In the glossary")).toBeNull();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(calls.some((c) => c.includes("correction_accepted"))).toBe(false);
+  });
+
+  it("after a reload the saved entry is read from the glossary", async () => {
+    glossaryServer([SAVED], [201, SAVED]);
+    render(<CorrectionsPanel noteId="n1" rows={[ROW]} version={1} onChanged={() => {}} />);
+    expect(await screen.findByText("In the glossary")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(await screen.findByRole("button", { name: "Accept" })).toBeInTheDocument();
+  });
+
+  it("a grammar-only variant the server refused to learn is not shown as learned", async () => {
+    glossaryServer([], [200, { ...SAVED, heard_as: [], ignored_heard_as: ["Fabian Reinbolt"] }]);
+    render(<CorrectionsPanel noteId="n1" rows={[ROW]} version={1} onChanged={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    expect(await screen.findByText(/was not learned/)).toBeInTheDocument();
+    expect(screen.queryByText("In the glossary")).toBeNull();
   });
 
   it("reject puts the heard name back and reloads the note", async () => {
@@ -203,8 +324,8 @@ describe("names in the note", () => {
     render(<CorrectionsPanel noteId="n1" rows={[ROW]} version={1} onChanged={reloaded} />);
     fireEvent.click(screen.getByRole("button", { name: "Reject" }));
     expect(await screen.findByText("Put back as heard")).toBeInTheDocument();
-    expect(calls[0]).toContain('"action":"correction_rejected"');
-    expect(calls[0]).toContain('"reason":"wrong_name"');
+    const patch = calls.find((c) => c.includes("correction_rejected"))!;
+    expect(patch).toContain('"reason":"wrong_name"');
     expect(reloaded).toHaveBeenCalled();
   });
 });

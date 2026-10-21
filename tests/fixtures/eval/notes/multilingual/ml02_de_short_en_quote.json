@@ -1,0 +1,37 @@
+{
+ "id": "ml02_de_short_en_quote",
+ "language": "de",
+ "meeting_type": "auto",
+ "recorded_on": "2026-10-15",
+ "recording_type": "podcast_broadcast",
+ "transcript": [
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 0,
+   "t_end_ms": 26000,
+   "text": "Hier ist das Wirtschaftsupdate am Donnerstag. Der Möbelhersteller Nordhaus hat heute seine Quartalszahlen vorgelegt. Der Umsatz stieg um vier Prozent auf 2,1 Milliarden Euro, der Gewinn blieb dagegen hinter den Erwartungen der Analysten zurück. Zur Preisfrage sagte Konzernchefin Mara Holt auf der Telefonkonferenz nur einen Satz."
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 26000,
+   "t_end_ms": 30000,
+   "text": "We will not raise prices this year.",
+   "language": "en"
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 30000,
+   "t_end_ms": 52000,
+   "text": "Die Aktie legte nach dieser Aussage um drei Prozent zu. Am Montag folgt die Hauptversammlung in Hamburg, auf der auch über die Dividende abgestimmt wird."
+  }
+ ],
+ "gold": {
+  "speakers": {
+   "SPEAKER_1": "Moderator",
+   "SPEAKER_2": "Mara Holt"
+  },
+  "key_facts": [
+   "Nordhaus erhöht in diesem Jahr die Preise nicht."
+  ]
+ }
+}

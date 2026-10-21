@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from auth import Claims
 from note_models import NoteContent, NoteSection, NoteStatus
 from note_service.domain.meetings_repository import MeetingRow
-from note_service.domain.template_match import TemplateCandidate
+from note_service.domain.template_catalog import TemplateCandidate
 from template_models import TemplateDefinition
 
 AUTHOR = UUID("11111111-1111-1111-1111-111111111111")
@@ -183,7 +183,7 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     async def _load_candidates(conn, *, language):  # noqa: ANN001
         return CATALOGUE
 
-    monkeypatch.setattr(rm.template_match, "load_candidates", _load_candidates)
+    monkeypatch.setattr(rm.template_catalog, "load_candidates", _load_candidates)
 
     async def _next_code(conn, *, tenant_id):  # noqa: ANN001
         return "NOTE-2026-00042"

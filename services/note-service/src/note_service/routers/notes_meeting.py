@@ -29,14 +29,15 @@ from template_models import FieldType, TemplateDefinition
 from .. import audit_kinds, meeting_metrics
 from ..config import settings
 from ..deps import get_state, requires
-from ..domain import access, code_sequence, generation_service, series_service, template_match
+from ..domain import access, code_sequence, generation_service, series_service, template_catalog
+from ..domain import agenda as agenda_rules
 from ..domain import meetings_repository as meetings
 from ..domain import notes_repository as repo
+from ..domain import user_notes as user_notes_rules
 from ..domain import visibility as visibility_defaults
 from ..domain.conflicts import OptimisticLockMismatchError
-from ..domain.meeting_doc import agenda as agenda_rules
-from ..domain.meeting_doc import user_notes as user_notes_rules
 from ..domain.repository import get_template
+from ..domain.writer import NoteTemplate
 from ..notifications import emit_budget_reached
 from . import ai_settings as ai_settings_router
 from .notes_from_transcript import (
@@ -99,6 +100,8 @@ class StartMeetingRequest(BaseModel):
     language: Literal["auto", "en", "de", "uk"] = "auto"
     meeting_type: Literal["auto", "client", "team", "sales", "one_on_one", "interview"] = "auto"
     template_id: UUID | None = None
+    # P2: the note template the writer shapes the note with; omitted = auto (the model chooses).
+    template: NoteTemplate | None = None
     calendar: CalendarContextIn | None = None
 
 
@@ -247,9 +250,11 @@ async def _pick_template(
         return template_id, _parse_definition(row), int(row["schema_version"]), str(row["name"])
 
     resolved = TEMPLATE_LANGUAGE_FALLBACK if language == "auto" else language
-    candidates = await template_match.load_candidates(conn, language=resolved)
+    candidates = await template_catalog.load_candidates(conn, language=resolved)
     if not candidates and resolved != TEMPLATE_LANGUAGE_FALLBACK:
-        candidates = await template_match.load_candidates(conn, language=TEMPLATE_LANGUAGE_FALLBACK)
+        candidates = await template_catalog.load_candidates(
+            conn, language=TEMPLATE_LANGUAGE_FALLBACK
+        )
     if not candidates:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -328,6 +333,10 @@ async def start_meeting(
             co_author_ids=[],
             template_id=template_id,
             template_schema_version=schema_version,
+            # Task 4: a template the request named is the person's choice; one picked for
+            # the meeting type is not (the type itself is, on the meeting row).
+            template_source=None,
+            template=body.template,
             source_session_id=None,
             content=content,
             # Only the placeholder is for the generation job to replace.

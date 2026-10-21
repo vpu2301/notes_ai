@@ -1,0 +1,9 @@
+{
+  "language": "de",
+  "utterances": [
+    {"speaker": "Entwickler", "language": "de", "text": "Guten Morgen zusammen, kurzes Stand-up. Gestern habe ich den Pull Request für das Login fertig gemacht und das Deployment auf Staging läuft seit heute früh."},
+    {"speaker": "Entwickler", "language": "de", "text": "Beim Merge gab es einen Konflikt im Feature Flag für die neue Suche, den habe ich zusammen mit dem Backend Team aufgelöst."},
+    {"speaker": "Entwickler", "language": "de", "text": "Heute mache ich den Rollback Plan für das Release fertig und schaue mir die offenen Tickets im Dashboard an. Blocker habe ich keine."},
+    {"speaker": "Entwickler", "language": "de", "text": "Der Code Review für den Cache ist noch offen, wenn jemand Zeit hat, bitte heute Nachmittag anschauen."}
+  ]
+}

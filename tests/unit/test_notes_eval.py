@@ -178,9 +178,9 @@ def test_the_committed_corpus_is_the_shape_the_harness_reads() -> None:
 
 def _engine() -> Any:
     sys.path.insert(0, str(REPO / "services" / "note-service" / "src"))
-    from note_service.domain.meeting_doc import windows
+    from note_service.domain import transcript
 
-    return windows
+    return transcript
 
 
 def test_the_engine_reads_every_turn_the_harness_emits() -> None:
@@ -208,7 +208,7 @@ def test_speaker_names_are_applied_from_gold_or_defaulted() -> None:
 def test_the_pipeline_lands_in_the_templates_sections() -> None:
     windows = _engine()
     assert windows  # engine importable
-    from note_service.domain.meeting_doc import types
+    from note_service.domain import families as types
 
     family = types.family_for_type("auto")
     assert notes_eval.template_code(family, "de") == "meeting_notes_de"
@@ -217,51 +217,10 @@ def test_the_pipeline_lands_in_the_templates_sections() -> None:
     assert roles["decisions"] == "decisions" and roles["action_items"] == "action_items"
 
 
-class _NoopProvider:
-    backend = "fake"
-    model_id = "fake"
-
-    async def complete(self, *args: Any, **kwargs: Any) -> Any:
-        raise AssertionError("a blind engine must not call the model")
-
-    async def aclose(self) -> None:
-        return None
-
-
-def test_a_blind_engine_exits_2(tmp_path: Path, monkeypatch: Any, capsys: Any) -> None:
-    """The old shape reaches the engine as zero windows: the harness must
-    say so and stop, not score an empty document."""
-    import asyncio
-    import json
-
-    import models
-
-    corpus = tmp_path / "corpus"
-    corpus.mkdir()
-    (corpus / "m.json").write_text(json.dumps({**MEETING, "meeting_type": "auto"}), "utf-8")
-
-    def old_shape(meeting: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "language": "en",
-            "turns": [{"speaker": "S", "text": t["text"]} for t in meeting["transcript"]],
-        }
-
-    class _Registry:
-        def backend(self, name: str, expect_kind: str) -> Any:
-            return type("R", (), {"name": name, "model_id": "fake", "processor": None})()
-
-    monkeypatch.setattr(notes_eval, "as_asr_result", old_shape)
-    monkeypatch.setattr(notes_eval, "load_registry", lambda: _Registry())
-    monkeypatch.setattr(models, "build_chat_provider", lambda resolved: _NoopProvider())
-    code = asyncio.run(notes_eval.main("pipeline", "fake", corpus, 1))
-    assert code == notes_eval.EXIT_BLIND == 2
-    assert "engine saw no transcript" in capsys.readouterr().err
-
-
 def test_a_missing_corpus_exits_3(tmp_path: Path) -> None:
     import asyncio
 
-    assert asyncio.run(notes_eval.main("pipeline", "fake", tmp_path / "nope", 1)) == 3
+    assert asyncio.run(notes_eval.main("single_pass", "fake", tmp_path / "nope", 1)) == 3
 
 
 def test_a_real_quote_with_different_punctuation_or_an_echoed_header_is_a_citation() -> None:

@@ -751,35 +751,3 @@ async def test_logs_during_both_flows_carry_no_terms_or_transcript(
         if hits:
             leaked.append(f"{record.name}: {hits}")
     assert not leaked, "content reached the logs:\n" + "\n".join(leaked)
-
-
-async def test_an_eval_report_from_b_run_carries_no_term_text(
-    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import sys
-
-    sys.path.insert(0, str(REPO / "scripts" / "eval"))
-    sys.path.insert(0, str(REPO / "services" / "note-service" / "tests" / "unit"))
-    import _common
-    import notes_eval
-    from meeting_doc_fakes import ScriptedProvider
-    from notes_scoring import score_meeting
-
-    monkeypatch.setattr(_common, "DOCS_EVAL", tmp_path)
-    fixture = json.loads(
-        (REPO / "tests" / "fixtures" / "eval" / "notes" / "m01_en_product_sync.json").read_text(
-            "utf-8"
-        )
-    )
-    # B's name spoken in the meeting and named as its speaker.
-    for turn in fixture["transcript"][:2]:
-        turn["text"] = f"{world.b_term} said: {turn['text']}"
-    fixture.setdefault("gold", {})["speakers"] = {"SPEAKER_1": world.b_term}
-    produced = await notes_eval.run_pipeline(fixture, ScriptedProvider())
-    totals = notes_eval.Totals()
-    row = notes_eval.score(fixture, produced, totals)
-    row.update(score_meeting(fixture, produced))
-    path = _common.write_report(
-        "notes-pipeline", "scripted", {"runs": [{"run": 1, "meetings": [row]}]}
-    )
-    assert world.b_term not in path.read_text("utf-8")

@@ -2,7 +2,7 @@
 
 A team workspace shares by default (members edit, viewers comment); a
 personal workspace and the families marked sensitive
-(`meeting_doc.types.Family.default_visibility`: one-on-one, interview, memo)
+(`families.Family.default_visibility`: one-on-one, interview, memo)
 stay private. W5 applied the same rule to the notes that existed before W3
 (`scripts/ops/backfill_workspace_visibility.py`) and to a note that moves;
 :func:`default_for_note` is that rule on a stored note, and
@@ -18,7 +18,7 @@ from fastapi import HTTPException, status
 
 from . import sharing_policy
 from .access import VISIBILITY_PRIVATE, VISIBILITY_WORKSPACE
-from .meeting_doc.types import (
+from .families import (
     FAMILIES,
     RECORDING_TYPES,
     detected_value,

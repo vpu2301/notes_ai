@@ -193,6 +193,37 @@
    "Waltzmann",
    "Quillhaven",
    "Ferrytale"
+  ],
+  "certainties": [
+   {
+    "match": "will diese Regel unbedingt erhalten",
+    "certainty": "statement",
+    "holder": "Karla Sonnenfeld"
+   },
+   {
+    "match": "nicht verhandelbar",
+    "certainty": "statement",
+    "holder": "Karla Sommerfeld"
+   },
+   {
+    "match": "erst einmal eine Verhandlungsposition",
+    "certainty": "opinion",
+    "holder": "Jonas Pfeffer"
+   },
+   {
+    "match": "hält man die Kosten für zu hoch",
+    "certainty": "statement",
+    "holder": "Finanzministerium"
+   },
+   {
+    "match": "zum Warnstreik aufgerufen",
+    "certainty": "fact"
+   },
+   {
+    "match": "könnten sich Lieferungen",
+    "certainty": "prediction",
+    "holder": "Logistikverbände"
+   }
   ]
  }
 }

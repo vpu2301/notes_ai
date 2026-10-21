@@ -30,7 +30,10 @@ def build_chat_provider(resolved: ResolvedBackend) -> ChatProvider:
         )
     if resolved.kind == "recorded":
         return RecordedChatProvider(
-            backend=resolved.name, cassette_dir=cfg.cassette_dir or "", model_id=resolved.model_id
+            backend=resolved.name,
+            cassette_dir=cfg.cassette_dir or "",
+            model_id=resolved.model_id,
+            context_window=cfg.context_window,
         )
     if resolved.kind == "anthropic":
         return AnthropicProvider(model_id=resolved.model_id)

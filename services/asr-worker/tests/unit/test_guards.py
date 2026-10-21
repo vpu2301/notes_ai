@@ -230,3 +230,108 @@ def test_g3_is_skipped_when_the_backend_gave_no_word_probabilities() -> None:
     result = guards.apply(out, [SpeechSegment(0, 4000)]).output
     # No no_speech_prob either: G1 rests on VAD alone and drops it, G3 did not run.
     assert [d.reason for d in result.diagnostics.dropped_segments] == ["no_speech"]
+
+
+# ── G2 near-repeats (Sprint B3 T3) ───────────────────────────────────
+
+
+def test_g2_a_drifting_loop_is_cut_after_two_repetitions() -> None:
+    # Articles and endings drift, as Whisper's loops do; no 2–6-gram repeats exactly 4 times.
+    units = [
+        "das ist der US -Präsident,",
+        "das ist die US -Präsident,",
+        "das ist der US -Präsidentin,",
+    ]
+    drift = "Das ist einmal das US -Präsident, " + " ".join(units * 3)
+    seg = _seg(0, drift)
+    assert guards.loop_cut([w.text for w in seg.words], 4, fuzzy_ratio=1.0) is None
+    result = guards.apply(_out([seg]), _speech_over(seg))
+    (kept,) = result.output.segments
+    assert kept.text.lower().count("das ist") == 1 + 4, kept.text
+    assert result.loop_ranges == [(seg.start_ms, seg.end_ms)]
+
+
+def test_g2_near_repeat_grams_match_at_the_fuzzy_ratio_and_not_above_it() -> None:
+    tokens = [
+        "wir",
+        "sehen",
+        "uns",
+        "dann",
+        "morgen",
+        "früh",
+        "wir",
+        "sehen",
+        "uns",
+        "dann",
+        "morgen",
+        "spät",
+        "wir",
+        "sehen",
+        "uns",
+        "dann",
+        "morgen",
+        "früh",
+        "wir",
+        "sehen",
+        "uns",
+        "dann",
+        "morgen",
+        "spät",
+    ]
+    assert guards.loop_cut(tokens, 4, fuzzy_ratio=0.8) == 12
+    assert guards.loop_cut(tokens, 4, fuzzy_ratio=1.0) is None
+
+
+def test_g2_exact_loops_are_cut_as_before() -> None:
+    seg = _seg(0, "vielen dank " * 6)
+    assert guards.loop_cut([w.text for w in seg.words], 4, fuzzy_ratio=1.0) == 4
+
+
+# ── Stock outros (Sprint A3 T2) ──────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("language", "text"),
+    [
+        ("en", "Thank you for watching!"),
+        ("de", "Danke fürs Zuschauen."),
+        ("uk", "Дякую за перегляд!"),
+    ],
+)
+def test_a_stock_outro_after_a_gap_is_cut(language: str, text: str) -> None:
+    speech = _seg(0, "wir sprechen heute über den haushalt der stadt und den liefertermin")
+    outro = _seg(speech.end_ms + 4000, text)
+    out = _out([speech, outro], [_d(speech, no_speech_prob=0.01), _d(outro, no_speech_prob=0.05)])
+    out = out.model_copy(update={"language": language})
+    result = guards.apply(out, [SpeechSegment(0, outro.end_ms)])
+    assert [s.start_ms for s in result.output.segments] == [speech.start_ms]
+    (drop,) = result.output.diagnostics.dropped_segments
+    assert drop.reason == "artefact_outro"
+
+
+def test_a_stock_outro_the_decoder_doubts_is_cut_without_a_gap() -> None:
+    speech = _seg(0, "we talk about the budget and the delivery date today")
+    outro = _seg(speech.end_ms + 100, "Thanks for watching")
+    out = _out([speech, outro], [_d(speech, no_speech_prob=0.01), _d(outro, no_speech_prob=0.7)])
+    result = guards.apply(
+        out.model_copy(update={"language": "en"}), [SpeechSegment(0, outro.end_ms)]
+    )
+    assert len(result.output.segments) == 1
+
+
+def test_thanks_for_watching_spoken_mid_speech_stays() -> None:
+    speech = _seg(0, "we talk about the budget and the delivery date today")
+    said = _seg(speech.end_ms + 200, "Thanks for watching, and now the second item on the budget")
+    out = _out([speech, said], [_d(speech, no_speech_prob=0.01), _d(said, no_speech_prob=0.02)])
+    result = guards.apply(
+        out.model_copy(update={"language": "en"}), [SpeechSegment(0, said.end_ms)]
+    )
+    assert len(result.output.segments) == 2 and result.output.diagnostics.dropped_segments == []
+
+
+def test_the_outro_table_names_each_language() -> None:
+    assert guards.is_stock_outro("Untertitelung des ZDF", "de")
+    assert guards.is_stock_outro("Підпишіться на канал", "uk")
+    assert not guards.is_stock_outro(
+        "Subscribe to our newsletter for the budget details next week", "en"
+    )

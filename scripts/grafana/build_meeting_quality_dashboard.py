@@ -180,6 +180,26 @@ SELECT 'note', coalesce(g.error_kind, '—'), count(*)
  GROUP BY 2
  ORDER BY 3 DESC"""
 
+# ── Note instructions (Sprint N5) ──────────────────────────────────
+INSTRUCTIONS_SQL = """-- Workspaces whose note instructions changed in the range.
+SELECT t.name               AS "Workspace",
+       w.scope              AS "Scope",
+       w.version            AS "Version",
+       w.updated_at         AS "Updated"
+  FROM workspace_note_instructions w
+  JOIN tenants t ON t.id = w.tenant_id
+ WHERE $__timeFilter(w.updated_at)
+ ORDER BY w.updated_at DESC"""
+
+INSTRUCTED_TS_SQL = f"""-- Per day: the share of notes written under instructions.
+WITH {_GEN}
+SELECT date_trunc('day', n.created_at)                                     AS time,
+       avg(CASE WHEN g.stats->>'instructed' = 'true' THEN 1.0 ELSE 0.0 END) AS "Written under instructions"
+  FROM gen g JOIN notes n ON n.id = g.note_id
+ WHERE $__timeFilter(n.created_at) AND g.status IN ('complete', 'partial')
+ GROUP BY 1
+ ORDER BY 1"""
+
 ALL_SQL = [
     MEETINGS_SQL,
     *STAT_SQL.values(),
@@ -187,6 +207,8 @@ ALL_SQL = [
     NOTE_TS_SQL,
     SPEED_TS_SQL,
     GUARDS_TS_SQL,
+    INSTRUCTIONS_SQL,
+    INSTRUCTED_TS_SQL,
     SPELLINGS_SQL,
     FAILURES_SQL,
 ]
@@ -316,6 +338,41 @@ def build() -> dict[str, Any]:
                 "options": {"showHeader": True},
             }
         )
+    add(
+        {
+            "type": "row",
+            "title": "Note instructions",
+            "collapsed": False,
+            "gridPos": {"x": 0, "y": 41, "w": 24, "h": 1},
+            "panels": [],
+        }
+    )
+    add(
+        {
+            "type": "table",
+            "title": "Workspaces with note instructions",
+            "gridPos": {"x": 0, "y": 42, "w": 12, "h": 7},
+            "targets": [_target(INSTRUCTIONS_SQL, "table")],
+            "fieldConfig": {"defaults": {}, "overrides": []},
+            "options": {"showHeader": True},
+        }
+    )
+    add(
+        {
+            "type": "timeseries",
+            "title": "Notes written under instructions",
+            "gridPos": {"x": 12, "y": 42, "w": 12, "h": 7},
+            "targets": [_target(INSTRUCTED_TS_SQL, "time_series")],
+            "fieldConfig": {
+                "defaults": {**ts_defaults, "unit": "none"},
+                "overrides": [_unit_override(["Written under instructions"], "percentunit")],
+            },
+            "options": {
+                "legend": {"displayMode": "list", "placement": "bottom"},
+                "tooltip": {"mode": "multi"},
+            },
+        }
+    )
     return {
         "title": "Meeting quality (admin)",
         "uid": "meeting-quality",

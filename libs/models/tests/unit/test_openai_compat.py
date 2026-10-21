@@ -175,7 +175,8 @@ async def test_status_mapping(
     if status == 429:
         assert exc.value.retry_after_s == 7.0
         assert exc.value.retryable is True
-        assert calls == 1  # rate_limited is the job policy's retry, not the provider's
+        # Task 4: the provider waits Retry-After out (120 s per call) before giving up.
+        assert calls == 1 + 120 // 7
 
 
 async def test_timeouts_and_connect_errors_map_and_retry_thrice() -> None:

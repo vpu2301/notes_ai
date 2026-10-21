@@ -36,7 +36,7 @@ final class AppState: ObservableObject {
     /// Which page the Settings sheet opens on.
     @Published var settingsTab: SettingsTab = .general
 
-    enum SettingsTab: Hashable { case general, connectors, dataAI, account }
+    enum SettingsTab: Hashable { case general, connectors, dataAI, writing, account }
 
     /// Open Settings on the Connectors page (menus, the home page's prompt).
     func showConnectors() {
@@ -1350,6 +1350,14 @@ final class AppState: ObservableObject {
     func openWebSettingsData() {
         if let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
             .appending(path: "settings/data") {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    /// Settings › Note writing in the web app, where the style, the instructions and the model behaviour are changed.
+    func openWebSettingsWriting() {
+        if let url = URL(string: settings.webAppURL.trimmingCharacters(in: .whitespaces))?
+            .appending(path: "settings/writing") {
             UIApplication.shared.open(url)
         }
     }

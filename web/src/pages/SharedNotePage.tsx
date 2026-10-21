@@ -15,7 +15,10 @@ import { sharedStrings } from "../i18n/shared";
 import type { SharedNoteView, SharedSection } from "../api/types";
 import { CodeInput } from "../components/CodeInput";
 import { AlertIcon, DownloadIcon } from "../components/icons";
-import { RichText } from "../components/RichText";
+import { RichText, type LineExtra } from "../components/RichText";
+import { lineKey } from "../lib/itemKey";
+import { mmss } from "../lib/generation";
+import { provenanceLabel } from "../i18n/note";
 import { FlagControl, SharedItems } from "../components/SharedItems";
 import { safeFilename, saveBlob } from "../lib/exportNote";
 import { formatDateTime } from "../lib/time";
@@ -134,6 +137,25 @@ export function SharedNotePage() {
   };
 
   const byRole = (role: SharedSection["role"]) => note?.sections.filter((s) => s.role === role) ?? [];
+  // B4: the provenance marker beside each line the sender's engine wrote, in the note's language.
+  // B4: the provenance words; P3: the [mm:ss] the line rests on. The recipient never sees the evidence itself.
+  const marksFor = (s: SharedSection): LineExtra | undefined => {
+    const marks = s.line_marks ?? {};
+    const times = s.line_times ?? {};
+    if (Object.keys(marks).length === 0 && Object.keys(times).length === 0) return undefined;
+    return (raw) => {
+      const key = lineKey(raw);
+      const label = provenanceLabel(note?.lang, marks[key]);
+      const at = times[key];
+      if (!label && at === undefined) return null;
+      return (
+        <>
+          {label && <span className="provenance-chip muted">{label}</span>}
+          {at !== undefined && <span className="line-time muted">[{mmss(at)}]</span>}
+        </>
+      );
+    };
+  };
   const decisions = byRole("decisions");
   const actions = byRole("action_items");
   // A short roster is a line under the title; anything longer is a section.
@@ -320,7 +342,7 @@ export function SharedNotePage() {
               {prose.map((s) => (
                 <section key={s.section_key} className="doc-section">
                   {s.name && <h2 className="section-name">{s.name}</h2>}
-                  <RichText text={s.text} />
+                  <RichText text={s.text} lineExtra={marksFor(s)} />
                   {note.can_respond && (
                     <FlagControl
                       token={token}
@@ -337,7 +359,7 @@ export function SharedNotePage() {
                   className={`doc-section shared-key ${note.changes?.sections_changed.includes(s.section_key) && !changesDismissed ? "changed" : ""}`}
                 >
                   <h2 className="section-name">{t.agreed}</h2>
-                  <RichText text={s.text} />
+                  <RichText text={s.text} lineExtra={marksFor(s)} />
                   {note.can_respond && (
                     <FlagControl
                       token={token}

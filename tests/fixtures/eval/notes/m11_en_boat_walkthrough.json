@@ -143,6 +143,12 @@
   },
   "contact": [
    "Questions can be sent by email or left as a comment below the video"
+  ],
+  "certainties": [
+   {
+    "match": "Cruising speed is twenty six knots",
+    "certainty": "fact"
+   }
   ]
  }
 }

@@ -15,6 +15,17 @@ describe("the document-type pill (Summary Engine v2, Q3)", () => {
     expect(screen.queryByText("Meeting notes")).not.toBeInTheDocument();
   });
 
+  it("names the writer's template over everything else (P2)", () => {
+    render(
+      <DocTypePill templateName="Meeting notes" recordingType="podcast_broadcast" template="public_meeting" />,
+    );
+    expect(screen.getByText("Public meeting").closest(".doc-pill")).toHaveAttribute(
+      "title",
+      "The template this note was written with",
+    );
+    expect(screen.queryByText("Podcast / broadcast")).not.toBeInTheDocument();
+  });
+
   it("keeps the template's name for a meeting, and before any run", () => {
     const { rerender } = render(<DocTypePill templateName="Meeting notes" recordingType="meeting" />);
     expect(screen.getByText("Meeting notes")).toBeInTheDocument();

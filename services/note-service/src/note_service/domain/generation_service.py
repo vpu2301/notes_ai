@@ -16,9 +16,8 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
-from . import ai_settings
+from . import ai_settings, prompts
 from . import generation_repository as gen_repo
-from .meeting_doc.prompts import PROMPT_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +85,7 @@ async def start(
 
     generation_id = uuid4()
     job_id = uuid4()
+    prompt_version = prompts.PROMPT_VERSION
     key = snapshot_key(tenant_id, note_id, generation_id)
 
     # Before the row: an orphan object is cheap, an orphan row is not.
@@ -109,7 +109,7 @@ async def start(
             job_id=job_id,
             requested_by=requested_by,
             reason=reason,
-            prompt_version=PROMPT_VERSION,
+            prompt_version=prompt_version,
             transcript_rev=transcript_rev,
             snapshot_key=key,
             # Must be the id the snapshot was sealed with (AAD + object key), or the DEK unwrap fails.
@@ -128,7 +128,7 @@ async def start(
         priority=PRIORITY_REGENERATE
         if reason == "regenerate"
         else (priority if priority is not None else PRIORITY_AUTO),
-        idempotency_key=(f"{note_id}:{transcript_rev}:{PROMPT_VERSION}:{secrets.token_hex(4)}"),
+        idempotency_key=(f"{note_id}:{transcript_rev}:{prompt_version}:{secrets.token_hex(4)}"),
         conn=conn,
     )
     return stored_id, gen_repo.QUEUED

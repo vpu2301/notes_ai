@@ -26,11 +26,12 @@ from template_models import FieldType, TemplateDefinition
 from .. import audit_kinds
 from ..config import settings
 from ..deps import get_state, requires
-from ..domain import access, code_sequence, generation_service, template_match
+from ..domain import access, code_sequence, generation_service, template_catalog
 from ..domain import notes_repository as repo
 from ..domain import visibility as visibility_defaults
 from ..domain.field_extraction_client import extract_fields
 from ..domain.repository import get_template
+from ..domain.writer import NoteTemplate
 from ..notifications import emit_budget_reached
 from . import ai_settings as ai_settings_router
 
@@ -48,9 +49,11 @@ class CreateFromTranscriptRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     asr_job_id: UUID
-    # Omitted → deterministic auto-match against the transcript.
+    # Omitted → the general meeting-notes template in the transcript's language.
     template_id: UUID | None = None
     title: str = Field(default="", max_length=512)
+    # P2: the note template the writer shapes the note with; omitted = auto (the model chooses).
+    template: NoteTemplate | None = None
 
 
 class FromTranscriptResponse(BaseModel):
@@ -260,12 +263,12 @@ TEMPLATE_LANGUAGE_FALLBACK = "en"
 
 async def _candidates_for_language(
     conn: asyncpg.Connection, language: str
-) -> tuple[list[template_match.TemplateCandidate], str]:
+) -> tuple[list[template_catalog.TemplateCandidate], str]:
     """Active templates in ``language``, else in the fallback; returns (candidates, their language)."""
-    candidates = await template_match.load_candidates(conn, language=language)
+    candidates = await template_catalog.load_candidates(conn, language=language)
     if candidates or language == TEMPLATE_LANGUAGE_FALLBACK:
         return candidates, language
-    fallback = await template_match.load_candidates(conn, language=TEMPLATE_LANGUAGE_FALLBACK)
+    fallback = await template_catalog.load_candidates(conn, language=TEMPLATE_LANGUAGE_FALLBACK)
     return fallback, TEMPLATE_LANGUAGE_FALLBACK
 
 
@@ -327,7 +330,7 @@ async def create_note_from_transcript(
             selection = "explicit"
         else:
             candidates, template_language = await _candidates_for_language(conn, language)
-            choice = template_match.select_template(candidates, transcript)
+            choice = template_catalog.default_template(candidates)
             if choice is None:
                 raise HTTPException(
                     status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -341,10 +344,10 @@ async def create_note_from_transcript(
                     "from_transcript.template_language_fallback",
                     extra={"transcript_language": language, "template_language": template_language},
                 )
-            definition = choice.candidate.definition
-            template_id, template_name = choice.candidate.id, choice.candidate.name
-            schema_version = choice.candidate.schema_version
-            selection, score = choice.mode, choice.score
+            definition = choice.definition
+            template_id, template_name = choice.id, choice.name
+            schema_version = choice.schema_version
+            selection = "fallback"
 
         title = body.title.strip() or f"{template_name} — {date.today().isoformat()}"
         # Typed-field proposals (ADR-0028). Fail-open: costs proposals, not the draft.
@@ -382,6 +385,9 @@ async def create_note_from_transcript(
                 content=content,
                 source_asr_job_id=body.asr_job_id,
                 title_source="user" if body.title.strip() else "default",
+                # R0: nothing scores a transcript any more; the column stays NULL.
+                template_source=None,
+                template=body.template,
                 visibility=await visibility_defaults.default_for_new_note(
                     conn, tenant_id=claims.tid, template_id=template_id
                 ),

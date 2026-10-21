@@ -77,8 +77,8 @@ def base_config(**overrides: Any) -> dict[str, Any]:
             },
         },
         "routing": {
-            "understand": {"standard": "hf_eu", "premium": "hf_eu"},
-            "summarize": {"standard": "hf_eu", "premium": "hf_eu"},
+            "write": {"standard": "hf_eu", "premium": "hf_eu"},
+            "ask": {"standard": "hf_eu", "premium": "hf_eu"},
             "asr": {"standard": "hf_eu_asr", "premium": "hf_eu_asr"},
         },
         "env_overrides": {

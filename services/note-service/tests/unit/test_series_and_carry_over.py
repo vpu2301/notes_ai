@@ -12,9 +12,8 @@ import pytest
 
 from auth import Claims
 from note_models import NoteContent, NoteSection, NoteStatus
-from note_service.domain import carry_over
-from note_service.domain.meeting_doc import series
-from note_service.domain.meeting_doc import types as meeting_types
+from note_service.domain import carry_over, series
+from note_service.domain import families as meeting_types
 
 AUTHOR = UUID("11111111-1111-1111-1111-111111111111")
 COLLEAGUE = UUID("44444444-4444-4444-4444-444444444444")
@@ -242,25 +241,6 @@ def test_the_client_call_family_exists_and_may_be_shared() -> None:
     family = meeting_types.family_for_template("client_call_de")
     assert family.meeting_type == "client"
     assert meeting_types.supports_client_version(family)
-    # The two things a generic template has nowhere to put.
-    kinds = meeting_types.fact_kinds(family)
-    assert kinds["client_request"] == meeting_types.REQUESTS
-    assert kinds["commitment_ours"] == meeting_types.ACTION_ITEMS
-    assert kinds["commitment_theirs"] == meeting_types.ACTION_ITEMS
-
-
-def test_what_a_buyer_objected_to_is_ours_not_theirs() -> None:
-    sales = meeting_types.family_for_template("sales_call")
-    assert meeting_types.is_internal_kind(sales, "objection")
-    assert meeting_types.is_internal_kind(sales, "competitor_mention")
-    assert meeting_types.is_internal_kind(sales, "budget_timeline")
-    assert not meeting_types.is_internal_kind(sales, "decision")
-
-
-def test_the_scratchpad_is_internal_in_every_family() -> None:
-    for family in meeting_types.FAMILIES:
-        assert meeting_types.is_internal_kind(family, "user_point")
-        assert meeting_types.is_internal_kind(family, "judgement")
 
 
 def test_a_longer_family_prefix_wins() -> None:

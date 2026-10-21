@@ -28,10 +28,10 @@ from note_models import ReadPurpose
 from .. import audit_kinds
 from ..deps import get_state, requires
 from ..domain import access, carry_over, client_view, lines, series_service
+from ..domain import families as meeting_types
 from ..domain import generation_repository as gen_repo
 from ..domain import meetings_repository as meetings
 from ..domain import notes_repository as repo
-from ..domain.meeting_doc import types as meeting_types
 from .notes import _resolve_section_names
 
 logger = logging.getLogger(__name__)

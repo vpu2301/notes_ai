@@ -666,6 +666,10 @@ export interface SharedSection {
   text: string;
   /** Drives the page's fixed hierarchy; `other` collapses below the fold. */
   role: SharedSectionRole;
+  /** B4 — line key → verbatim | paraphrase | composed, for the marker beside each line. */
+  line_marks?: Record<string, string>;
+  /** P3 — line key → start_ms of the turn the line cites, printed as [mm:ss] after it. */
+  line_times?: Record<string, number>;
 }
 
 export interface SharedNoteView {
@@ -914,6 +918,10 @@ export interface GlossaryTerm {
   in_hint?: boolean;
   /** The note the rename that added it happened in, when known. */
   source_note_id?: string | null;
+  /** Every "heard as" differs only by an article, an ending or capitals: likely a mistake. */
+  suspect?: "grammar_variant" | null;
+  /** What this save asked to learn that was grammar, not a mishearing: not stored. */
+  ignored_heard_as?: string[];
 }
 
 export interface GlossaryHint {
@@ -971,6 +979,8 @@ export interface StartMeetingRequest {
   language?: AsrLanguage;
   meeting_type?: MeetingType;
   template_id?: string;
+  /** P2 — the writer's template for this note; omitted = `auto`. */
+  template?: NoteTemplate;
   calendar?: MeetingCalendarContext;
 }
 
@@ -1189,6 +1199,14 @@ export interface EntityCorrection {
   status: "proposed" | "accepted" | "rejected";
   /** A person accepted, edited or rejected it (older servers omit it). */
   decided?: boolean;
+}
+
+/** A3 — a respelling the note's current generation applied, for the transcript's "heard as" marker. */
+export interface NoteCorrection {
+  surface: string;
+  canonical: string;
+  source: string;
+  count: number;
 }
 
 export interface CorrectionsView {
@@ -1466,6 +1484,135 @@ export interface AiSettings {
   /** Who writes notes right now (null where nothing is routed). */
   writer?: AiWriter | null;
   small_writer?: AiWriter | null;
+  /** The model parameters set by hand (P2: only what the writer reads). */
+  model_params?: ModelParams;
+  /** What runs: the saved values with the model's own caps applied. */
+  model_params_effective?: ModelParams;
+  model_params_version?: number;
+  /** False: the saved values no longer validate; notes use the recommended ones. */
+  model_params_valid?: boolean;
+  model_params_limits?: Record<string, ModelParamLimit>;
+  /** Measured share of lines dropped per temperature; null until measured. */
+  model_params_measured?: { temperature?: Record<string, number | null> };
+}
+
+export interface ModelParams {
+  temperature: number;
+  max_output_tokens: number | null;
+  max_concurrency: number;
+  ask_temperature: number;
+  ask_max_tokens: number;
+}
+
+// ── Note templates (P2): the writer's shape for a note ─────────────
+
+/** The seven templates the writer ships; `auto` lets the model choose. */
+export type NoteTemplate =
+  | "meeting"
+  | "client_call"
+  | "interview"
+  | "broadcast"
+  | "public_meeting"
+  | "memo"
+  | "auto";
+
+export const NOTE_TEMPLATES: readonly NoteTemplate[] = [
+  "auto",
+  "meeting",
+  "client_call",
+  "interview",
+  "broadcast",
+  "public_meeting",
+  "memo",
+];
+
+export const NOTE_TEMPLATE_LABELS: Record<NoteTemplate, string> = {
+  auto: "Automatic",
+  meeting: "Meeting",
+  client_call: "Client call",
+  interview: "Interview",
+  broadcast: "Broadcast",
+  public_meeting: "Public meeting",
+  memo: "Memo",
+};
+
+export type TemplateLanguage = "en" | "de" | "uk";
+
+/** One template in one language: the built-in text, or this workspace's own over it. */
+export interface WorkspaceTemplate {
+  name: NoteTemplate;
+  language: TemplateLanguage;
+  source: "builtin" | "workspace";
+  markdown: string;
+  can_edit: boolean;
+  updated_at?: string | null;
+  updated_by?: string | null;
+}
+
+export interface ModelParamLimit {
+  min?: number;
+  max?: number;
+  step?: number;
+  default?: number | string | null;
+  options?: string[];
+  /** The model's configuration limits the value to this. */
+  cap?: number;
+  cap_source?: string;
+}
+
+// ── Note instructions (how this workspace wants its notes written) ──
+
+/** A request the writer will not follow; `message` is the server's sentence, shown as sent. */
+export interface AiInstructionsNotApplied {
+  text: string;
+  reason: string;
+  message: string;
+}
+
+/** Workspace, or a meeting type whose text extends it (N4). */
+export type InstructionsScope =
+  | "workspace"
+  | "client"
+  | "team"
+  | "sales"
+  | "one_on_one"
+  | "interview"
+  | "broadcast"
+  | "memo";
+
+export interface AiInstructions {
+  /** An `InstructionsScope`, or "note" for one note's own. */
+  scope: string;
+  /** 0: nothing saved; `text` is then the default rules. */
+  version: number;
+  /** The text the writer follows: the saved text, else the default rules (P2a). */
+  text: string;
+  /** "workspace" when a saved text replaces the default rules, else "default". */
+  source: "workspace" | "default";
+  /** The rules that ship, for the label and "Reset to default". */
+  default_text: string;
+  /** The compiled dials; the card renders `understood`, never this. */
+  profile: Record<string, unknown>;
+  profile_hash: string;
+  compile_status: "compiled" | "failed";
+  compile_error_kind: string | null;
+  /** One sentence per dial that differs from usual, written by the server. */
+  understood: string[];
+  /** Passed to the writer verbatim as wording guidance. */
+  guidance: string[];
+  not_applied: AiInstructionsNotApplied[];
+  can_edit: boolean;
+  max_chars: number;
+  updated_at: string | null;
+  updated_by: string | null;
+  /** The parents' versions this text was compiled with: `{"workspace": 3}`. */
+  base_versions?: Record<string, number>;
+  /** The text this one extends; null for the workspace. */
+  extends?: { scope: string; version: number } | null;
+  /** Saved, but waiting for the recompile after its parent changed. */
+  stale?: boolean;
+  /** On the workspace view: every scope that has a text. */
+  scopes?: { scope: InstructionsScope; version: number; stale: boolean }[];
 }
 
 export interface AiSettingsUpdate {
@@ -1474,6 +1621,9 @@ export interface AiSettingsUpdate {
   generation_enabled?: boolean;
   monthly_budget_cents?: number;
   acknowledge?: { name: string; region: string }[];
+  /** Always the whole set: a partial object is refused. */
+  model_params?: ModelParams;
+  reset_model_params?: boolean;
 }
 
 // ── The document engine, as the client sees it ─────────────────────
@@ -1499,6 +1649,12 @@ export interface GenerationView {
   sections_written?: number | null;
   /** Stretches left out of the notes; empty for older generations. */
   excluded_ranges?: ExcludedRange[];
+  /** Why a finished note is incomplete with no missing minutes; empty for older generations. */
+  incomplete_reasons?: string[];
+  /** The transcript revision it was written from; absent from older servers. */
+  transcript_rev?: number | null;
+  /** Languages its lines were spoken in, the recording's first; empty before multilingual evidence. */
+  source_languages?: string[];
   /** How the facts spread over the recording; null for older generations. */
   coverage?: GenerationCoverage | null;
   /** What the recording was taken to be, and who decided. */
@@ -1506,6 +1662,46 @@ export interface GenerationView {
   recording_type_source?: "user" | "classifier" | "rule" | "template" | null;
   /** The spoken language the run wrote in. */
   language?: string | null;
+  /** What produced the run (code, versions, flags as executed, models); absent from older servers. */
+  provenance?: GenerationProvenance | null;
+  /** The workspace's note instructions the run was written under; null when none. */
+  instructions?: { scope: string; version: number; fallback?: string | null } | null;
+  /** The version of the workspace's model settings that wrote it (0: the defaults). */
+  model_settings_version?: number | null;
+  /** P2 — the template the writer used; null while running, under `auto` before the model named one, or on older runs. */
+  template?: NoteTemplate | null;
+  /** P1 — the note as the writer wrote it (Markdown); null while running or on older runs. */
+  text?: string | null;
+}
+
+export interface GenerationStageModel {
+  stage: string;
+  backend: string | null;
+  model_id: string | null;
+  calls: number;
+  failed: number;
+}
+
+export interface GenerationProvenance {
+  run_kind: string;
+  /** The worker's build; `pinned_build_sha` is the API's when it queued the run. */
+  build_sha?: string | null;
+  pinned_build_sha?: string | null;
+  prompt_version: string;
+  profile_version_id?: string | null;
+  algorithm_version?: string | null;
+  /** `snapshot`: pinned when queued; `deployment`: a run from before snapshots. */
+  flags_source?: "snapshot" | "deployment" | null;
+  multilingual_evidence?: boolean | null;
+  fidelity?: boolean | null;
+  final_check?: boolean | null;
+  /** Flags this worker's deployment sets differently from what the run was pinned with. */
+  flags_differ?: string[];
+  output_language?: string | null;
+  output_language_source?: string | null;
+  transcript_rev?: number | null;
+  stages?: GenerationStageModel[];
+  fallbacks?: { kind: string; backend: string; primary: string; reason: string | null }[];
 }
 
 export type ExcludedReason =
@@ -1528,6 +1724,17 @@ export interface GenerationCoverage {
   excluded_ms: number;
 }
 
+export interface CitedTurn {
+  turn: number;
+  start_ms: number;
+  end_ms: number;
+  speaker?: string | null;
+  text: string;
+  /** True when `text` is the part of a long turn around the cited moment (`at_ms`). */
+  excerpt?: boolean;
+  at_ms?: number | null;
+}
+
 export interface GeneratedItem {
   item_key: string;
   kind: string;
@@ -1547,17 +1754,44 @@ export interface GeneratedItem {
   placement: string;
   /** Item keys of the facts this line rests on. */
   cites?: string[];
-  certainty?: "fact" | "estimate" | "prediction" | "opinion" | "proposal" | "allegation" | null;
+  certainty?:
+    | "fact"
+    | "estimate"
+    | "prediction"
+    | "opinion"
+    | "proposal"
+    | "allegation"
+    | "reported"
+    | "unproven"
+    | "refuted"
+    | "statement"
+    | null;
   /** Whose position it is. */
   attributed_to?: string | null;
   /** For a sub-point, the row key of the bullet it sits under. */
   parent_key?: string | null;
+  /** B4 — what the line is: the speaker's words, one fact, or several. Null before B4. */
+  provenance?: "verbatim" | "paraphrase" | "composed" | null;
+  /** B4 — a claim row's verdict cell (the label and the speaker's clause). */
+  verdict?: string | null;
   /** A figure row's verified fields (every word in its quote). */
   figure?: { name: string; value: string; unit: string; qualifier: string } | null;
   /** Names respelled in this line; the quote keeps what was heard. */
-  corrections?: { surface: string; canonical: string; source: string }[];
+  /** `entity`: "person" only with evidence of a person; absent on older servers. */
+  corrections?: { surface: string; canonical: string; source: string; entity?: "person" | "term" }[];
   /** Dates the line names, resolved against the recording day. */
   mentions?: { text: string; date: string; time: string | null; direction: string }[];
+  /** P1 — the item's place in the note (the Markdown's order). */
+  position?: number;
+  /** P1 — a table row's cells (`{header, cells}`); absent for a bullet or a paragraph. */
+  table_row?: { header: string[]; cells: string[] } | null;
+  /** P1 — the time named no turn exactly; the nearest one is cited. */
+  cite_nearest?: boolean;
+  /** P3 — every turn the line cites, the first being the row's quote; empty without a cite. */
+  cited_turns?: CitedTurn[];
+  /** P3 — the optional check call's verdict and its one-line reason; null when the call was off. */
+  check?: "ok" | "unsupported" | null;
+  check_reason?: string | null;
 }
 
 // ─── Billing ─────────────────────────────────────────────────────────────

@@ -124,3 +124,46 @@ async def test_poller_asks_again_after_the_window(
     await asyncio.sleep(0.02)
     await poll()
     assert queries["n"] == 2
+
+
+async def test_a_cancel_stops_the_wait_for_a_step_without_checkpoints() -> None:
+    """The diarizer has no cancel checks of its own: Cancel must not wait it out."""
+    from asr_worker.processor import _unless_cancelled
+    from models import TranscriptionCancelledError as Cancelled
+
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def diarize() -> str:
+        started.set()
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            stopped.set()
+            raise
+        return "done"
+
+    calls = 0
+
+    async def should_cancel() -> bool:
+        nonlocal calls
+        calls += 1
+        return started.is_set()
+
+    with pytest.raises(Cancelled):
+        await asyncio.wait_for(_unless_cancelled(diarize(), should_cancel), timeout=5)
+    await asyncio.wait_for(stopped.wait(), timeout=1)
+    assert calls >= 1
+
+
+async def test_without_a_cancel_the_step_result_comes_back() -> None:
+    from asr_worker.processor import _unless_cancelled
+
+    async def diarize() -> str:
+        await asyncio.sleep(0.01)
+        return "done"
+
+    async def never() -> bool:
+        return False
+
+    assert await _unless_cancelled(diarize(), never) == "done"

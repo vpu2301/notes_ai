@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 
+from . import throttle
 from .errors import PROVIDER_RETRY_KINDS, ErrorKind, ProviderError, register_secret
 from .protocols import JsonSchema, JsonValue, ProviderResult
 from .usage import UsageRecord, emit
@@ -68,6 +69,8 @@ class OpenAICompatibleChatProvider:
         self._cold_start_seconds = cold_start_seconds
         self._timeout_s = timeout_s
         self._sleep: SleepFn = sleep or asyncio.sleep
+        # Read by the note worker as the cap on a workspace's parallel calls (N0).
+        self.max_concurrency = max_concurrency
         self._sem = asyncio.Semaphore(max_concurrency)
         register_secret(auth_token)
         headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
@@ -122,6 +125,7 @@ class OpenAICompatibleChatProvider:
         started = time.monotonic()
         attempts = 0
         waited_s = 0.0  # time slept on `warming`; bounded by cold_start_seconds
+        throttled_s = 0.0  # time slept on 429; bounded by throttle.CALL_BUDGET_S
         async with self._sem:
             while True:
                 attempts += 1
@@ -131,7 +135,36 @@ class OpenAICompatibleChatProvider:
                         data, schema, latency_ms=int((time.monotonic() - started) * 1000)
                     )
                 except ProviderError as exc:
-                    if self._should_retry(exc, attempts, waited_s):
+                    if exc.kind is ErrorKind.RATE_LIMITED:
+                        # Task 4: a throttled call waits (Retry-After, else backoff with
+                        # jitter) within its budgets; every attempt is a ledger row.
+                        delay = throttle.wait_for(exc.retry_after_s, attempts, throttled_s)
+                        if delay is not None:
+                            throttled_s += delay
+                            emit(
+                                UsageRecord(
+                                    backend=self.backend,
+                                    model_id=self.model_id,
+                                    operation="chat.complete",
+                                    ok=False,
+                                    latency_ms=int((time.monotonic() - started) * 1000),
+                                    structured_mode=self._mode,
+                                    error_kind=str(exc.kind),
+                                    workspace_id=workspace_id,
+                                    attempts=attempts,
+                                )
+                            )
+                            logger.info(
+                                "models.throttled",
+                                extra={
+                                    "backend": self.backend,
+                                    "attempt": attempts,
+                                    "delay_s": round(delay, 2),
+                                },
+                            )
+                            await self._sleep(delay)
+                            continue
+                    elif self._should_retry(exc, attempts, waited_s):
                         delay = self._retry_delay(exc, attempts, waited_s)
                         waited_s += delay
                         logger.info(
@@ -375,7 +408,8 @@ class OpenAICompatibleChatProvider:
         )
 
     def _should_retry(self, exc: ProviderError, attempts: int, waited_s: float) -> bool:
-        if exc.kind not in PROVIDER_RETRY_KINDS:
+        # `rate_limited` is handled in `complete` (budgeted waits, Task 4), never here.
+        if exc.kind not in PROVIDER_RETRY_KINDS or exc.kind is ErrorKind.RATE_LIMITED:
             return False
         if exc.kind is ErrorKind.WARMING:
             # Budget = declared cold start, counted in time actually waited.

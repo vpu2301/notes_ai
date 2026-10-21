@@ -7,6 +7,7 @@ bytes. Pure function of the input string.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from html import escape as _escape
 
 __all__ = ["render_rich_text"]
@@ -84,7 +85,7 @@ def _is_table(lines: list[str]) -> bool:
     return len(lines) >= 2 and "|" in lines[0] and any(_TABLE_SEP.match(x) for x in lines[1:2])
 
 
-def render_rich_text(text: str) -> str:
+def render_rich_text(text: str, *, line_mark: Callable[[str], str] | None = None) -> str:
     """Render one section body as block-level HTML.
 
     Recognises: ATX headings, ``- ``/``* ``/``• `` bullets, ``1.``
@@ -92,9 +93,16 @@ def render_rich_text(text: str) -> str:
     ``---`` rules and pipe tables. Everything else is a paragraph, with
     single newlines treated as soft wraps (a blank line starts a new
     block) — which is how the note editor's plain-text fields behave.
+
+    ``line_mark`` (B4): a marker to print after a bullet, ordered item or paragraph,
+    given the raw line (empty when there is none) — the provenance of a written line.
     """
     if not text or not text.strip():
         return ""
+
+    def mark(raw: str) -> str:
+        label = line_mark(raw) if line_mark else ""
+        return f' <span class="prov">{_escape(label, quote=False)}</span>' if label else ""
 
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     html: list[str] = []
@@ -106,6 +114,7 @@ def render_rich_text(text: str) -> str:
     def flush_para() -> None:
         nonlocal para
         if para:
+            # A3: no provenance marker on a paragraph (the opening, the summary) — lines only.
             html.append(_paragraph(para))
             para = []
 
@@ -169,12 +178,12 @@ def render_rich_text(text: str) -> str:
             continue
 
         if m := _BULLET.match(line):
-            push("ul", f"<li>{_inline(m.group(1))}</li>")
+            push("ul", f"<li>{_inline(m.group(1))}{mark(line)}</li>")
             i += 1
             continue
 
         if m := _ORDERED.match(line):
-            push("ol", f"<li>{_inline(m.group(2))}</li>")
+            push("ol", f"<li>{_inline(m.group(2))}{mark(line)}</li>")
             i += 1
             continue
 

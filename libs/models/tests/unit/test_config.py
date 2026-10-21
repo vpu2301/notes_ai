@@ -61,7 +61,7 @@ def test_local_processor_may_not_be_enabled_outside_dev_or_test() -> None:
 
 def test_routing_to_unknown_backend_is_rejected() -> None:
     cfg = base_config()
-    cfg["routing"]["understand"]["premium"] = "nope"
+    cfg["routing"]["ask"]["premium"] = "nope"
     with pytest.raises(ConfigError) as exc:
         parse_config(cfg, environ={}, source="t")
     assert exc.value.code == "unknown_backend"

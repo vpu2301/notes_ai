@@ -1,0 +1,35 @@
+{
+ "id": "ml10_de_framing_no_observer",
+ "language": "de",
+ "meeting_type": "auto",
+ "recorded_on": "2026-10-07",
+ "recording_type": "podcast_broadcast",
+ "transcript": [
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 0,
+   "t_end_ms": 30000,
+   "text": "Willkommen beim Wirtschaftsfunk. Heute geht es um die neue Mautregel für Lkw. Ab März zahlen Lastwagen über 3,5 Tonnen auch auf Bundesstraßen, und die Speditionen rechnen mit höheren Preisen."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 30000,
+   "t_end_ms": 55000,
+   "text": "Kritiker befürchten, dass kleine Speditionen die Kosten nicht weitergeben können. Das Verkehrsministerium hält die Regel dagegen für überfällig."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 55000,
+   "t_end_ms": 70000,
+   "text": "Das war der Wirtschaftsfunk. Bis zum nächsten Mal."
+  }
+ ],
+ "gold": {
+  "speakers": {
+   "SPEAKER_1": "Moderator"
+  },
+  "key_facts": [
+   "Ab März gilt die Lkw-Maut auch auf Bundesstraßen."
+  ]
+ }
+}

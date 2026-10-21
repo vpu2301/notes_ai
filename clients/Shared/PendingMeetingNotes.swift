@@ -23,9 +23,11 @@ struct PendingMeetingNote: Codable, Equatable, Sendable {
     var updatedAt: Date
     /// Why its workspace refused it (`not_a_member`, `tenant_dissolved`); nil while it can still sync.
     var blockedReason: String?
+    /// P2 — the writer's template chosen for this meeting; nil = automatic (and on files from before P2).
+    var template: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case title, language, text, calendar
+        case title, language, text, calendar, template
         case clientCaptureId = "client_capture_id"
         case noteId = "note_id"
         case meetingType = "meeting_type"

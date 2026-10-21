@@ -1,4 +1,4 @@
-.PHONY: workspace-smoke meeting-quality-dashboard meeting-quality-backfill check-routing-report smoke-ios eval-asr eval-asr-assert eval-asr-validate eval-notes eval-notes-assert local-bakeoff eval-notes-validate test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers weekly-notes test-integration-db test-isolation run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
+.PHONY: score-notes score-notes-fixtures write-and-score check-dev-build workspace-smoke meeting-quality-dashboard meeting-quality-backfill check-routing-report smoke-ios eval-asr eval-asr-synthetic eval-asr-assert eval-asr-validate eval-notes eval-notes-assert eval-notes-validate test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers weekly-notes test-integration-db test-isolation run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
 
 COMPOSE = docker compose
 COMPOSE_FILE = docker-compose.yml
@@ -7,8 +7,15 @@ PROMTOOL_IMAGE = prom/prometheus:v2.54.1
 
 ##@ Local Development
 
-dev-up: ## Start the full local stack (PostgreSQL, Redis, Kafka, Keycloak, observability)
-	$(COMPOSE) -f $(COMPOSE_FILE) up -d --wait
+dev-up: ## Start the full local stack (base + dev override, as `docker compose up` does); images are rebuilt from the working tree and stamped with HEAD (Task 4); waits for the long-running services only (one-shot seed/migrate are excluded, Task 5 step 0)
+	BUILD_SHA=$$(git rev-parse HEAD) $(COMPOSE) up -d --build
+	@for i in $$(seq 1 120); do \
+	  starting=$$($(COMPOSE) ps --format '{{.Service}} {{.Health}}' | awk '$$2 == "starting" {print $$1}' | tr '\n' ' '); \
+	  down=$$($(COMPOSE) ps -a --format '{{.Service}} {{.State}} {{.ExitCode}}' | awk '$$1 != "seed" && $$1 != "migrate" && $$1 != "minio-init" && $$2 != "running" && $$2 != "created" {print $$1"("$$2":"$$3")"}' | tr '\n' ' '); \
+	  if [ -z "$$starting" ] && [ -z "$$down" ]; then break; fi; \
+	  if [ -n "$$down" ] && [ $$i -gt 12 ]; then echo "not running: $$down"; exit 1; fi; \
+	  sleep 5; \
+	done
 	@echo ""
 	@echo "Stack is up. Service URLs:"
 	@echo "  PostgreSQL   : localhost:5432"
@@ -81,17 +88,34 @@ dev-model: $(if $(ARGS),,dev-up) ## Start the docker stack + model servers on th
 eval-smoke: ## Smoke eval (5 synthetic meetings) against one backend: `make eval-smoke BACKEND=dev_mac`
 	uv run --project libs/models python scripts/eval/smoke_eval.py --backend $(BACKEND)
 
-eval-notes: ## Gold-set eval of the document engine: `make eval-notes BACKEND=dev_mac [ARM=pipeline|single_pass] [CORPUS=eval/notes/v2] [RUNS=3] [JUDGE=dev_mac] [SAVE=scripts/eval/local/notes-<arm>] [LABEL=qwen3-8b]`
+eval-notes: ## Gold-set eval harness (single_pass arm; stored notes: `make score-notes`, fixtures: `make score-notes-fixtures`): `make eval-notes BACKEND=dev_mac [ARM=single_pass] [CORPUS=eval/notes/v2] [RUNS=3] [JUDGE=dev_mac] [SAVE=scripts/eval/local/notes-<arm>] [LABEL=qwen3-8b]`
 	uv run --project services/note-service --with pyyaml python scripts/eval/notes_eval.py \
-	    --backend $(BACKEND) --arm $(or $(ARM),pipeline) --runs $(or $(RUNS),1) \
+	    --backend $(BACKEND) --arm $(or $(ARM),single_pass) --runs $(or $(RUNS),1) \
 	    $(if $(CORPUS),--corpus $(CORPUS),) $(if $(JUDGE),--judge $(JUDGE),) $(if $(SAVE),--save-notes $(SAVE),) $(if $(LABEL),--label $(LABEL),)
 
-local-bakeoff: ## Sprint L1: every local candidate on a corpus → docs/eval/notes-local-bakeoff-<date>.md: `make local-bakeoff [CORPUS=tests/fixtures/eval/notes] [CANDIDATES="gemma3:4b qwen3:8b"]`
-	@bash scripts/dev/local-bakeoff.sh $(if $(CORPUS),--corpus $(CORPUS),) $(if $(CANDIDATES),--candidates "$(CANDIDATES)",)
+check-dev-build: ## Task 4: the newest dev generation's stats.build must be this checkout (git sha + engine code digest): `make check-dev-build [DSN=postgresql://funnel_reader:…]`
+	uv run --project services/note-service --with asyncpg python scripts/eval/check_build.py $(if $(DSN),--dsn $(DSN),)
 
-eval-notes-assert: ## Regression checklists (r01 = the 2026-09-22 audit, m06 = its synthetic twin): `make eval-notes-assert BACKEND=dev_mac [CORPUS=eval/notes/v2]`
-	uv run --project services/note-service --with pyyaml python scripts/eval/notes_assert.py \
-	    --backend $(or $(BACKEND),dev_mac) $(if $(CORPUS),--corpus $(CORPUS),)
+eval-notes-assert: ## The global writer assertions on stored notes' newest generations (no model call): `make eval-notes-assert NOTE_IDS=<uuid>[,<uuid>] [DSN=postgresql://…]`
+	uv run --project services/note-service --with pyyaml --with asyncpg python scripts/eval/notes_assert.py \
+	    --note-ids $(NOTE_IDS) $(if $(DSN),--dsn $(DSN),)
+
+score-notes: ## Sprint P3: score stored notes' generations (structure, hand table, judge, reference) → docs/eval/writer-v2-<date>.md: `make score-notes NOTE_IDS=<uuid|code>[,…] [RUNS=3] [JUDGE=dev_mac] [HANDSCORE=dir] [REFERENCES=dir] [DSN=…] [LABEL=…]`
+	uv run --project services/note-service --with pyyaml --with asyncpg python scripts/eval/score_notes.py \
+	    --note-ids $(NOTE_IDS) --runs $(or $(RUNS),1) $(if $(JUDGE),--judge $(JUDGE),) \
+	    $(if $(HANDSCORE),--handscore $(HANDSCORE),) $(if $(REFERENCES),--references $(REFERENCES),) \
+	    $(if $(DSN),--dsn $(DSN),) $(if $(LABEL),--label $(LABEL),)
+
+score-notes-fixtures: ## Sprint P3: write a fixture corpus with the writer and score it against its gold facts (the nightly regression): `make score-notes-fixtures BACKEND=dev_mac [CORPUS=tests/fixtures/eval/notes] [IDS=m01,…] [RUNS=1] [JUDGE=dev_mac] [SAVE=dir] [LABEL=…]`
+	uv run --project services/note-service --with pyyaml --with asyncpg python scripts/eval/score_notes.py \
+	    --fixtures $(or $(CORPUS),tests/fixtures/eval/notes) --backend $(BACKEND) --runs $(or $(RUNS),1) \
+	    $(if $(IDS),--ids $(IDS),) $(if $(JUDGE),--judge $(JUDGE),) $(if $(SAVE),--save $(SAVE),) $(if $(LABEL),--label $(LABEL),)
+
+write-and-score: ## Sprint P3: the loop — write the notes again on the dev stack (RUNS each) and score every run: `make write-and-score IDS=NOTE-2026-00077,… RUNS=3 [TEMPLATE=…] [JUDGE=dev_mac] [HANDSCORE=dir] [REFERENCES=dir] [SAVE=dir] [LABEL=…]`
+	uv run --project services/note-service --with pyyaml --with asyncpg python scripts/eval/write_and_score.py \
+	    --ids $(IDS) --runs $(or $(RUNS),3) $(if $(TEMPLATE),--template $(TEMPLATE),) $(if $(JUDGE),--judge $(JUDGE),) \
+	    $(if $(HANDSCORE),--handscore $(HANDSCORE),) $(if $(REFERENCES),--references $(REFERENCES),) \
+	    $(if $(SAVE),--save $(SAVE),) $(if $(DSN),--dsn $(DSN),) $(if $(LABEL),--label $(LABEL),)
 
 eval-notes-validate: ## Check a notes gold corpus against gold format v2: `make eval-notes-validate [CORPUS=eval/notes/v2]`
 	uv run --project services/note-service python scripts/eval/notes_gold.py $(or $(CORPUS),tests/fixtures/eval/notes)
@@ -100,6 +124,9 @@ eval-asr: ## Sprint TQ1: ASR gold set through the job's path → docs/eval/asr-<
 	HF_HUB_OFFLINE=$(or $(HF_HUB_OFFLINE),1) uv run --project services/asr-worker python scripts/eval/asr_eval.py run \
 	    --backend $(BACKEND) --split $(or $(SPLIT),test) $(if $(CORPUS),--corpus $(CORPUS),) \
 	    $(if $(IDS),--ids $(IDS),) $(if $(HINT),--hint-file $(HINT),) $(if $(LABEL),--label $(LABEL),) $(if $(DRAFT),--draft,) $(if $(GUARDS),--guards $(GUARDS),)
+
+eval-asr-synthetic: ## Sprint B3: build the synthetic code-switch cases (macOS TTS) → tests/fixtures/eval/asr/synthetic/<id>/; then `make eval-asr BACKEND=inproc_cpu_asr CORPUS=tests/fixtures/eval/asr/synthetic IDS=cs01,cs02,cs03`
+	uv run --project services/asr-worker python scripts/eval/make_codeswitch_fixture.py $(IDS)
 
 eval-asr-assert: ## Sprint TQ1: r03/r04 transcript checklists on the gold set (XFAIL = a later sprint's): `make eval-asr-assert [BACKEND=inproc_cpu_asr] [CORPUS=eval/asr/v1]`
 	HF_HUB_OFFLINE=$(or $(HF_HUB_OFFLINE),1) uv run --project services/asr-worker python scripts/eval/asr_eval.py assert \

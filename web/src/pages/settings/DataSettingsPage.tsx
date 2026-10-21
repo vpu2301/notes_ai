@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { getAiSettings, putAiSettings } from "../../api/aiSettings";
 import { messageFor } from "../../lib/errorCopy";
-import type { AiProcessor, AiSettings, AiWriter } from "../../api/types";
-import { ConfirmDialog } from "../../components/ConfirmDialog";
+import type { AiSettings, AiWriter } from "../../api/types";
 import { Segmented } from "../../components/Segmented";
 import { useToast } from "../../components/Toaster";
 import { useSettingsView } from "../../lib/useSettingsView";
 
 const VIEWS = [
   { value: "processing", label: "Processing" },
-  { value: "writing", label: "Note writing" },
   { value: "spend", label: "Spend" },
 ] as const;
 
@@ -25,8 +24,8 @@ export function DataSettingsPage() {
   const [settings, setSettings] = useState<AiSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [pendingTier, setPendingTier] = useState<string | null>(null);
   const [view, setView] = useSettingsView(VIEWS);
+  const [params] = useSearchParams();
 
   const load = useCallback(async () => {
     try {
@@ -41,6 +40,15 @@ export function DataSettingsPage() {
     void load();
   }, [load]);
 
+  // Note writing has its own page now; old links land there.
+  if (params.get("view") === "writing") {
+    return (
+      <Navigate
+        to={`/settings/writing${params.get("advanced") === "1" ? "?advanced=1" : ""}`}
+        replace
+      />
+    );
+  }
   if (error && !settings) return <p className="help danger-text">{error}</p>;
   if (!settings) return <p className="help">Loading…</p>;
 
@@ -48,7 +56,6 @@ export function DataSettingsPage() {
     setBusy(true);
     try {
       setSettings(await putAiSettings(body));
-      setPendingTier(null);
       toast.success(done);
     } catch (err) {
       toast.error(messageFor(err));
@@ -59,12 +66,10 @@ export function DataSettingsPage() {
     }
   };
 
-  // Companies a tier change newly involves, from the server's list so dialog and check agree.
-  const unacknowledged = (tier: string): AiProcessor[] =>
-    settings.processors.filter((p) => !p.acknowledged && p.tiers.includes(tier));
-
   const overBudget = settings.month_to_date_cents >= settings.budget_cents;
   const downgraded = settings.effective_tier !== settings.tier;
+  // A team workspace starts with nothing agreed to, so nothing is written until an admin agrees.
+  const unagreed = settings.needs_acknowledgement;
   // Who is writing right now: the processor, or "the local model".
   const writerName = (w: AiWriter | null | undefined): string =>
     !w ? "" : w.processor && w.region !== "local" ? `${w.processor} (${w.region})` : "the local model";
@@ -131,82 +136,41 @@ export function DataSettingsPage() {
             </table>
           )}
 
-          {downgraded && (
+          {unagreed.length > 0 && (
             <p className="banner banner-warn" role="status">
-              Note writing is running on the <strong>{settings.effective_tier}</strong> tier, not{" "}
-              <strong>{settings.tier}</strong>:{" "}
-              {settings.needs_acknowledgement.map((p) => `${p.name} (${p.region})`).join(", ")}{" "}
-              {settings.needs_acknowledgement.length === 1 ? "has" : "have"} not been agreed to for
-              this workspace.{" "}
-              {settings.can_edit
-                ? "Choose the tier again below to review and agree."
-                : "A workspace admin can review this."}
+              <span className="grow">
+                {downgraded ? (
+                  <>
+                    Note writing is running on the <strong>{settings.effective_tier}</strong>{" "}
+                    tier, not <strong>{settings.tier}</strong>:{" "}
+                  </>
+                ) : (
+                  "Notes are not written for this workspace yet: "
+                )}
+                {unagreed.map((p) => `${p.name} (${p.region.toUpperCase()})`).join(", ")}{" "}
+                {unagreed.length === 1 ? "has" : "have"} not been agreed to for this workspace.{" "}
+                {settings.can_edit
+                  ? "Agreeing lets them process your meetings."
+                  : "A workspace admin can agree to this."}
+              </span>
+              {settings.can_edit && (
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={busy}
+                  onClick={() =>
+                    void save(
+                      { acknowledge: unagreed.map((p) => ({ name: p.name, region: p.region })) },
+                      "Agreed. Notes will be written for this workspace.",
+                    )
+                  }
+                >
+                  Agree
+                </button>
+              )}
             </p>
           )}
         </section>
-      )}
-
-      {view === "writing" && (
-        <>
-          <section className="card pad settings-card" aria-label="Model tier">
-            <h2 className="settings-h">Quality of written notes</h2>
-            <p className="help">
-              The standard tier writes every note. The premium tier uses a larger model — slower and
-              more expensive, and available on the Pro and Enterprise plans.
-            </p>
-            <div className="seg" role="group" aria-label="Model tier">
-              {["standard", "premium"].map((tier) => (
-                <button
-                  key={tier}
-                  type="button"
-                  className="seg-opt"
-                  aria-pressed={settings.tier === tier}
-                  disabled={
-                    !settings.can_edit ||
-                    busy ||
-                    (tier === "premium" && !settings.may_choose_premium)
-                  }
-                  onClick={() => {
-                    if (settings.tier === tier) return;
-                    const needed = unacknowledged(tier);
-                    if (needed.length > 0) setPendingTier(tier);
-                    else void save({ tier }, `Notes will be written on the ${tier} tier.`);
-                  }}
-                >
-                  {tier === "standard" ? "Standard" : "Premium"}
-                </button>
-              ))}
-            </div>
-            {!settings.may_choose_premium && (
-              <p className="help">The premium tier is available on the Pro and Enterprise plans.</p>
-            )}
-            {!settings.can_edit && (
-              <p className="help">Only a workspace admin can change this.</p>
-            )}
-          </section>
-
-          <section className="card pad settings-card" aria-label="Automatic note writing">
-            <h2 className="settings-h">Automatic note writing</h2>
-            <p className="help">
-              When this is off, recordings are still transcribed and your own typing is untouched —
-              the note simply is not written for you. Notes already written keep every word they have.
-            </p>
-            <label className="chk-row">
-              <input
-                type="checkbox"
-                checked={settings.generation_enabled}
-                disabled={!settings.can_edit || busy}
-                onChange={(e) =>
-                  void save(
-                    { generation_enabled: e.target.checked },
-                    e.target.checked ? "Notes will be written automatically." : "Automatic note writing is off.",
-                  )
-                }
-              />
-              Write notes automatically after a recording
-            </label>
-          </section>
-        </>
       )}
 
       {view === "spend" && (
@@ -247,35 +211,6 @@ export function DataSettingsPage() {
         </section>
       )}
 
-      {pendingTier && (
-        <ConfirmDialog
-          title={`Switch to the ${pendingTier} tier?`}
-          subtitle="This lets new companies process your meetings. They are listed below by name and region."
-          confirmLabel="Agree and switch"
-          busy={busy}
-          onCancel={() => setPendingTier(null)}
-          onConfirm={() =>
-            void save(
-              {
-                tier: pendingTier,
-                acknowledge: unacknowledged(pendingTier).map((p) => ({
-                  name: p.name,
-                  region: p.region,
-                })),
-              },
-              `Notes will be written on the ${pendingTier} tier.`,
-            )
-          }
-        >
-          <ul className="ack-list">
-            {unacknowledged(pendingTier).map((p) => (
-              <li key={`${p.name}/${p.region}`}>
-                <strong>{p.name}</strong> — {p.region.toUpperCase()} — {p.purpose}
-              </li>
-            ))}
-          </ul>
-        </ConfirmDialog>
-      )}
     </div>
   );
 }

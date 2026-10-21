@@ -1,0 +1,33 @@
+{
+ "id": "ml11_de_polarity_inversion",
+ "sentinel": "F1-03 critical inversion: worse stays worse, fewer stays fewer, not approved stays not approved, opposes stays opposes — whatever the composer writes",
+ "speakers": {
+  "SPEAKER_1": "Moderation",
+  "SPEAKER_2": "Anna Keller",
+  "SPEAKER_3": "Tom Reyes"
+ },
+ "must_contain_any": [
+  [
+   "schlechter",
+   "verschlechtert"
+  ],
+  [
+   "nicht genehmigt",
+   "abgelehnt",
+   "nicht zugestimmt",
+   "nicht freigegeben"
+  ]
+ ],
+ "must_not_contain": [
+  "besser als im Vorjahr",
+  "verbessert",
+  "mehr Aufträge",
+  "hat den Ausbau des Werks in Ulm genehmigt",
+  "hat den Ausbau in Ulm genehmigt",
+  "Ausbau in Ulm wurde genehmigt",
+  "unterstützt die Fusion",
+  "unterstützen die Fusion",
+  "befürwortet die Fusion"
+ ],
+ "excluded_language_ms_max": 0
+}

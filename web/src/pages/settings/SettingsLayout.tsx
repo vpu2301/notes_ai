@@ -6,6 +6,7 @@ import {
   CreditCardIcon,
   LockIcon,
   MonitorIcon,
+  PenIcon,
   ShieldIcon,
   UserIcon,
   UsersIcon,
@@ -17,6 +18,7 @@ const HEADINGS: Record<string, string> = {
   account: "Profile",
   security: "Security",
   data: "Data & AI",
+  writing: "Note writing",
   members: "Members",
   devices: "Room devices",
   workspace: "Branding & sharing",
@@ -27,6 +29,7 @@ const TAB_TITLES: Record<string, string> = {
   account: "Account settings",
   security: "Security settings",
   data: "Data & AI settings",
+  writing: "Note writing settings",
   members: "Members",
   devices: "Room devices",
   workspace: "Workspace settings",
@@ -57,6 +60,8 @@ export function SettingsLayout() {
             <span className="settings-nav-label">Workspace</span>
             {/* Every member, not only a manager. */}
             <SettingsLink to="/settings/data" label="Data & AI" icon={<ShieldIcon />} />
+            {/* Every member reads how notes are written; changing it is an admin's (server-checked). */}
+            <SettingsLink to="/settings/writing" label="Note writing" icon={<PenIcon />} />
             {/* Every member: the roster, and Leave. Managing people stays with owners and admins. */}
             <SettingsLink to="/settings/members" label="Members" icon={<UsersIcon />} />
             {manages && (

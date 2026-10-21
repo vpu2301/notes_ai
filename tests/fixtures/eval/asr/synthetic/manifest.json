@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "notes": "Sprint B3 synthetic code-switch cases, built from the tracked script.json of each case by `make eval-asr-synthetic` (macOS TTS: Anna de, Samantha en, Lesya uk). Audio, reference.json and spans.json are generated and never committed. cs01: German narration with two English clips spliced in with 150 ms joins, so each clip sits inside a narration run (the r02 shape). cs02: Ukrainian interview with one English quote spliced in the same way. cs03: German stand-up with English product terms — the precision case, nothing may be decoded again. Not a WER gold set for real speech.",
+  "recordings": [
+    {"id": "cs01", "language": "de", "kinds": ["podcast"], "minutes": 0.9, "speakers": 2, "split": "dev", "licence": "synthetic macOS TTS, no person recorded", "has_code_switch": true, "code_switch_languages": ["en"]},
+    {"id": "cs02", "language": "uk", "kinds": ["interview"], "minutes": 0.7, "speakers": 2, "split": "dev", "licence": "synthetic macOS TTS, no person recorded", "has_code_switch": true, "code_switch_languages": ["en"]},
+    {"id": "cs03", "language": "de", "kinds": ["internal_meeting"], "minutes": 0.6, "speakers": 1, "split": "dev", "licence": "synthetic macOS TTS, no person recorded"}
+  ]
+}

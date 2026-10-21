@@ -20,7 +20,7 @@ from models import ConfigError, ProviderError
 from .. import audit_kinds
 from ..config import settings
 from ..deps import get_state, requires
-from ..domain import access
+from ..domain import access, ai_settings, model_params
 from ..domain import notes_repository as repo
 from ..domain.ask import NoteAsker, Turn, sections_for_prompt
 from .notes_from_transcript import _fetch_transcript, _transcript_text
@@ -133,6 +133,11 @@ async def ask_note(
         if not access.can_read_transcript(row, claims):
             # W3: answers come from the note alone when the transcript is not shared with them.
             source_job_id = None
+        # N0: the workspace's temperature and answer length for "Ask this note".
+        params = model_params.from_stored(
+            (await ai_settings.fetch(conn, tenant_id=claims.tid)).model_params,
+            tenant_id=claims.tid,
+        )
     if version is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="note not found")
 
@@ -160,6 +165,8 @@ async def ask_note(
             transcript=transcript,
             history=history,
             question=body.question,
+            temperature=params.ask_temperature,
+            max_tokens=params.ask_max_tokens,
         )
     except ConfigError as exc:
         logger.warning("ask.model_not_configured: %s", exc)

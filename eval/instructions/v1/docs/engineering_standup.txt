@@ -1,0 +1,10 @@
+# Reader
+The team; they skim.
+# Length
+Short. Two to four bullets per section.
+# Sections
+No open questions (we track them in Jira). No figure tables.
+# Emphasis
+Blockers, who is waiting on whom, anything that changed the plan.
+# Wording
+Use "PR" not "pull request"; "prod" not "production". Short headings.

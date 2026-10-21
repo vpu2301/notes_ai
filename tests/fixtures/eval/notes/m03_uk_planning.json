@@ -59,6 +59,16 @@
   ],
   "decisions": [
    "Не додавати темну тему в перший реліз"
+  ],
+  "certainties": [
+   {
+    "match": "вісімдесят відсотків",
+    "certainty": "statement"
+   },
+   {
+    "match": "не додавати темну тему",
+    "certainty": "fact"
+   }
   ]
  }
 }

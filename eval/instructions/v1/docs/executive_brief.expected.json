@@ -1,0 +1,13 @@
+{
+ "length": "short",
+ "summary_sentences": 4,
+ "sections_off": [
+  "topics",
+  "open_questions"
+ ],
+ "avoid": [
+  "synergy",
+  "align",
+  "circle back"
+ ]
+}

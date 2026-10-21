@@ -40,6 +40,16 @@ class Turn(_Model):
     t_start_ms: int = Field(ge=0)
     t_end_ms: int = Field(ge=0)
     text: str
+    # The language the ASR decoded this turn in, when not the meeting's (multilingual sentinels).
+    language: Literal["en", "de", "uk"] | None = None
+
+
+class NoiseMarker(_Model):
+    """A non-speech span the ASR marked (``result["noise"]``)."""
+
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+    kind: Literal["music", "noise", "silence"]
 
 
 class Action(_Model):
@@ -147,9 +157,35 @@ def fact_third(fact: str | dict | KeyFact) -> int | None:
     return None
 
 
+class GoldClaim(_Model):
+    """B4: a claim the recording relays — who makes it, words of it (any one must
+    appear in the claims-table row), and the speaker's verdict words, when there is one."""
+
+    who: str | None = None
+    claim: list[str] = Field(min_length=1)
+    verdict: list[str] = Field(default_factory=list)
+
+
+class GoldCertainty(_Model):
+    """A1: the certainty and holder of one fact, matched by ``match`` — a phrase of its
+    quote or text. ``holder`` is the claimant (never the relayer), or None when nobody
+    named holds it; the scorer compares holders by their last word, case-insensitive."""
+
+    match: str = Field(min_length=3)
+    certainty: Literal[
+        "fact", "estimate", "prediction", "opinion", "proposal", "allegation",
+        "reported", "unproven", "refuted", "statement",
+    ]  # fmt: skip
+    holder: str | None = None
+
+
 class Gold(_Model):
     # v1/v2: strings; v3: KeyFact objects. One file uses one.
     key_facts: list[str | KeyFact] = Field(default_factory=list)
+    # A1: certainty and holder labels on the facts the checklists name.
+    certainties: list[GoldCertainty] = Field(default_factory=list)
+    # B4: the relayed claims the note's claims table must carry.
+    claims: list[GoldClaim] = Field(default_factory=list)
     actions: list[Action] = Field(default_factory=list)
     decisions: list[str] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
@@ -188,6 +224,9 @@ class Meeting(_Model):
     transcript: list[Turn]
     # Gold v3: the human-corrected transcript; faithfulness is scored against both.
     reference_transcript: list[Turn] | None = None
+    noise: list[NoiseMarker] = Field(default_factory=list)
+    # A person's explicit choice of note language (multilingual sentinels); absent = resolved.
+    output_language: Literal["en", "de", "uk"] | None = None
     gold: Gold
 
 

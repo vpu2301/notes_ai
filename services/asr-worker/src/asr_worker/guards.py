@@ -44,6 +44,39 @@ _artefact_total = _meter.create_counter(
 LOOP_MIN_N = 2
 LOOP_MAX_N = 6
 KEEP_REPETITIONS = 2
+# A3 T2 — the decoder's stock outro lines ("Thank you for watching!"), per language: cut when
+# the decoder itself doubts the speech (no_speech_prob) OR a gap of at least this long
+# precedes the segment — a real "thanks for watching" spoken mid-speech, with no gap and a
+# confident decoder, stays. A segment is an outro when its normalised text is one of these
+# or starts with one and has at most OUTRO_MAX_TOKENS tokens.
+STOCK_OUTROS: dict[str, tuple[str, ...]] = {
+    "en": ("thank you for watching", "thanks for watching", "subscribe"),
+    "de": ("danke fürs zuschauen", "untertitel von", "untertitelung"),
+    "uk": ("дякую за перегляд", "підпишіться"),
+}
+OUTRO_GAP_MS = 3_000
+OUTRO_NO_SPEECH = 0.5
+OUTRO_MAX_TOKENS = 6
+# Dropped before grams are compared (B3 T3): a drifting loop swaps these ("das" / "der").
+_ARTICLES = frozenset(
+    [
+        "der",
+        "die",
+        "das",
+        "den",
+        "dem",
+        "des",
+        "ein",
+        "eine",
+        "einen",
+        "einem",
+        "einer",
+        "eines",
+        "the",
+        "a",
+        "an",
+    ]
+)
 
 
 @dataclass
@@ -85,23 +118,65 @@ def _norm(text: str) -> str:
     return " ".join("".join(ch for ch in text.casefold() if ch.isalnum() or ch.isspace()).split())
 
 
-def loop_cut(tokens: Sequence[str], repeats: int) -> int | None:
-    """First token to drop when a 2–6-gram repeats ``repeats`` times (two kept), else None."""
-    norm = [_norm(t) for t in tokens]
+def _loop_tokens(tokens: Sequence[str]) -> tuple[list[str], list[int]]:
+    """Normalised tokens worth comparing (no punctuation, articles or one-character
+    tokens) and each one's index in ``tokens``."""
+    norm: list[str] = []
+    index: list[int] = []
+    for k, token in enumerate(tokens):
+        t = _norm(token)
+        if len(t) < 2 or t in _ARTICLES:
+            continue
+        norm.append(t)
+        index.append(k)
+    return norm, index
+
+
+def _same_gram(a: Sequence[str], b: Sequence[str], ratio: float) -> bool:
+    """True when at least ``ratio`` of the gram's positions carry the same token."""
+    return sum(x == y for x, y in zip(a, b, strict=True)) >= ratio * len(a)
+
+
+def loop_cut(
+    tokens: Sequence[str], repeats: int, *, fuzzy_ratio: float | None = None
+) -> int | None:
+    """First token to drop when a 2–6-gram repeats ``repeats`` times (two kept), else None.
+
+    Grams are compared on normalised tokens without punctuation, articles or
+    one-character tokens, and a near-repeat counts when ``fuzzy_ratio`` of the gram's
+    tokens match (the ``asr_loop_fuzzy_ratio`` setting; 1.0 = exact only), so a drifting loop
+    ("das US -Präsident, das ist der US -Präsident, …") is cut like an exact one.
+    """
+    ratio = settings.asr_loop_fuzzy_ratio if fuzzy_ratio is None else fuzzy_ratio
+    norm, index = _loop_tokens(tokens)
     n_tok = len(norm)
     for n in range(LOOP_MIN_N, LOOP_MAX_N + 1):
         for i in range(0, n_tok - n * repeats + 1):
             gram = norm[i : i + n]
-            if not any(gram):
-                continue
             count = 1
             j = i + n
-            while j + n <= n_tok and norm[j : j + n] == gram:
+            while j + n <= n_tok and _same_gram(gram, norm[j : j + n], ratio):
                 count += 1
                 j += n
             if count >= repeats:
-                return i + n * KEEP_REPETITIONS
+                # Right after the last kept token of the second repetition, so a
+                # dropped article or comma before the third goes with it.
+                return index[i + n * KEEP_REPETITIONS - 1] + 1
     return None
+
+
+def is_stock_outro(text: str, language: str | None) -> bool:
+    """True when ``text`` is a stock outro line of ``language`` (every language when None)."""
+    norm = _norm(text)
+    if not norm:
+        return False
+    tables = [STOCK_OUTROS[language]] if language in STOCK_OUTROS else list(STOCK_OUTROS.values())
+    for phrases in tables:
+        for phrase in phrases:
+            key = _norm(phrase)
+            if norm == key or (norm.startswith(key) and len(norm.split()) <= OUTRO_MAX_TOKENS):
+                return True
+    return False
 
 
 def _artefact_id(phrase: object) -> str:
@@ -143,6 +218,7 @@ def apply(output: TranscriptionOutput, speech: Sequence[SpeechSegment]) -> GateR
 
     previous_norm: str | None = None
     same_run = 0
+    previous_end: int | None = None
     for seg in output.segments:
         d = _diag_for(seg, diags)
         share = speech_share(seg.start_ms, seg.end_ms, speech)
@@ -157,6 +233,18 @@ def apply(output: TranscriptionOutput, speech: Sequence[SpeechSegment]) -> GateR
         ):
             if value is None:
                 unavailable[name] = unavailable.get(name, 0) + 1
+
+        # A3 T2 — a stock outro the decoder writes over the credits: cut when the decoder
+        # doubts the speech or a gap of OUTRO_GAP_MS precedes it; spoken mid-speech it stays.
+        gap_before = seg.start_ms - previous_end if previous_end is not None else seg.start_ms
+        previous_end = max(seg.end_ms, seg.start_ms)
+        if is_stock_outro(seg.text, seg.language or output.language) and (
+            (no_speech is not None and no_speech >= OUTRO_NO_SPEECH) or gap_before >= OUTRO_GAP_MS
+        ):
+            record(seg, "artefact_outro", d, share)
+            if not enabled:
+                out_segments.append(seg)
+            continue
 
         # T3
         phrase = match_artefact(seg.text)

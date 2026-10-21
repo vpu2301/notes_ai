@@ -173,6 +173,11 @@ export function GlossarySection() {
                 <span className="glossary-term">{entry.term}</span>
                 <span className="glossary-kind">{entry.kind}</span>
                 {!sent && <span className="glossary-tag">not sent</span>}
+                {entry.suspect === "grammar_variant" && (
+                  <span className="glossary-tag" title="Its “heard as” differs only by an article, an ending or capitals">
+                    grammar, not a mishearing
+                  </span>
+                )}
                 {entry.heard_as.length > 0 && (
                   <span className="help glossary-heard">heard as {entry.heard_as.join(", ")}</span>
                 )}

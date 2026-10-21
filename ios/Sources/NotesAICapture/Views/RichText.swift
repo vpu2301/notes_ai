@@ -292,6 +292,10 @@ enum RichText {
 struct RichLineExtra {
     var chip: String?
     var names: [String] = []
+    /// P3: the line names no transcript time — a grey mark, nothing to open.
+    var noReference = false
+    /// P3: the check call could not find it — an amber mark; the reason is in the sheet.
+    var unsupported = false
     var open: () -> Void
 }
 
@@ -486,21 +490,31 @@ struct RichLineExtraView: View {
                 DSChip(text: name, tint: DS.accentText, soft: DS.accentSoft)
                     .accessibilityLabel("Name corrected to \(name)")
             }
-            Button(action: extra.open) {
-                HStack(spacing: 3) {
-                    Image(systemName: "quote.opening")
-                        .font(.dsSymbol(10, .semibold))
-                    Text("Source")
-                        .font(.ds(12, .medium))
+            if extra.noReference {
+                // P3: no transcript time on the line — a grey mark that opens nothing.
+                Circle().fill(DS.line).frame(width: 7, height: 7)
+                    .accessibilityLabel("No reference")
+            } else {
+                Button(action: extra.open) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "quote.opening")
+                            .font(.dsSymbol(10, .semibold))
+                        Text("Source")
+                            .font(.ds(12, .medium))
+                        if extra.unsupported {
+                            // P3: the check call could not find it; the reason is in the sheet.
+                            Circle().fill(DS.warn).frame(width: 6, height: 6)
+                        }
+                    }
+                    .foregroundStyle(extra.unsupported ? DS.warn : DS.muted)
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: 24)
+                    .background(Capsule().strokeBorder(extra.unsupported ? DS.warn : DS.line, lineWidth: DS.hairline))
+                    .contentShape(Capsule())
                 }
-                .foregroundStyle(DS.muted)
-                .padding(.horizontal, 8)
-                .frame(minHeight: 24)
-                .background(Capsule().strokeBorder(DS.line, lineWidth: DS.hairline))
-                .contentShape(Capsule())
+                .buttonStyle(.plain)
+                .accessibilityLabel(extra.unsupported ? "Show where this came from (not found in the transcript)" : "Show where this came from")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Show where this came from")
         }
     }
 }

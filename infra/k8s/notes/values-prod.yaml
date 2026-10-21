@@ -49,8 +49,8 @@ commonEnv:
 apps:
   note-worker:
     env:
-      # Off until model_tier_precision >= 0.9 (ADR-0060).
-      MDX_NOTE_ENTITY_MODEL_TIER: "false"
+      # Note instructions: off until N5 decides GA.
+      MDX_NOTE_INSTRUCTIONS_ENABLED: "false"
   auth-service:
     replicas: 2
     # W4: the native flip in production is its own decision (ADR-0069). The chart's

@@ -1,0 +1,44 @@
+{
+ "id": "ml09_en_paraphrase_and_conditions",
+ "language": "en",
+ "meeting_type": "auto",
+ "recorded_on": "2026-10-08",
+ "recording_type": "meeting",
+ "transcript": [
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 0,
+   "t_end_ms": 18000,
+   "text": "Our refund policy changes on the first of December: customers get a full refund within thirty days of purchase."
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 18000,
+   "t_end_ms": 30000,
+   "text": "So from December first, anyone can get all their money back if they ask within thirty days. Got it."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 30000,
+   "t_end_ms": 46000,
+   "text": "And two offers for the Hamburg client. We give a ten percent discount if they sign by Friday."
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 46000,
+   "t_end_ms": 60000,
+   "text": "Separately, we give a ten percent discount if they order more than five hundred licences, whenever they sign."
+  }
+ ],
+ "gold": {
+  "speakers": {
+   "SPEAKER_1": "Ana Ruiz",
+   "SPEAKER_2": "Ben Okafor"
+  },
+  "key_facts": [
+   "Full refund within 30 days from 1 December.",
+   "10% discount if signed by Friday.",
+   "10% discount for more than 500 licences."
+  ]
+ }
+}

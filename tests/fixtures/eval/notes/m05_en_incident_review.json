@@ -59,6 +59,16 @@
   ],
   "decisions": [
    "No manual retry button in the app; the upload queue already retries"
+  ],
+  "certainties": [
+   {
+    "match": "Root cause was the storage credentials",
+    "certainty": "statement"
+   },
+   {
+    "match": "not add a manual retry button",
+    "certainty": "fact"
+   }
   ]
  }
 }

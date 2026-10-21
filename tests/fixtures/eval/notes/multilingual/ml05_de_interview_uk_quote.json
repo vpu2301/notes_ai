@@ -1,0 +1,52 @@
+{
+ "id": "ml05_de_interview_uk_quote",
+ "language": "de",
+ "meeting_type": "auto",
+ "recorded_on": "2026-10-12",
+ "recording_type": "interview",
+ "transcript": [
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 0,
+   "t_end_ms": 20000,
+   "text": "Willkommen zum Interview. Bei mir ist Oksana Melnyk, Bürgermeisterin der ukrainischen Stadt Bila Zerkwa, die gerade in Berlin zu Gast ist. Frau Melnyk, was haben Sie bei Ihrem Besuch vereinbart?"
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 20000,
+   "t_end_ms": 48000,
+   "text": "Ми домовилися з Берліном про партнерство міст. Німецька сторона передасть нам дванадцять автобусів до кінця літа, а ми відкриємо в місті центр професійної освіти для молоді.",
+   "language": "uk"
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 48000,
+   "t_end_ms": 56000,
+   "text": "Und was erwarten Sie von der Bundesregierung?"
+  },
+  {
+   "speaker": "SPEAKER_2",
+   "t_start_ms": 56000,
+   "t_end_ms": 80000,
+   "text": "Нам потрібні генератори для лікарень. Без них ми не переживемо ще одну зиму без світла.",
+   "language": "uk"
+  },
+  {
+   "speaker": "SPEAKER_1",
+   "t_start_ms": 80000,
+   "t_end_ms": 88000,
+   "text": "Vielen Dank für das Gespräch, Frau Melnyk."
+  }
+ ],
+ "output_language": "de",
+ "gold": {
+  "speakers": {
+   "SPEAKER_1": "Katrin Weiß",
+   "SPEAKER_2": "Oksana Melnyk"
+  },
+  "key_facts": [
+   "Berlin übergibt der Stadt bis Ende des Sommers zwölf Busse.",
+   "Die Stadt braucht Generatoren für die Krankenhäuser."
+  ]
+ }
+}

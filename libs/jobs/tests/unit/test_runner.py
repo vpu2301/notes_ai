@@ -3,6 +3,7 @@ attempt, auth never retries, usage flushes with the completion."""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -256,3 +257,65 @@ async def test_on_dead_fires_for_non_retryable_and_unhandled_and_never_raises() 
     assert await r.run_one(_job("a")) is JobStatus.FAILED
     assert await r.run_one(_job("b")) is JobStatus.DEAD
     assert told == ["auth", "unhandled"]
+
+
+async def test_the_runner_installs_its_ledger_as_the_usage_sink() -> None:
+    """Task 4: the worker never called ``install()``; every provider record went to the
+    log sink and the ledger table stayed empty. The runner installs it itself now."""
+    from models import UsageRecord, emit, set_usage_sink
+
+    ledger = UsageLedger(CostTable.empty())
+    try:
+        JobRunner(
+            FakeQueue([]), {"understand": HandlerSpec(run=None)}, worker_id="w1", ledger=ledger
+        )  # type: ignore[arg-type]
+        ledger.begin()
+        emit(
+            UsageRecord(
+                backend="b", model_id="m", operation="chat.complete", ok=False,
+                latency_ms=1, error_kind="rate_limited", attempts=2,
+            )
+        )  # fmt: skip
+        [rec] = ledger.drain()
+    finally:
+        set_usage_sink(None)
+    assert rec.error_kind == "rate_limited" and rec.attempts == 2
+
+
+async def test_the_poll_loop_reaps_expired_leases_before_claiming() -> None:
+    """Task 5 step 0 (Q3): an expired lease is reaped (the job re-queued) once per poll."""
+
+    class ReapingQueue(FakeQueue):
+        def __init__(self, jobs: list[Job]) -> None:
+            super().__init__(jobs)
+            self.reaped = 0
+            # Leased by a dead worker: not claimable until reaped.
+            self.stale, self.pending = list(jobs), []
+
+        async def reap_stale_leases(self, *, grace_seconds: float = 30.0) -> int:
+            self.reaped += 1
+            requeued, self.stale = self.stale, []
+            self.pending.extend(requeued)
+            return len(requeued)
+
+    ran: list[str] = []
+
+    async def handler(ctx: JobContext) -> dict[str, Any]:
+        ran.append(str(ctx.job.id))
+        return {"ok": True}
+
+    job = _job()
+    q = ReapingQueue([job])
+    runner = JobRunner(
+        q, {"understand": HandlerSpec(run=handler)}, worker_id="w1", poll_interval_s=0.01
+    )  # type: ignore[arg-type]
+
+    async def stop_soon() -> None:
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            if ran:
+                break
+        runner.stop()
+
+    await asyncio.gather(runner.run_forever(), stop_soon())
+    assert q.reaped >= 1 and ran == [str(job.id)]

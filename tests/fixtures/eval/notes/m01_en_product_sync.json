@@ -66,6 +66,20 @@
   "decisions": [
    "Extend the pricing test by two more weeks rather than decide on noise",
    "Ship the new onboarding flow to everyone by Friday"
+  ],
+  "certainties": [
+   {
+    "match": "cut drop-off on step two",
+    "certainty": "statement"
+   },
+   {
+    "match": "extend it two more weeks",
+    "certainty": "proposal"
+   },
+   {
+    "match": "inconclusive after two weeks",
+    "certainty": "statement"
+   }
   ]
  }
 }

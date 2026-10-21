@@ -1,0 +1,170 @@
+{
+ "id": "r02_de_midterms_explainer",
+ "sentinel": "B1 regression case r02: the German midterms explainer behind NOTE-2026-00077 (2026-10-19). The transcript is a local fixture (eval/notes/v2/, gitignored; until the ASR artifact is exported it is the PDF reconstruction with synthetic timings). Twenty-two checks; numbers from the original generation below.",
+ "original_generation": {
+  "generation_id": "32059979-adcd-4e42-a397-520479a16f01",
+  "backend": "mistral_eu",
+  "model_id": "mistral-large-2512",
+  "summary_ladder": "composed",
+  "summary_fallback": null,
+  "block_chapters": 3,
+  "blocks_rendered": 3,
+  "block_failures": {
+   "all_bullets_unsupported": 1
+  },
+  "topics_fallback": "chapters",
+  "facts_kept": 37,
+  "facts_by_third": [
+   15,
+   9,
+   13
+  ],
+  "lines_total": 22,
+  "lines_unsupported": {
+   "name": 8,
+   "number": 7,
+   "copied": 0,
+   "example": 0,
+   "descriptive": 0,
+   "unsupported": 0,
+   "first_person": 0,
+   "no_information": 0
+  },
+  "recording_type": "podcast_broadcast",
+  "recording_type_source": "classifier",
+  "language": "de",
+  "speech_ms": 649649,
+  "excluded_ms": 39092,
+  "asr": {
+   "language_sent": "auto",
+   "detected_language": "de",
+   "other_language_chunks": 5
+  }
+ },
+ "must_contain_any": [
+  [
+   "3. November"
+  ],
+  [
+   "35"
+  ],
+  [
+   "5.000",
+   "5000",
+   "fünftausend"
+  ],
+  [
+   "Billion"
+  ],
+  [
+   "34 %",
+   "34 Prozent",
+   "34%"
+  ],
+  [
+   "Goldstone"
+  ],
+  [
+   "Harris"
+  ],
+  [
+   "Briefwahl"
+  ],
+  [
+   "Wählerregister",
+   "Wahlregister"
+  ],
+  [
+   "2020"
+  ],
+  [
+   "unbelegt",
+   "nicht belegt",
+   "unbestätigt"
+  ],
+  [
+   "widerlegt"
+  ]
+ ],
+ "hedged_must_keep": [
+  {
+   "match": "Dollar",
+   "markers": [
+    "versprochen",
+    "verspricht",
+    "Versprechen",
+    "will",
+    "soll",
+    "angekündigt",
+    "kündigt",
+    "Vorschlag",
+    "vorgeschlagen",
+    "würde",
+    "falls",
+    "wenn"
+   ]
+  }
+ ],
+ "must_not_contain": [
+  "ausgezahlt",
+  "Podcast-Folge",
+  "Zunächst —",
+  "Vorschlag —",
+  "Also said",
+  "Technische Daten",
+  "Es sprechen Erzähler/in",
+  "laut politische Beobachter"
+ ],
+ "framing_must_not_contain": [
+  "2024"
+ ],
+ "headings_must_not_match": [
+  "^\\d{1,2}:\\d{2}",
+  "^(?:Trump|Donald Trump)$"
+ ],
+ "sprint": {
+  "must_contain_any": "B1/B2",
+  "hedged_must_keep": "B1",
+  "must_not_contain": "B1",
+  "headings_must_not_match": "B1",
+  "framing": "B1"
+ },
+ "claims_row": [
+  {
+   "who": "Trump",
+   "claim": [
+    "Briefwahl"
+   ],
+   "verdict": [
+    "unbelegt",
+    "nicht belegt",
+    "unbestätigt"
+   ]
+  },
+  {
+   "who": "Trump",
+   "claim": [
+    "Staatsbürger"
+   ],
+   "verdict": [
+    "selten",
+    "Untersuchungen"
+   ]
+  },
+  {
+   "who": "Trump",
+   "claim": [
+    "2020"
+   ],
+   "verdict": [
+    "widerlegt"
+   ]
+  },
+  {
+   "who": "Republikaner",
+   "claim": [
+    "radikal"
+   ]
+  }
+ ]
+}

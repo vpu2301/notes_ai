@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -26,10 +26,11 @@ from note_models import NoteStatus, ReadPurpose
 
 from .. import audit_kinds
 from ..deps import get_state, requires
-from ..domain import access, generation_service
+from ..domain import access, entities, generation_service
 from ..domain import generation_repository as gen_repo
 from ..domain import glossary_repository as glossary_repo
 from ..domain import notes_repository as repo
+from ..domain.writer import NoteTemplate
 from ..notifications import emit_budget_reached
 from . import ai_settings as ai_settings_router
 from .notes_from_transcript import _fetch_transcript
@@ -64,6 +65,81 @@ class Coverage(BaseModel):
     excluded_ms: int
 
 
+class StageModel(BaseModel):
+    """Which backend and model actually answered one stage's calls, and how many failed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage: str
+    backend: str | None
+    model_id: str | None
+    calls: int
+    failed: int
+    """sha256 of every distinct system text this stage sent."""
+    system_hashes: list[str] = []
+
+
+class PromptCall(BaseModel):
+    """One call the resolver says this run makes, and whether a request with exactly
+    that system text was sent (a retry with a suffix is a different text)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    call: str
+    sha: str
+    sent: bool
+
+
+class ModelFallback(BaseModel):
+    """A model override that landed on its fallback in the worker, and why."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    backend: str
+    primary: str
+    reason: str | None
+
+
+class InstructionsRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    """`workspace`, a meeting family (`client`, …) or `note` (N4)."""
+    scope: str
+    version: int
+    """`stale`: the type's text was being updated, so the workspace's wrote the note."""
+    fallback: str | None = None
+
+
+class Provenance(BaseModel):
+    """F1-01 — what produced this run, so two results can be told apart: the code, the
+    prompt and profile versions, both flags as the run EXECUTED them and where they came
+    from (``snapshot``: pinned at enqueue; ``deployment``: a row from before snapshots),
+    the output language and its source, the transcript revision, and the models that
+    answered. While queued or running it is the pinned snapshot; null fields are unknown."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_kind: str
+    build_sha: str | None = None
+    pinned_build_sha: str | None = None
+    prompt_version: str
+    profile_version_id: str | None = None
+    algorithm_version: str | None = None
+    flags_source: Literal["snapshot", "deployment"] | None = None
+    multilingual_evidence: bool | None = None
+    fidelity: bool | None = None
+    final_check: bool | None = None
+    """Flags the worker's deployment has set differently from what the job was pinned with."""
+    flags_differ: list[str] = []
+    output_language: str | None = None
+    output_language_source: str | None = None
+    transcript_rev: int | None = None
+    stages: list[StageModel] = []
+    fallbacks: list[ModelFallback] = []
+    prompt_calls: list[PromptCall] = []
+
+
 class GenerationView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -95,6 +171,13 @@ class GenerationView(BaseModel):
     """Q2 — what was left out, and how the facts cover the recording.
     Empty / null for generations made before Q2."""
     excluded_ranges: list[ExcludedRange] = []
+    """Why a finished note is not complete without missing minutes: ``summary_composed``,
+    ``topics_chapters``, ``claims_unverified``. Empty for complete and older generations."""
+    incomplete_reasons: list[str] = []
+    """The transcript revision it was written from, and the languages its lines were
+    spoken in (recording's first); empty for generations before multilingual evidence."""
+    transcript_rev: int | None = None
+    source_languages: list[str] = []
     coverage: Coverage | None = None
     """Q3 — what the recording was taken to be (``meeting``, ``podcast_broadcast``,
     ``lecture_webinar``, ``voice_memo``, …) and who decided: ``user`` (a
@@ -105,6 +188,18 @@ class GenerationView(BaseModel):
     """The spoken language the run wrote in (``en``/``de``/``uk``), so the
     client labels exclusions in it. Null before Q3."""
     language: str | None = None
+    provenance: Provenance | None = None
+    """N2 — the workspace's note instructions this run was written under; null: none."""
+    instructions: InstructionsRef | None = None
+    """N0 — the version of the workspace's model settings (style and parameters) that
+    wrote it; 0: the defaults; null: a run from before N0."""
+    model_settings_version: int | None = None
+    """P1 — the note as the writer wrote it (Markdown, first line the title); null while
+    queued or running and for runs of the removed path."""
+    text: str | None = None
+    """P2 — the template the note was written with (`meeting`, `public_meeting`, …): the one
+    requested, or the one the model chose under `auto`; null while running or when unknown."""
+    template: str | None = None
 
     @property
     def live(self) -> bool:
@@ -116,6 +211,15 @@ class GenerationStarted(BaseModel):
 
     id: UUID
     status: str
+
+
+class RegenerateRequest(BaseModel):
+    """P2: ``template`` — write the note with this template from now on (``auto`` = the
+    model chooses). Omitted: the note's current choice."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    template: NoteTemplate | None = None
 
 
 class GeneratedItemView(BaseModel):
@@ -152,6 +256,63 @@ class GeneratedItemView(BaseModel):
     figure: dict[str, str] | None = None
     corrections: list[dict[str, str]] = []
     mentions: list[dict[str, str | None]] = []
+    """B4 — what the line is: the speaker's words, one fact, or several. Null for rows
+    written before the column existed."""
+    provenance: Literal["verbatim", "paraphrase", "composed"] | None = None
+    """B4 — a claim row's verdict cell (the label and the speaker's clause)."""
+    verdict: str | None = None
+    """P1 — the item's place in the note (0-based, the Markdown's order), what it is
+    (``bullet``, ``paragraph``, ``vote``, ``claim``, ``table_row``), a table row's cells, and
+    whether its time named no turn exactly (the nearest one is cited)."""
+    position: int = 0
+    table_row: dict[str, Any] | None = None
+    cite_nearest: bool = False
+    """P3 — every turn the line cites, in the Markdown's order (the first is the row's
+    quote); empty for a line without a cite or a row from before P3."""
+    cited_turns: list[CitedTurn] = []
+    """P3 — the optional check call's verdict (``ok`` | ``unsupported``) and its one-line
+    reason; null when the call was off."""
+    check: Literal["ok", "unsupported"] | None = None
+    check_reason: str | None = None
+
+
+class CitedTurn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    turn: int
+    start_ms: int
+    end_ms: int
+    speaker: str | None = None
+    text: str
+    """True when ``text`` is the part of a long turn around the cited moment (``at_ms``)."""
+    excerpt: bool = False
+    at_ms: int | None = None
+
+
+GeneratedItemView.model_rebuild()
+
+
+def _cited_turns(payload: Any) -> list[CitedTurn]:
+    data = _json_object(payload) or {}
+    out: list[CitedTurn] = []
+    for raw in data.get("turns") or []:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            out.append(
+                CitedTurn(
+                    turn=int(raw.get("turn", 0)),
+                    start_ms=int(raw.get("start_ms", 0)),
+                    end_ms=int(raw.get("end_ms", 0)),
+                    speaker=(str(raw["speaker"]) if raw.get("speaker") else None),
+                    text=str(raw.get("text") or ""),
+                    excerpt=bool(raw.get("excerpt") or False),
+                    at_ms=(int(raw["at_ms"]) if raw.get("at_ms") is not None else None),
+                )
+            )
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def _excluded(stats: dict) -> list[ExcludedRange]:
@@ -164,6 +325,14 @@ def _excluded(stats: dict) -> list[ExcludedRange]:
     return out
 
 
+def _source_languages(stats: dict) -> list[str]:
+    """Languages with spoken lines in this generation, the recording's first."""
+    languages = stats.get("languages") or {}
+    first = stats.get("recording_language")
+    spoken = [c for c, v in languages.items() if c != "unknown" and (v or {}).get("lines")]
+    return sorted(spoken, key=lambda c: (c != first, c))
+
+
 def _coverage(stats: dict) -> Coverage | None:
     thirds = stats.get("facts_by_third")
     if not isinstance(thirds, list) or len(thirds) != 3:
@@ -172,6 +341,58 @@ def _coverage(stats: dict) -> Coverage | None:
         facts_by_third=[int(n) for n in thirds],
         speech_ms=int(stats.get("speech_ms") or 0),
         excluded_ms=int(stats.get("excluded_ms") or 0),
+    )
+
+
+def _provenance(row: gen_repo.GenerationRow) -> Provenance:
+    stats = row.stats or {}
+    # The old path listed its calls per stage; the writer (P1) records a count.
+    calls = stats.get("calls")
+    per_stage = [c for c in calls if isinstance(c, dict)] if isinstance(calls, list) else []
+    sent = {str(h) for c in per_stage for h in c.get("system_hashes") or []}
+    pinned = getattr(row, "config_snapshot", None) or {}
+    runtime = stats.get("runtime") or {}
+    flags = runtime.get("flags") or {}
+    final = (stats.get("final_check") or {}).get("ran")
+    return Provenance(
+        run_kind=str(runtime.get("run_kind") or pinned.get("run_kind") or "generation"),
+        build_sha=runtime.get("build_sha"),
+        pinned_build_sha=runtime.get("pinned_build_sha") or pinned.get("build_sha"),
+        prompt_version=row.prompt_version,
+        profile_version_id=stats.get("profile_version_id") or pinned.get("profile_version_id"),
+        algorithm_version=runtime.get("algorithm_version") or pinned.get("algorithm_version"),
+        flags_source=runtime.get("flags_source") or ("snapshot" if pinned else None),
+        multilingual_evidence=flags.get("multilingual", pinned.get("multilingual")),
+        fidelity=flags.get("fidelity", pinned.get("fidelity")),
+        final_check=final if final is not None else runtime.get("final_check"),
+        flags_differ=[str(f) for f in runtime.get("flags_differ") or []],
+        output_language=stats.get("output_language") or pinned.get("output_language"),
+        output_language_source=stats.get("output_language_source"),
+        transcript_rev=getattr(row, "transcript_rev", None),
+        stages=[
+            StageModel(
+                stage=str(c.get("stage")),
+                backend=c.get("backend"),
+                model_id=c.get("model_id"),
+                calls=int(c.get("calls") or 0),
+                failed=int(c.get("failed") or 0),
+                system_hashes=[str(h) for h in c.get("system_hashes") or []],
+            )
+            for c in per_stage
+        ],
+        prompt_calls=[
+            PromptCall(call=str(call), sha=str(sha), sent=str(sha) in sent)
+            for call, sha in (stats.get("prompt_hashes") or {}).items()
+        ],
+        fallbacks=[
+            ModelFallback(
+                kind=str(f.get("kind")),
+                backend=str(f.get("backend")),
+                primary=str(f.get("primary")),
+                reason=f.get("reason"),
+            )
+            for f in runtime.get("fallbacks") or []
+        ],
     )
 
 
@@ -197,10 +418,40 @@ def _view(row: gen_repo.GenerationRow) -> GenerationView:
             else None
         ),
         excluded_ranges=_excluded(stats),
+        incomplete_reasons=[str(r) for r in stats.get("incomplete") or []],
+        transcript_rev=getattr(row, "transcript_rev", None),
+        source_languages=_source_languages(stats),
         coverage=_coverage(stats),
         recording_type=stats.get("recording_type"),
         recording_type_source=stats.get("recording_type_source"),
         language=stats.get("language"),
+        provenance=_provenance(row),
+        instructions=_instructions_ref(stats),
+        model_settings_version=_model_settings_version(stats),
+        text=getattr(row, "text", None),
+        template=_template_of(stats),
+    )
+
+
+def _template_of(stats: dict[str, object]) -> str | None:
+    """The template the writer used (``stats.template``); ``auto`` means none was chosen."""
+    name = stats.get("template")
+    return str(name) if name and name != "auto" else None
+
+
+def _model_settings_version(stats: dict[str, object]) -> int | None:
+    ref = stats.get("model_params")
+    return int(ref["version"]) if isinstance(ref, dict) and "version" in ref else None
+
+
+def _instructions_ref(stats: dict[str, object]) -> InstructionsRef | None:
+    ref = stats.get("instructions")
+    if not isinstance(ref, dict) or "version" not in ref:
+        return None
+    return InstructionsRef(
+        scope=str(ref.get("scope") or "workspace"),
+        version=int(ref["version"]),
+        fallback=str(ref["fallback"]) if ref.get("fallback") else None,
     )
 
 
@@ -243,18 +494,18 @@ async def regenerate(
     note_id: UUID,
     request: Request,
     claims: Annotated[Claims, Depends(requires("note.write", "note"))],
+    body: RegenerateRequest | None = None,
 ) -> GenerationStarted:
-    """Write the note again from the recording.
-
-    Safe to press: the writer rewrites only sections nobody has edited
-    since the last run, so the author's own text survives a regenerate
-    exactly as it survives the first pass.
-    """
+    """Write the note again from the recording, with the template the body names (P2) or
+    the note's current one. The items of the newest run replace the older run's."""
     state = get_state()
     auth_header = request.headers.get("authorization") or ""
+    template = body.template if body is not None else None
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         note = access.require_edit(await repo.fetch_note(conn, note_id=note_id), claims)
+        if template is not None and template != getattr(note, "template", None):
+            await repo.set_template(conn, note_id=note_id, template=template)
         if note.status != NoteStatus.DRAFT:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
@@ -341,7 +592,12 @@ async def regenerate(
                 },
             ) from None
 
-    await _audit(claims, audit_kinds.NOTE_GENERATION_REQUESTED, note_id, {"reason": "regenerate"})
+    await _audit(
+        claims,
+        audit_kinds.NOTE_GENERATION_REQUESTED,
+        note_id,
+        {"reason": "regenerate", **({"template": template} if template else {})},
+    )
     return GenerationStarted(id=generation_id, status=generation_status)
 
 
@@ -391,9 +647,87 @@ async def generated_items(
             figure=_figure(_get(r, "payload")) if r["kind"] == "figure" else None,
             corrections=_undecided(_json_list(_get(r, "corrections")), reviewed),
             mentions=_json_list(_get(r, "mentions")),
+            provenance=_line_provenance(_get(r, "provenance")),
+            verdict=_verdict(_get(r, "payload")) if r["kind"] == "claim" else None,
+            position=int(_get(r, "position") or 0),
+            table_row=_json_object(_get(r, "table_row")),
+            cite_nearest=bool(_get(r, "cite_nearest") or False),
+            cited_turns=_cited_turns(_get(r, "payload")),
+            check=_get(r, "check") if _get(r, "check") in ("ok", "unsupported") else None,
+            check_reason=_get(r, "check_reason"),
         )
         for r in rows
     ]
+
+
+class NoteCorrectionSummary(BaseModel):
+    """A3 T3 — one respelling the current generation applied: what the transcript says
+    (``surface``), what the note says (``canonical``), and on how many lines."""
+
+    surface: str
+    canonical: str
+    source: str
+    count: int
+
+
+def summarise_corrections(rows: list[object], rejected: set[str]) -> list[NoteCorrectionSummary]:
+    """The respellings of the current generation's rows, one per (surface, canonical),
+    counted by line; a respelling the author rejected is left out."""
+    counts: dict[tuple[str, str], NoteCorrectionSummary] = {}
+    for r in rows:
+        for c in _json_list(_get(r, "corrections")):
+            if not isinstance(c, dict):
+                continue
+            surface = str(c.get("surface", "")).strip()
+            canonical = str(c.get("canonical", "")).strip()
+            if not surface or not canonical or surface == canonical:
+                continue
+            if glossary_repo.name_review_tag(surface, canonical) in rejected:
+                continue
+            key = (surface, canonical)
+            if key in counts:
+                counts[key].count += 1
+            else:
+                counts[key] = NoteCorrectionSummary(
+                    surface=surface, canonical=canonical, source=str(c.get("source", "")), count=1
+                )
+    return sorted(counts.values(), key=lambda c: (-c.count, c.surface))
+
+
+@router.get("/{note_id}/corrections/summary", response_model=list[NoteCorrectionSummary])
+async def corrections_summary(
+    note_id: UUID,
+    claims: Annotated[Claims, Depends(requires("note.read", "note"))],
+    purpose: ReadPurpose | None = None,
+) -> list[NoteCorrectionSummary]:
+    """A3 — the respellings the note's current generation applied, for the transcript
+    tab's "heard as" marker. The surfaces are transcript words, so the read goes through
+    the same rules as the items."""
+    state = get_state()
+    async with tenant_connection(state.app_pool, claims.tid) as conn:
+        note = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
+        access.require_read_purpose(note, claims, purpose)
+        rows = await gen_repo.items_for_note(conn, note_id=note_id, current_only=True)
+        rejected = await glossary_repo.rejected_name_tags(conn, note_id=note_id)
+    return summarise_corrections(list(rows), rejected)
+
+
+def _line_provenance(value: object) -> Literal["verbatim", "paraphrase", "composed"] | None:
+    return value if value in ("verbatim", "paraphrase", "composed") else None  # type: ignore[return-value]
+
+
+def _verdict(value: object) -> str | None:
+    """B4 — a claim row's verdict from its payload."""
+    import json
+
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    if isinstance(value, dict) and isinstance(value.get("verdict"), str):
+        return value["verdict"] or None
+    return None
 
 
 def _get(row: object, key: str) -> object:
@@ -405,16 +739,31 @@ def _get(row: object, key: str) -> object:
 
 
 def _undecided(corrections: list[object], reviewed: set[str]) -> list[object]:
-    """The respellings still waiting for the author; one decided anywhere in the note is not offered again."""
-    if not reviewed:
-        return corrections
+    """The respellings still waiting for the author; one decided anywhere in the note is not
+    offered again, and grammar is never offered (F2-02: an article, an ending or capitals,
+    as rows stored before the guard may still carry)."""
     return [
         c
         for c in corrections
         if not isinstance(c, dict)
-        or glossary_repo.name_review_tag(str(c.get("surface", "")), str(c.get("canonical", "")))
-        not in reviewed
+        or (
+            entities.is_correction(str(c.get("surface", "")), str(c.get("canonical", "")))
+            and glossary_repo.name_review_tag(
+                str(c.get("surface", "")), str(c.get("canonical", ""))
+            )
+            not in reviewed
+        )
     ]
+
+
+def _json_object(value: object) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        import json
+
+        value = json.loads(value)
+    return dict(value) if isinstance(value, dict) else None
 
 
 def _json_list(value: object) -> list:

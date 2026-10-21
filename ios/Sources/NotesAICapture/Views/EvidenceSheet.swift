@@ -11,24 +11,58 @@ struct EvidenceSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    if row.isUnsupported {
+                        // P3: the check call could not find it; the words stay as written.
+                        DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill",
+                                 text: "Not found in the transcript" + (row.checkReason.map { " — \($0)" } ?? ""))
+                    }
                     HStack(spacing: 6) {
                         if let chip = row.chipLabel {
                             DSChip(text: chip, tint: DS.text3, soft: DS.surface2)
+                        }
+                        if row.citeNearest == true {
+                            DSChip(text: "Nearest match", tint: DS.text3, soft: DS.surface2)
+                        }
+                        // B4: "Wörtlich" / "Paraphrase" / "Aus 2 Aussagen", in the note's language.
+                        if let mark = row.provenanceLabel(language: model.generation?.language) {
+                            DSChip(text: mark, tint: DS.text3, soft: DS.surface2)
                         }
                         ForEach(row.correctedNames, id: \.self) { name in
                             DSChip(text: name, tint: DS.accentText, soft: DS.accentSoft)
                         }
                     }
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("“\(row.quote)”")
-                            .font(.ds(17))
-                            .foregroundStyle(DS.text1)
-                            .lineSpacing(3)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(meta)
-                            .font(.dsMeta)
-                            .foregroundStyle(DS.muted)
+                        // B4: the claim row's verdict, the presenter's own words.
+                        if let verdict = row.verdict, !verdict.isEmpty {
+                            Text(verdict)
+                                .font(.ds(15, .semibold))
+                                .foregroundStyle(DS.text2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        // P3: every cited turn, the first in full colour, its time highlighted.
+                        ForEach(Array(row.turnsCited.enumerated()), id: \.element.id) { index, turn in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    Text(formatElapsed(ms: turn.momentMs))
+                                        .font(.dsMono(12, .semibold))
+                                        .foregroundStyle(DS.accentText)
+                                        .padding(.horizontal, 4)
+                                        .background(RoundedRectangle(cornerRadius: 3, style: .continuous).fill(DS.accentSoft))
+                                    if let speaker = turn.speaker, !speaker.isEmpty {
+                                        Text(speaker).font(.dsMeta).foregroundStyle(DS.muted)
+                                    }
+                                    if index == 0, let mark = row.provenanceLabel(language: model.generation?.language) {
+                                        Text(mark).font(.dsMeta).foregroundStyle(DS.muted)
+                                    }
+                                }
+                                Text("“\(turn.text)”")
+                                    .font(.ds(index == 0 ? 17 : 15))
+                                    .foregroundStyle(index == 0 ? DS.text1 : DS.text2)
+                                    .lineSpacing(3)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
                     }
                     .dsCard()
                     if model.canSeekTranscript {
@@ -68,11 +102,6 @@ struct EvidenceSheet: View {
         }
     }
 
-    private var meta: String {
-        var parts = [formatElapsed(ms: row.startMs)]
-        if let speaker = row.speakerName, !speaker.isEmpty { parts.append(speaker) }
-        return parts.joined(separator: " · ")
-    }
 }
 
 /// Short / Standard / Detailed. A view — never an edit, never a model call.

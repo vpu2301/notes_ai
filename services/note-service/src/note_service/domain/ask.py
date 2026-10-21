@@ -124,7 +124,7 @@ class NoteAsker:
                     self._settings_source.cached if self._settings_source is not None else None
                 ),
             )
-        resolved = self._registry.resolve(workspace_id, "understand")
+        resolved = self._registry.resolve(workspace_id, "ask")
         provider = self._providers.get(resolved.name)
         if provider is None:
             provider = build_chat_provider(resolved)
@@ -142,8 +142,11 @@ class NoteAsker:
         transcript: str,
         history: list[Turn],
         question: str,
+        temperature: float = 0.2,
+        max_tokens: int | None = None,
     ) -> Answer:
-        """Raises ``models.ConfigError`` / ``models.ProviderError``."""
+        """Raises ``models.ConfigError`` / ``models.ProviderError``. ``temperature`` and
+        ``max_tokens``: the workspace's (N0); unset, this service's defaults."""
         provider = self._provider(workspace_id)
         prompt = build_prompt(
             title=title,
@@ -155,7 +158,11 @@ class NoteAsker:
             max_chars=self._max_chars,
         )
         result = await provider.complete(
-            prompt, None, max_tokens=self._max_tokens, temperature=0.2, system=SYSTEM_PROMPT
+            prompt,
+            None,
+            max_tokens=max_tokens or self._max_tokens,
+            temperature=temperature,
+            system=SYSTEM_PROMPT,
         )
         return Answer(
             text=result.text.strip(),

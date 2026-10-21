@@ -1,14 +1,29 @@
+import type { NoteTemplate } from "../api/types";
+import { NOTE_TEMPLATE_LABELS } from "../api/types";
 import { recordingTypeLabel } from "../lib/generation";
 import { SparkleIcon } from "./icons";
 
-/** Meta-row pill: the template's name, unless the engine found the recording is something else. */
+/**
+ * Meta-row pill: the template the writer used (P2), else what the engine found the recording
+ * to be, else the catalogue template's name.
+ */
 export function DocTypePill({
   templateName,
   recordingType,
+  template,
 }: {
   templateName: string | null;
   recordingType?: string | null;
+  template?: NoteTemplate | null;
 }) {
+  if (template && template !== "auto") {
+    return (
+      <span className="doc-pill tpl" title="The template this note was written with">
+        <SparkleIcon size={13} />
+        {NOTE_TEMPLATE_LABELS[template] ?? template}
+      </span>
+    );
+  }
   const detected = recordingTypeLabel(recordingType);
   if (detected) {
     return (

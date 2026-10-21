@@ -135,10 +135,19 @@ const COPY: Record<string, string> = {
   budget_exceeded:
     "This workspace has used its AI budget for the month, so this note was not written up. Your recording and your own notes are untouched.",
   generation_in_progress: "This note is already being written.",
+  // Note instructions (Settings › Data & AI › Note writing).
+  not_available: "This isn't available in this workspace yet.",
+  text_too_long: "The instructions are too long. Shorten them and try again.",
+  scope_unknown: "That kind of meeting doesn't have its own instructions.",
   too_many_generations: "This note has been rewritten as often as it can be today.",
   no_transcript: "This note was not made from a recording, so there is nothing to write it from.",
   note_cancelled: "This note was cancelled and cannot be written again.",
   not_available_for_type: "A one-to-one and an interview debrief have no client version.",
+  // Note templates (P2).
+  template_unknown: "There is no template with that name.",
+  template_too_long: "The template is too long. Shorten it and try again.",
+  template_empty: "The template is empty. Write at least one section heading.",
+  template_no_sections: "A template needs at least one section heading (a line starting with ## ).",
 
   // ── note roles & comments (W3) ────────────────────────────────────
   // The `required` level is in the problem; the sentence does not need it.

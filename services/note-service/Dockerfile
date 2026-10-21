@@ -47,9 +47,12 @@ RUN uv pip install --system --no-cache \
 # sitecustomize re-registers /deps as one so they activate.
 RUN printf 'import site\nsite.addsitedir("/deps")\n' > /deps/sitecustomize.py
 
+# The commit the image was built from, shown with every generation (F1-01).
+ARG BUILD_SHA=unknown
 ENV PYTHONPATH=/deps \
     PATH="/deps/bin:${PATH}" \
-    MODELS_CONFIG=/app/config/models.yaml
+    MODELS_CONFIG=/app/config/models.yaml \
+    MDX_BUILD_SHA=${BUILD_SHA}
 
 COPY --chown=nonroot:nonroot config/models.yaml /app/config/models.yaml
 

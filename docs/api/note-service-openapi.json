@@ -760,6 +760,62 @@
         "title": "ChoiceOption",
         "type": "object"
       },
+      "CitedTurn": {
+        "additionalProperties": false,
+        "properties": {
+          "at_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At Ms"
+          },
+          "end_ms": {
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "excerpt": {
+            "default": false,
+            "title": "Excerpt",
+            "type": "boolean"
+          },
+          "speaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speaker"
+          },
+          "start_ms": {
+            "title": "Start Ms",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "turn": {
+            "title": "Turn",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "turn",
+          "start_ms",
+          "end_ms",
+          "text"
+        ],
+        "title": "CitedTurn",
+        "type": "object"
+      },
       "ClientSectionView": {
         "additionalProperties": false,
         "properties": {
@@ -1461,6 +1517,26 @@
             "format": "uuid",
             "title": "Asr Job Id",
             "type": "string"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "enum": [
+                  "meeting",
+                  "client_call",
+                  "interview",
+                  "broadcast",
+                  "public_meeting",
+                  "memo",
+                  "auto"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
           },
           "template_id": {
             "anyOf": [
@@ -2242,6 +2318,45 @@
             ],
             "title": "Certainty"
           },
+          "check": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ok",
+                  "unsupported"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check"
+          },
+          "check_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Reason"
+          },
+          "cite_nearest": {
+            "default": false,
+            "title": "Cite Nearest",
+            "type": "boolean"
+          },
+          "cited_turns": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CitedTurn"
+            },
+            "title": "Cited Turns",
+            "type": "array"
+          },
           "cites": {
             "default": [],
             "items": {
@@ -2369,6 +2484,27 @@
             "title": "Placement",
             "type": "string"
           },
+          "position": {
+            "default": 0,
+            "title": "Position",
+            "type": "integer"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "enum": [
+                  "verbatim",
+                  "paraphrase",
+                  "composed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provenance"
+          },
           "quote": {
             "title": "Quote",
             "type": "string"
@@ -2403,9 +2539,32 @@
             "title": "Start Ms",
             "type": "integer"
           },
+          "table_row": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Row"
+          },
           "text": {
             "title": "Text",
             "type": "string"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
           }
         },
         "required": [
@@ -2533,6 +2692,24 @@
             "title": "Id",
             "type": "string"
           },
+          "incomplete_reasons": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Incomplete Reasons",
+            "type": "array"
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InstructionsRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "language": {
             "anyOf": [
               {
@@ -2555,9 +2732,30 @@
             ],
             "title": "Model Id"
           },
+          "model_settings_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Settings Version"
+          },
           "prompt_version": {
             "title": "Prompt Version",
             "type": "string"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Provenance"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "recording_type": {
             "anyOf": [
@@ -2592,6 +2790,14 @@
             ],
             "title": "Sections Written"
           },
+          "source_languages": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Languages",
+            "type": "array"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -2613,6 +2819,39 @@
             },
             "title": "Suggested Sections",
             "type": "array"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "transcript_rev": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transcript Rev"
           },
           "windows_done": {
             "anyOf": [
@@ -2709,6 +2948,206 @@
           "terms"
         ],
         "title": "HintView",
+        "type": "object"
+      },
+      "InstructionsRef": {
+        "additionalProperties": false,
+        "properties": {
+          "fallback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scope",
+          "version"
+        ],
+        "title": "InstructionsRef",
+        "type": "object"
+      },
+      "InstructionsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "InstructionsRequest",
+        "type": "object"
+      },
+      "InstructionsView": {
+        "additionalProperties": false,
+        "description": "The stored text. The ``profile``, ``understood``, ``guidance`` and ``not_applied``\nfields are the shape clients read; since Sprint R0 nothing compiles the text, so they\nare empty and ``compile_status`` is always ``compiled``.",
+        "properties": {
+          "base_versions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Base Versions",
+            "type": "object"
+          },
+          "can_edit": {
+            "title": "Can Edit",
+            "type": "boolean"
+          },
+          "compile_error_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compile Error Kind"
+          },
+          "compile_status": {
+            "title": "Compile Status",
+            "type": "string"
+          },
+          "default_text": {
+            "default": "",
+            "title": "Default Text",
+            "type": "string"
+          },
+          "extends": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScopeRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "guidance": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Guidance",
+            "type": "array"
+          },
+          "max_chars": {
+            "title": "Max Chars",
+            "type": "integer"
+          },
+          "not_applied": {
+            "items": {
+              "$ref": "#/components/schemas/NotAppliedView"
+            },
+            "title": "Not Applied",
+            "type": "array"
+          },
+          "profile": {
+            "additionalProperties": true,
+            "title": "Profile",
+            "type": "object"
+          },
+          "profile_hash": {
+            "title": "Profile Hash",
+            "type": "string"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeState"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "source": {
+            "default": "workspace",
+            "enum": [
+              "workspace",
+              "default"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "understood": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Understood",
+            "type": "array"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scope",
+          "version",
+          "text",
+          "profile",
+          "profile_hash",
+          "compile_status",
+          "compile_error_kind",
+          "understood",
+          "guidance",
+          "not_applied",
+          "can_edit",
+          "max_chars",
+          "updated_at",
+          "updated_by"
+        ],
+        "title": "InstructionsView",
         "type": "object"
       },
       "ItemCounts": {
@@ -3242,6 +3681,85 @@
         "title": "MetadataDiff",
         "type": "object"
       },
+      "ModelFallback": {
+        "additionalProperties": false,
+        "description": "A model override that landed on its fallback in the worker, and why.",
+        "properties": {
+          "backend": {
+            "title": "Backend",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "primary": {
+            "title": "Primary",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "kind",
+          "backend",
+          "primary",
+          "reason"
+        ],
+        "title": "ModelFallback",
+        "type": "object"
+      },
+      "ModelParamsBody": {
+        "additionalProperties": false,
+        "description": "The whole parameter set: every field is required, so a client cannot clear a value\nby leaving it out (a partial object is a 422).",
+        "properties": {
+          "ask_max_tokens": {
+            "title": "Ask Max Tokens",
+            "type": "integer"
+          },
+          "ask_temperature": {
+            "title": "Ask Temperature",
+            "type": "number"
+          },
+          "max_concurrency": {
+            "title": "Max Concurrency",
+            "type": "integer"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
+          },
+          "temperature": {
+            "title": "Temperature",
+            "type": "number"
+          }
+        },
+        "required": [
+          "temperature",
+          "max_output_tokens",
+          "max_concurrency",
+          "ask_temperature",
+          "ask_max_tokens"
+        ],
+        "title": "ModelParamsBody",
+        "type": "object"
+      },
       "MovedView": {
         "additionalProperties": false,
         "properties": {
@@ -3276,6 +3794,30 @@
           "media_state"
         ],
         "title": "MovedView",
+        "type": "object"
+      },
+      "NotAppliedView": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "reason",
+          "message"
+        ],
+        "title": "NotAppliedView",
         "type": "object"
       },
       "NoteAmendmentType": {
@@ -3319,6 +3861,35 @@
           "template_schema_version"
         ],
         "title": "NoteContent",
+        "type": "object"
+      },
+      "NoteCorrectionSummary": {
+        "description": "A3 T3 \u2014 one respelling the current generation applied: what the transcript says\n(``surface``), what the note says (``canonical``), and on how many lines.",
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "surface": {
+            "title": "Surface",
+            "type": "string"
+          }
+        },
+        "required": [
+          "surface",
+          "canonical",
+          "source",
+          "count"
+        ],
+        "title": "NoteCorrectionSummary",
         "type": "object"
       },
       "NoteCreatedResponse": {
@@ -4158,6 +4729,208 @@
         "title": "ProcessorView",
         "type": "object"
       },
+      "PromptCall": {
+        "additionalProperties": false,
+        "description": "One call the resolver says this run makes, and whether a request with exactly\nthat system text was sent (a retry with a suffix is a different text).",
+        "properties": {
+          "call": {
+            "title": "Call",
+            "type": "string"
+          },
+          "sent": {
+            "title": "Sent",
+            "type": "boolean"
+          },
+          "sha": {
+            "title": "Sha",
+            "type": "string"
+          }
+        },
+        "required": [
+          "call",
+          "sha",
+          "sent"
+        ],
+        "title": "PromptCall",
+        "type": "object"
+      },
+      "Provenance": {
+        "additionalProperties": false,
+        "description": "F1-01 \u2014 what produced this run, so two results can be told apart: the code, the\nprompt and profile versions, both flags as the run EXECUTED them and where they came\nfrom (``snapshot``: pinned at enqueue; ``deployment``: a row from before snapshots),\nthe output language and its source, the transcript revision, and the models that\nanswered. While queued or running it is the pinned snapshot; null fields are unknown.",
+        "properties": {
+          "algorithm_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Algorithm Version"
+          },
+          "build_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Sha"
+          },
+          "fallbacks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModelFallback"
+            },
+            "title": "Fallbacks",
+            "type": "array"
+          },
+          "fidelity": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fidelity"
+          },
+          "final_check": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Check"
+          },
+          "flags_differ": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Flags Differ",
+            "type": "array"
+          },
+          "flags_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "snapshot",
+                  "deployment"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flags Source"
+          },
+          "multilingual_evidence": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multilingual Evidence"
+          },
+          "output_language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Language"
+          },
+          "output_language_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Language Source"
+          },
+          "pinned_build_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned Build Sha"
+          },
+          "profile_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Version Id"
+          },
+          "prompt_calls": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PromptCall"
+            },
+            "title": "Prompt Calls",
+            "type": "array"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "run_kind": {
+            "title": "Run Kind",
+            "type": "string"
+          },
+          "stages": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StageModel"
+            },
+            "title": "Stages",
+            "type": "array"
+          },
+          "transcript_rev": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transcript Rev"
+          }
+        },
+        "required": [
+          "run_kind",
+          "prompt_version"
+        ],
+        "title": "Provenance",
+        "type": "object"
+      },
       "PublicLinkRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4269,6 +5042,34 @@
           "code"
         ],
         "title": "RedeemRequest",
+        "type": "object"
+      },
+      "RegenerateRequest": {
+        "additionalProperties": false,
+        "description": "P2: ``template`` \u2014 write the note with this template from now on (``auto`` = the\nmodel chooses). Omitted: the note's current choice.",
+        "properties": {
+          "template": {
+            "anyOf": [
+              {
+                "enum": [
+                  "meeting",
+                  "client_call",
+                  "interview",
+                  "broadcast",
+                  "public_meeting",
+                  "memo",
+                  "auto"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          }
+        },
+        "title": "RegenerateRequest",
         "type": "object"
       },
       "RelocateRequest": {
@@ -4445,6 +5246,50 @@
           "notes"
         ],
         "title": "RevokeAllResult",
+        "type": "object"
+      },
+      "ScopeRef": {
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scope",
+          "version"
+        ],
+        "title": "ScopeRef",
+        "type": "object"
+      },
+      "ScopeState": {
+        "additionalProperties": false,
+        "description": "One scope that has a text: its version.",
+        "properties": {
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scope",
+          "version",
+          "stale"
+        ],
+        "title": "ScopeState",
         "type": "object"
       },
       "SearchHitDTO": {
@@ -4783,6 +5628,36 @@
           "may_choose_premium": {
             "title": "May Choose Premium",
             "type": "boolean"
+          },
+          "model_params": {
+            "additionalProperties": true,
+            "title": "Model Params",
+            "type": "object"
+          },
+          "model_params_effective": {
+            "additionalProperties": true,
+            "title": "Model Params Effective",
+            "type": "object"
+          },
+          "model_params_limits": {
+            "additionalProperties": true,
+            "title": "Model Params Limits",
+            "type": "object"
+          },
+          "model_params_measured": {
+            "additionalProperties": true,
+            "title": "Model Params Measured",
+            "type": "object"
+          },
+          "model_params_valid": {
+            "default": true,
+            "title": "Model Params Valid",
+            "type": "boolean"
+          },
+          "model_params_version": {
+            "default": 0,
+            "title": "Model Params Version",
+            "type": "integer"
           },
           "month_to_date_cents": {
             "title": "Month To Date Cents",
@@ -5308,6 +6183,22 @@
       "SharedSection": {
         "additionalProperties": false,
         "properties": {
+          "line_marks": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Line Marks",
+            "type": "object"
+          },
+          "line_times": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "Line Times",
+            "type": "object"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -5722,6 +6613,63 @@
         "title": "SpacesResponse",
         "type": "object"
       },
+      "StageModel": {
+        "additionalProperties": false,
+        "description": "Which backend and model actually answered one stage's calls, and how many failed.",
+        "properties": {
+          "backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backend"
+          },
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "system_hashes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "System Hashes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "stage",
+          "backend",
+          "model_id",
+          "calls",
+          "failed"
+        ],
+        "title": "StageModel",
+        "type": "object"
+      },
       "StartMeetingRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5768,6 +6716,26 @@
             "format": "date-time",
             "title": "Started At",
             "type": "string"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "enum": [
+                  "meeting",
+                  "client_call",
+                  "interview",
+                  "broadcast",
+                  "public_meeting",
+                  "memo",
+                  "auto"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
           },
           "template_id": {
             "anyOf": [
@@ -5965,6 +6933,31 @@
           "terms"
         ],
         "title": "SynonymGroupOut",
+        "type": "object"
+      },
+      "TemplateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "language": {
+            "enum": [
+              "en",
+              "de",
+              "uk"
+            ],
+            "title": "Language",
+            "type": "string"
+          },
+          "markdown": {
+            "maxLength": 40000,
+            "title": "Markdown",
+            "type": "string"
+          }
+        },
+        "required": [
+          "language",
+          "markdown"
+        ],
+        "title": "TemplateBody",
         "type": "object"
       },
       "TemplateDefinition": {
@@ -6337,6 +7330,68 @@
         "title": "TemplateSummary",
         "type": "object"
       },
+      "TemplateView": {
+        "additionalProperties": false,
+        "properties": {
+          "can_edit": {
+            "title": "Can Edit",
+            "type": "boolean"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "markdown": {
+            "title": "Markdown",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "builtin",
+              "workspace"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          }
+        },
+        "required": [
+          "name",
+          "language",
+          "source",
+          "markdown",
+          "can_edit"
+        ],
+        "title": "TemplateView",
+        "type": "object"
+      },
       "TermView": {
         "additionalProperties": false,
         "properties": {
@@ -6360,6 +7415,14 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "ignored_heard_as": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ignored Heard As",
+            "type": "array"
           },
           "in_hint": {
             "default": true,
@@ -6387,6 +7450,18 @@
               }
             ],
             "title": "Source Note Id"
+          },
+          "suspect": {
+            "anyOf": [
+              {
+                "const": "grammar_variant",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suspect"
           },
           "term": {
             "title": "Term",
@@ -6551,6 +7626,16 @@
             ],
             "title": "Generation Enabled"
           },
+          "model_params": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelParamsBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "monthly_budget_cents": {
             "anyOf": [
               {
@@ -6578,6 +7663,11 @@
               }
             ],
             "title": "Provider"
+          },
+          "reset_model_params": {
+            "default": false,
+            "title": "Reset Model Params",
+            "type": "boolean"
           },
           "tier": {
             "anyOf": [
@@ -7704,6 +8794,327 @@
         ]
       }
     },
+    "/v1/ai/instructions": {
+      "delete": {
+        "operationId": "delete_instructions_v1_ai_instructions_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Instructions",
+        "tags": [
+          "ai"
+        ]
+      },
+      "get": {
+        "operationId": "get_instructions_v1_ai_instructions_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Instructions",
+        "tags": [
+          "ai"
+        ]
+      },
+      "put": {
+        "description": "Save. Identical text is not a new version; an empty text clears the instructions.",
+        "operationId": "put_instructions_v1_ai_instructions_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstructionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Instructions",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/v1/ai/instructions/{scope}": {
+      "delete": {
+        "operationId": "delete_scoped_instructions_v1_ai_instructions__scope__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Scoped Instructions",
+        "tags": [
+          "ai"
+        ]
+      },
+      "get": {
+        "operationId": "get_scoped_instructions_v1_ai_instructions__scope__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Scoped Instructions",
+        "tags": [
+          "ai"
+        ]
+      },
+      "put": {
+        "description": "A meeting type's text, extending the workspace text.",
+        "operationId": "put_scoped_instructions_v1_ai_instructions__scope__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstructionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Scoped Instructions",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
     "/v1/ai/settings": {
       "get": {
         "description": "Every member may see who processes their meetings.",
@@ -7807,6 +9218,286 @@
           }
         },
         "summary": "Put Ai Settings",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/v1/ai/templates": {
+      "get": {
+        "description": "Every template, in `language` (default: every language), built-in or overridden.",
+        "operationId": "list_templates_v1_ai_templates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "uk",
+                    "en",
+                    "de"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Language"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateView"
+                  },
+                  "title": "Response List Templates V1 Ai Templates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Templates",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/v1/ai/templates/{name}": {
+      "delete": {
+        "description": "Back to the built-in text. Idempotent.",
+        "operationId": "delete_template_v1_ai_templates__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
+              "default": "en",
+              "enum": [
+                "en",
+                "de",
+                "uk"
+              ],
+              "title": "Language",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Template",
+        "tags": [
+          "ai"
+        ]
+      },
+      "get": {
+        "operationId": "get_template_v1_ai_templates__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
+              "default": "en",
+              "enum": [
+                "en",
+                "de",
+                "uk"
+              ],
+              "title": "Language",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Template",
+        "tags": [
+          "ai"
+        ]
+      },
+      "put": {
+        "description": "This workspace's text for the template; the writer reads it from the next note on.",
+        "operationId": "put_template_v1_ai_templates__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Template",
         "tags": [
           "ai"
         ]
@@ -10524,6 +12215,86 @@
         ]
       }
     },
+    "/v1/notes/{note_id}/corrections/summary": {
+      "get": {
+        "description": "A3 \u2014 the respellings the note's current generation applied, for the transcript\ntab's \"heard as\" marker. The surfaces are transcript words, so the read goes through\nthe same rules as the items.",
+        "operationId": "corrections_summary_v1_notes__note_id__corrections_summary_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "purpose",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReadPurpose"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Purpose"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NoteCorrectionSummary"
+                  },
+                  "title": "Response Corrections Summary V1 Notes  Note Id  Corrections Summary Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Corrections Summary",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
     "/v1/notes/{note_id}/dates/{item_key}.ics": {
       "get": {
         "operationId": "date_ics_v1_notes__note_id__dates__item_key__ics_get",
@@ -10977,7 +12748,7 @@
         ]
       },
       "post": {
-        "description": "Write the note again from the recording.\n\nSafe to press: the writer rewrites only sections nobody has edited\nsince the last run, so the author's own text survives a regenerate\nexactly as it survives the first pass.",
+        "description": "Write the note again from the recording, with the template the body names (P2) or\nthe note's current one. The items of the newest run replace the older run's.",
         "operationId": "regenerate_v1_notes__note_id__generation_post",
         "parameters": [
           {
@@ -11007,6 +12778,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RegenerateRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "content": {
@@ -11032,6 +12820,183 @@
         "summary": "Regenerate",
         "tags": [
           "notes"
+        ]
+      }
+    },
+    "/v1/notes/{note_id}/instructions": {
+      "delete": {
+        "operationId": "delete_note_instructions_v1_notes__note_id__instructions_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Note Instructions",
+        "tags": [
+          "ai"
+        ]
+      },
+      "get": {
+        "operationId": "get_note_instructions_v1_notes__note_id__instructions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Note Instructions",
+        "tags": [
+          "ai"
+        ]
+      },
+      "put": {
+        "description": "Save this note's text. Empty text removes it. The client then rewrites the note\n(``POST \u2026/generation``).",
+        "operationId": "put_note_instructions_v1_notes__note_id__instructions_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstructionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructionsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Note Instructions",
+        "tags": [
+          "ai"
         ]
       }
     },

@@ -204,7 +204,7 @@ struct HomeView: View {
         withAnimation(.easeOut(duration: 0.18)) { searchOpen = false }
     }
 
-    /// The ⋯ beside New meeting: the other ways to start, then what kind of meeting the next one is.
+    /// The ⋯ beside New meeting: the other ways to start, what kind of meeting the next one is, and its template (P2).
     private func startItems() -> [DSMenuItem] {
         var items = NewNoteMenu.items(app: app, capture: capture)
         items.append(.separator)
@@ -212,6 +212,13 @@ struct HomeView: View {
         for type in MeetingType.allCases {
             items.append(.item(type.label, checked: capture.meetingType == type) {
                 capture.meetingType = type
+            })
+        }
+        items.append(.separator)
+        items.append(.header("Template"))
+        for template in NoteTemplate.allCases {
+            items.append(.item(template.label, checked: capture.template == template) {
+                capture.template = template
             })
         }
         return items

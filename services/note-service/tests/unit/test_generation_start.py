@@ -12,6 +12,7 @@ import pytest
 
 from note_service.domain import generation_repository as gen_repo
 from note_service.domain import generation_service as gen
+from note_service.domain import prompts
 
 
 class _Store:
@@ -64,3 +65,7 @@ async def test_snapshot_aad_row_id_and_job_payload_agree(monkeypatch: pytest.Mon
     assert created[0]["generation_id"] == generation_id
     assert created[0]["snapshot_key"] == put["key"]
     assert queue.payloads == [{"generation_id": str(generation_id), "note_id": str(note)}]
+
+    # The row names the writer prompt's version (Sprint R0: no pinned profile).
+    assert created[0]["prompt_version"] == prompts.PROMPT_VERSION
+    assert "config_snapshot" not in created[0]

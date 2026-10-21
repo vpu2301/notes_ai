@@ -22,8 +22,8 @@ from zoneinfo import ZoneInfo
 import httpx
 from dateutil import rrule as du_rrule
 
+from .agenda import agenda_lines
 from .google_calendar import CalendarEvent, CalendarInfo, find_meeting_url
-from .meeting_doc.agenda import agenda_lines
 
 logger = logging.getLogger(__name__)
 

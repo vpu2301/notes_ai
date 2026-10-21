@@ -656,6 +656,8 @@ def codeswitch(
     gold segment they overlap most."""
     regions = spans.get("code_switch", [])
     covered = 0
+    ref_words = 0
+    errors = 0
     words = _hyp_words(hyp)
     for r in regions:
         lang = r["language"]
@@ -676,6 +678,9 @@ def codeswitch(
         right_language = sum(1 for w in in_region if w[3] == lang) >= max(1, len(in_region) / 2)
         if present / len(ref_toks) >= CODESWITCH_MIN_SHARE and right_language:
             covered += 1
+        # Word errors of the foreign run itself (Sprint B3): verbatim in its own language.
+        ref_words += len(ref_toks)
+        errors += _word_errors(ref_toks, _grouped_tokens(in_region))
     translated = 0
     for seg in hyp.segments:
         if not seg.text.strip():
@@ -694,8 +699,21 @@ def codeswitch(
     return {
         "codeswitch_regions": len(regions),
         "codeswitch_covered": covered,
+        "codeswitch_ref_words": ref_words,
+        "codeswitch_errors": errors,
         "translated_segments": translated,
     }
+
+
+def _word_errors(ref_toks: list[str], hyp_toks: list[str]) -> int:
+    if not ref_toks:
+        return len(hyp_toks)
+    if not hyp_toks:
+        return len(ref_toks)
+    import jiwer
+
+    out = jiwer.process_words(" ".join(ref_toks), " ".join(hyp_toks))
+    return out.substitutions + out.deletions + out.insertions
 
 
 NONSPEECH_MARK_MIN_MS = 5000
@@ -919,7 +937,11 @@ def aggregate(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "speech_coverage": _ratio(total("transcribed_ms"), total("speech_ms")),
         "unexplained_gaps": int(total("unexplained_gaps")),
         "codeswitch_coverage": _ratio(total("codeswitch_covered"), total("codeswitch_regions")),
+        "codeswitch_wer": _ratio(total("codeswitch_errors"), total("codeswitch_ref_words")),
         "translated_segments": int(total("translated_segments")),
+        "segments_switched": int(total("segment_lid_switched")),
+        "loop_events": int(total("loop_events")),
+        "rediscover_rate": _ratio(total("segment_lid_suspects"), total("segments_decoded")),
         "nonspeech_marked": _ratio(total("nonspeech_marked"), total("nonspeech_regions")),
         "nonspeech_content_lines": int(total("nonspeech_content_lines")),
         "word_ts_median_ms": statistics.median(ts) if ts else None,

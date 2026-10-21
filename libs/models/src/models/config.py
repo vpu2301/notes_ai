@@ -24,12 +24,9 @@ OperationKind = Literal["chat", "asr", "embed", "diarization"]
 
 # operation -> kind; a new operation needs an entry here and a routing row in models.yaml.
 OPERATION_KINDS: dict[str, OperationKind] = {
-    "understand": "chat",
-    "summarize": "chat",
-    # Short calls around a generation, routed on their own so a small model can take them.
-    "classify": "chat",
-    "title": "chat",
-    "entities": "chat",
+    # The note writer (Sprint P1) and "Ask this note".
+    "write": "chat",
+    "ask": "chat",
     "asr": "asr",
     "embed": "embed",
 }

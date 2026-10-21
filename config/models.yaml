@@ -17,7 +17,6 @@ backends:
     context_window: ${DEV_MAC_CONTEXT:-16384}
     max_concurrency: 1
     timeout_seconds: 900
-    # The engine gives a small local model simpler work; off for every hosted backend.
     small_model: ${DEV_MAC_SMALL_MODEL:-true}
     # `none` keeps a reasoning family (Qwen3) from spending the budget on <think>; empty = not sent.
     request_overrides: { reasoning_effort: "${DEV_MAC_REASONING_EFFORT:-none}" }
@@ -32,8 +31,8 @@ backends:
     timeout_seconds: 3600
     processor: { name: "Developer machine", region: "local" }
 
-  # ── Mistral AI, EU-hosted API: the large model writes, the small one
-  # classifies/names/corrects. Ids pinned to a dated version, never `-latest`
+  # ── Mistral AI, EU-hosted API: the large model writes; the small one is
+  # registered for evals. Ids pinned to a dated version, never `-latest`
   # (docs/models/PINS.md); zero retention is an account setting.
   mistral_eu:
     kind: openai_compat
@@ -239,15 +238,15 @@ backends:
     kind: recorded
     enabled_in_envs: [test]
     cassette_dir: ${MODELS_CASSETTE_DIR:-tests/fixtures/eval/cassettes}
+    # The checklists' cassettes are cut on mistral_eu: replay with its window, or a long
+    # transcript is windowed differently and no cassette key matches.
+    context_window: 131072
 
 # operation -> tier -> backend, as staging/prod run it (dev is overridden below).
 routing:
-  understand: { standard: hf_eu,     premium: hf_eu }
-  summarize:  { standard: hf_eu,     premium: hf_eu }
-  classify:   { standard: hf_eu,     premium: hf_eu }
-  title:      { standard: hf_eu,     premium: hf_eu }
-  entities:   { standard: hf_eu,     premium: hf_eu }
-  asr:        { standard: hf_eu_asr, premium: hf_eu_asr }
+  write: { standard: hf_eu,     premium: hf_eu }
+  ask:   { standard: hf_eu,     premium: hf_eu }
+  asr:   { standard: hf_eu_asr, premium: hf_eu_asr }
 
 # Per-environment override of an operation kind (or operation), applied
 # before routing. The fallback is taken on missing_env, forced
@@ -255,9 +254,6 @@ routing:
 env_overrides:
   dev:
     chat: { primary: mistral_eu, fallback: dev_mac }
-    classify: { primary: mistral_eu_small, fallback: dev_mac }
-    title: { primary: mistral_eu_small, fallback: dev_mac }
-    entities: { primary: mistral_eu_small, fallback: dev_mac }
     asr: dev_mac_asr
     diarization: dev_mac_diar
   test: { chat: recorded, asr: inproc_cpu_asr }

@@ -1,14 +1,16 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { correctName } from "../api/generation";
-import { rememberTerm } from "../api/glossary";
+import { forgetTerm, listGlossary, rememberTerm } from "../api/glossary";
 import { messageFor } from "../lib/errorCopy";
-import type { GeneratedItem } from "../api/types";
+import type { GeneratedItem, GlossaryTerm } from "../api/types";
 
 export interface NameCorrection {
   itemKey: string;
   surface: string;
   canonical: string;
   source: string;
+  /** "person" only with evidence of a person; anything else is saved as a term. */
+  entity?: "person" | "term";
 }
 
 const MARKED = /([A-ZÄÖÜА-ЯІЇЄҐ][\w'’-]+(?:\s[A-ZÄÖÜА-ЯІЇЄҐ][\w'’-]+)?) \(\?\)/gu;
@@ -27,8 +29,23 @@ export function correctionsOf(rows: GeneratedItem[]): { fixed: NameCorrection[];
   return { fixed: [...fixed.values()], doubted: [...doubted] };
 }
 
-/** Accept = glossary term with the heard spelling as a mishearing; reject = line reverts.
- *  Nothing is learned without a person saying so. */
+/** The saved entry that already holds this respelling, if any. */
+function savedFor(c: NameCorrection, terms: GlossaryTerm[]): GlossaryTerm | undefined {
+  const heard = c.surface.toLocaleLowerCase();
+  return terms.find(
+    (t) => t.term === c.canonical && t.heard_as.some((h) => h.toLocaleLowerCase() === heard),
+  );
+}
+
+type RowState =
+  | { kind: "saved"; term: GlossaryTerm }
+  | { kind: "kept"; term: GlossaryTerm }
+  | { kind: "rejected" }
+  | { kind: "failed"; message: string };
+
+/** Accept = a glossary term with the heard spelling as a mishearing; reject = line reverts.
+ *  "In the glossary" is shown only from the server: its answer to the save, or an entry it
+ *  already holds. Nothing is learned without a person saying so. */
 export function CorrectionsPanel({
   noteId,
   rows,
@@ -41,30 +58,83 @@ export function CorrectionsPanel({
   onChanged: () => void;
 }) {
   const { fixed, doubted } = useMemo(() => correctionsOf(rows), [rows]);
-  const [done, setDone] = useState<Record<string, string>>({});
+  const [terms, setTerms] = useState<GlossaryTerm[]>([]);
+  const [state, setState] = useState<Record<string, RowState>>({});
   const [busy, setBusy] = useState<string | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (fixed.length === 0) return;
+    // What is persisted decides; a failed read just shows nothing as saved.
+    listGlossary()
+      .then((saved) => setTerms(Array.isArray(saved) ? saved : []))
+      .catch(() => setTerms([]));
+  }, [fixed.length]);
+
   if (fixed.length === 0 && doubted.length === 0) return null;
 
-  const act = async (c: NameCorrection, accept: boolean) => {
-    const id = `${c.surface}→${c.canonical}`;
-    setBusy(id);
-    setProblem(null);
+  const accept = async (c: NameCorrection, id: string) => {
+    let saved: GlossaryTerm;
     try {
-      if (accept) {
-        await rememberTerm({ term: c.canonical, kind: "person", heard_as: [c.surface] });
-      }
+      saved = await rememberTerm({
+        term: c.canonical,
+        kind: c.entity === "person" ? "person" : "term",
+        heard_as: [c.surface],
+        note_id: noteId,
+      });
+    } catch (err) {
+      setState((s) => ({ ...s, [id]: { kind: "failed", message: messageFor(err) } }));
+      return;
+    }
+    setTerms((t) => [...t.filter((x) => x.id !== saved.id), saved]);
+    const learned = savedFor(c, [saved]);
+    setState((s) => ({ ...s, [id]: learned ? { kind: "saved", term: saved } : { kind: "kept", term: saved } }));
+    try {
       await correctName(noteId, c.itemKey, {
         expected_version: version,
-        action: accept ? "correction_accepted" : "correction_rejected",
+        action: "correction_accepted",
         surface: c.surface,
         canonical: c.canonical,
         source: c.source,
       });
-      setDone((d) => ({ ...d, [id]: accept ? "Added to the glossary" : "Put back as heard" }));
-      if (!accept) onChanged();
+    } catch {
+      // The glossary entry stands; the note just asks again next time.
+    }
+  };
+
+  const reject = async (c: NameCorrection, id: string) => {
+    try {
+      await correctName(noteId, c.itemKey, {
+        expected_version: version,
+        action: "correction_rejected",
+        surface: c.surface,
+        canonical: c.canonical,
+        source: c.source,
+      });
+      setState((s) => ({ ...s, [id]: { kind: "rejected" } }));
+      onChanged();
     } catch (err) {
-      setProblem(messageFor(err));
+      setState((s) => ({ ...s, [id]: { kind: "failed", message: messageFor(err) } }));
+    }
+  };
+
+  const remove = async (term: GlossaryTerm, id: string) => {
+    try {
+      await forgetTerm(term.id);
+      setTerms((t) => t.filter((x) => x.id !== term.id));
+      setState((s) => {
+        const next = { ...s };
+        delete next[id];
+        return next;
+      });
+    } catch (err) {
+      setState((s) => ({ ...s, [id]: { kind: "failed", message: messageFor(err) } }));
+    }
+  };
+
+  const run = async (id: string, work: () => Promise<void>) => {
+    setBusy(id);
+    try {
+      await work();
     } finally {
       setBusy(null);
     }
@@ -76,19 +146,56 @@ export function CorrectionsPanel({
       <ul>
         {fixed.map((c) => {
           const id = `${c.surface}→${c.canonical}`;
+          const current = state[id];
+          const persisted = current?.kind === "saved" ? current.term : savedFor(c, terms);
           return (
             <li key={id}>
               <span>
                 <span className="muted">heard</span> {c.surface} → <strong>{c.canonical}</strong>
+                {c.entity !== "person" && <span className="muted"> (suggested term)</span>}
               </span>
-              {done[id] ? (
-                <span className="muted">{done[id]}</span>
+              {persisted ? (
+                <>
+                  <span className="muted">In the glossary</span>
+                  {persisted.can_delete && (
+                    <button
+                      type="button"
+                      className="btn ghost sm"
+                      disabled={busy === id}
+                      onClick={() => void run(id, () => remove(persisted, id))}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </>
+              ) : current?.kind === "kept" ? (
+                <span className="muted">
+                  Saved “{current.term.term}”, but “{c.surface}” was not learned: it only differs in
+                  grammar
+                </span>
+              ) : current?.kind === "rejected" ? (
+                <span className="muted">Put back as heard</span>
               ) : (
                 <>
-                  <button type="button" className="btn sm" disabled={busy === id} onClick={() => void act(c, true)}>
-                    Accept
+                  {current?.kind === "failed" && (
+                    <span className="danger-text" role="alert">
+                      Not saved: {current.message}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="btn sm"
+                    disabled={busy === id}
+                    onClick={() => void run(id, () => accept(c, id))}
+                  >
+                    {current?.kind === "failed" ? "Try again" : "Accept"}
                   </button>
-                  <button type="button" className="btn ghost sm" disabled={busy === id} onClick={() => void act(c, false)}>
+                  <button
+                    type="button"
+                    className="btn ghost sm"
+                    disabled={busy === id}
+                    onClick={() => void run(id, () => reject(c, id))}
+                  >
                     Reject
                   </button>
                 </>
@@ -104,7 +211,6 @@ export function CorrectionsPanel({
           </li>
         ))}
       </ul>
-      {problem && <p className="banner banner-warn">{problem}</p>}
     </section>
   );
 }

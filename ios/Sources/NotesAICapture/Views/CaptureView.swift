@@ -251,6 +251,24 @@ struct MeetingTypePicker: View {
     }
 }
 
+/// P2 — the writer's template for the next note. "Automatic" lets the model choose.
+struct NoteTemplatePicker: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            DSSegmentedPill(
+                options: NoteTemplate.allCases.map { .init($0, label: $0.label) },
+                selection: $capture.template,
+                height: 30)
+                .padding(.horizontal, 1)
+        }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Template")
+    }
+}
+
 /// The one button. Dark, like the web's create button.
 struct NewMeetingButton: View {
     @EnvironmentObject private var capture: CaptureViewModel
@@ -288,6 +306,7 @@ struct CaptureBar: View {
                 if !keyboardShown, app.capabilities.canRecord {
                     VStack(spacing: 8) {
                         MeetingTypePicker()
+                        NoteTemplatePicker()
                         NewMeetingButton(fill: true, height: 50)
                     }
                 }

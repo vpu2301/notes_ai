@@ -53,7 +53,6 @@ def create_app() -> FastAPI:
         title="Template Service",
         description="Baseline service template. Copy `services/_template/` to create a new service.",
         version="0.1.0",
-        openapi_version="3.1.0",
         lifespan=_lifespan,
         docs_url="/docs",
         redoc_url="/redoc",

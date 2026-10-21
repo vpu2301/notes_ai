@@ -337,12 +337,19 @@ services:
     build:
       context: .
       dockerfile: services/note-service/Dockerfile
+      # `BUILD_SHA=$(git rev-parse --short HEAD) docker compose build`: shown with every run.
+      args:
+        BUILD_SHA: "${BUILD_SHA:-unknown}"
     restart: unless-stopped
     environment: &note-env
       <<: [*common-env, *auth-env, *postgres-dsns, *cors-env, *s3-env]
       ASR_SERVICE_BASE_URL: http://asr-service:8000
       # manual = plan changes apply at once without payment (service default: none).
       MDX_BILLING_PROVIDER: "${MDX_BILLING_PROVIDER:-manual}"
+      # Note instructions (N1): on in dev; production stays off until N5.
+      MDX_NOTE_INSTRUCTIONS_ENABLED: "${MDX_NOTE_INSTRUCTIONS_ENABLED:-true}"
+      # P3: the optional check call after writing; off unless asked for.
+      MDX_NOTE_CHECK: "${MDX_NOTE_CHECK:-false}"
       # Without this the default redis://localhost resolves to the container
       # itself and every notification publish silently no-ops.
       REDIS_URL: redis://redis:6379/0
@@ -402,6 +409,8 @@ services:
     build:
       context: .
       dockerfile: services/note-service/Dockerfile
+      args:
+        BUILD_SHA: "${BUILD_SHA:-unknown}"
     restart: unless-stopped
     command: ["python", "-m", "note_service.worker"]
     environment: *note-env

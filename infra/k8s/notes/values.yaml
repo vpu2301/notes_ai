@@ -243,8 +243,8 @@ apps:
       MDX_MASTER_KEY_PATH: /etc/mdx/master.key
       ENV: staging
       MODELS_CONFIG: /app/config/models.yaml
-      # Staging only (ADR-0060); prod stays off until precision >= 0.9.
-      MDX_NOTE_ENTITY_MODEL_TIER: "true"
+      # Note instructions (N1): on in staging; production stays off until N5.
+      MDX_NOTE_INSTRUCTIONS_ENABLED: "true"
     secretEnv: [mdx-hf-endpoints]
     masterKey: true
     podLabels:

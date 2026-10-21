@@ -1,51 +1,52 @@
-"""The ``note.generate`` job (note-worker): a transcript becomes a document.
+"""The ``note.generate`` job (note-worker): a transcript becomes a note.
 
-Writes twice: items after extract/verify/merge, then summary and topics after
-reduce. Both go through `meeting_doc.writer`, which never overwrites a person's
-text; a re-run after a crash writes nothing new because the section hashes match.
+    load the note and the transcript snapshot (tenant context)
+    → writer.write(...)                         # Sprint P1: one call per window + a merge
+    → store the Markdown as written, and the items parsed from it, in order
+    → stats, usage, build stamp
+
+No branch, no flag, no fallback: a failed model call is retried by the job runner and
+nothing else. Sprint R0 removed the old path (extract / verify / compose / lint).
+Window outputs are cached in the transcript store beside the snapshot, so a worker that
+dies mid-window does not pay for the finished windows again.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import time
-from datetime import UTC, datetime
+from dataclasses import dataclass
 from typing import Any, Final
 from uuid import UUID
 
 from db import tenant_connection
+from models import throttle
 from note_models import NoteStatus
 
-from .. import generation_metrics
-from ..domain import carry_over, note_title
-from ..domain import generation_repository as gen_repo
-from ..domain import meetings_repository as meetings
-from ..domain import notes_repository as repo
-from ..domain.meeting_doc import (
-    classify,
-    doclint,
-    pipeline,
+from .. import build_info, generation_metrics
+from ..domain import (
+    checker,
+    families,
+    lines,
+    model_params,
+    note_apply,
+    note_markdown,
     prompts,
-    roles,
-    types,
-    windows,
+    transcript,
     writer,
 )
-from ..domain.meeting_doc.render import RenderedSection
+from ..domain import generation_repository as gen_repo
+from ..domain import meetings_repository as meetings
+from ..domain import note_instructions_repository as note_instructions_repo
+from ..domain import notes_repository as repo
+from ..domain import templates_repository as templates_repo
+from ..domain.action_items import item_key, normalise_text
 
 logger = logging.getLogger(__name__)
 
-STEP_EXTRACT = "extract"
-STEP_WRITE_ITEMS = "write_items"
-STEP_REDUCE = "reduce"
-STEP_WRITE_DOC = "write_doc"
-
-# Roles the first write covers: what the reader came for.
-ITEM_ROLES = frozenset(
-    {roles.DECISIONS, roles.ACTION_ITEMS, roles.OPEN_QUESTIONS, roles.RISKS,
-     roles.NEXT_MEETING, roles.AGENDA, roles.ATTENDEES}
-)  # fmt: skip
+STEP_WRITE: Final = "write"
+# The window outputs of a run in progress, beside its transcript snapshot.
+PARTS_SUFFIX: Final = ".parts.json"
 
 
 class GenerationDeps:
@@ -57,33 +58,78 @@ class GenerationDeps:
         app_pool: Any,
         transcripts_store: Any,
         provider_for: Any,
-        audit_writer: Any = None,
-        shadow_provider_for: Any = None,
-        shadow_percent: int = 0,
-        entity_model_tier: bool = False,
-        operation_provider_for: Any = None,
-        coverage_retry_budget_s_per_hour: float | None = None,
+        build_sha: str = "",
+        fallbacks: Any = None,
+        note_instructions: bool = False,
+        check_enabled: bool = False,
+        settings_row: Any = None,
     ) -> None:
         self.app_pool = app_pool
         self.transcripts_store = transcripts_store
+        # `(workspace_id) -> provider`: the workspace's routed writer.
         self.provider_for = provider_for
-        # `(workspace_id, operation) -> provider` for the short calls; None: the writing model.
-        self.operation_provider_for = operation_provider_for
-        self.audit_writer = audit_writer
-        # Candidate backend run beside the real one on a sample; output thrown away.
-        self.shadow_provider_for = shadow_provider_for
-        self.shadow_percent = shadow_percent
-        self.entity_model_tier = entity_model_tier
-        self.coverage_retry_budget_s_per_hour = coverage_retry_budget_s_per_hour
+        # P3: the optional check call after writing (MDX_NOTE_CHECK).
+        self.check_enabled = check_enabled
+        # This process's code, and `() -> [{kind, backend, primary, reason}]`: routing
+        # overrides that landed on their fallback. Both go into every run's provenance.
+        self.build_sha = build_sha
+        self.fallbacks = fallbacks
+        # N1: read the stored note-writing text (MDX_NOTE_INSTRUCTIONS_ENABLED).
+        self.note_instructions = note_instructions
+        # N0: `tenant_id -> SettingsRow` as of the refresh before this run (writing style,
+        # model parameters); None: the defaults.
+        self.settings_row = settings_row
 
 
-def _retry_budget(deps: GenerationDeps, built: list[Any] | None) -> float | None:
-    """Seconds the generation may run before the coverage retry is skipped."""
-    per_hour = getattr(deps, "coverage_retry_budget_s_per_hour", None)
-    if per_hour is None or not built:
+@dataclass(frozen=True, slots=True)
+class _ModelSettings:
+    """The workspace's model parameters for this run (N0), capped by the backend."""
+
+    params: Any
+    version: int
+
+    @property
+    def ref(self) -> dict[str, Any]:
+        return {"version": self.version, "hash": model_params.canonical_hash(self.params)}
+
+
+def model_settings(deps: Any, tenant_id: UUID, provider: Any) -> _ModelSettings:
+    """The row as refreshed before this run, validated and capped by the writer's backend.
+    No row (or no source): the defaults."""
+    from ..domain import ai_settings
+
+    source = getattr(deps, "settings_row", None)
+    row = source(tenant_id) if source is not None else ai_settings.SettingsRow(tenant_id=tenant_id)
+    params = model_params.effective(
+        model_params.from_stored(
+            row.model_params, tenant_id=tenant_id, version=row.model_params_version
+        ),
+        max_concurrency=getattr(provider, "max_concurrency", None),
+    )
+    return _ModelSettings(params, row.model_params_version)
+
+
+async def _instructions_text(
+    conn: Any, deps: Any, tenant_id: UUID, note_id: UUID, family: str | None
+) -> str | None:
+    """The stored note-writing text this run writes under: the note's own (N4), else its
+    meeting type's, else the workspace's; None when off or nothing is stored. The text is
+    passed as written — nothing compiles it (Sprint R0)."""
+    if not getattr(deps, "note_instructions", False):
         return None
-    hours = max(0, built[-1].end_ms - built[0].start_ms) / 3_600_000
-    return per_hour * max(hours, 1 / 60)
+    own = await note_instructions_repo.fetch_note(conn, note_id=note_id)
+    if own is not None and own.text.strip():
+        return own.text
+    scope = family if family in note_instructions_repo.TYPE_SCOPES else None
+    scopes = (
+        (note_instructions_repo.WORKSPACE, scope) if scope else (note_instructions_repo.WORKSPACE,)
+    )
+    rows = await note_instructions_repo.fetch_many(conn, tenant_id=tenant_id, scopes=scopes)
+    for key in (scope, note_instructions_repo.WORKSPACE):
+        row = rows.get(key) if key else None
+        if row is not None and row.text.strip():
+            return row.text
+    return None
 
 
 async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dict) -> dict:
@@ -102,17 +148,22 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
                 conn, generation_id=generation_id, status=gen_repo.SUPERSEDED, finished=True
             )
             return {"skipped": "note_gone"}
-        previous = await gen_repo.last_written(conn, note_id=note_id, before=generation_id)
-        previous_hashes = (previous.stats or {}).get("section_hashes", {}) if previous else {}
-        template_roles, template_code = await _role_map(conn, note_id=note_id)
-        template_family = types.family_for_template(template_code)
-        # Still-open items from the previous meeting, so the extractor can tick them off.
-        carried = await _carried(conn, note_id=note_id)
         meeting = await meetings.fetch(conn, note_id=note_id)
-        counterpart = _counterpart(meeting)
+        meeting_type = getattr(meeting, "meeting_type", None)
+        family = families.family_for_type(meeting_type)
+        instructions = await _instructions_text(conn, deps, tenant_id, note_id, family.meeting_type)
+        template_code = await _template_code(conn, note_id=note_id)
         await gen_repo.mark(
-            conn, generation_id=generation_id, status=gen_repo.RUNNING, step=STEP_EXTRACT
+            conn, generation_id=generation_id, status=gen_repo.RUNNING, step=STEP_WRITE
         )
+    template_name = writer.template_name_for(
+        meeting_type,
+        template_code,
+        chosen=getattr(note, "template_source", None) == "user",
+        note_template=getattr(note, "template", None),
+    )
+    started_at = getattr(meeting, "started_at", None) if meeting else None
+    recording_date = started_at.date() if started_at else None
 
     if not generation.snapshot_key:
         return await _fail(deps, tenant_id, generation_id, "no_snapshot")
@@ -127,659 +178,302 @@ async def handle_generate(deps: GenerationDeps, *, tenant_id: UUID, payload: dic
         return await _fail(deps, tenant_id, generation_id, "snapshot_unreadable")
 
     provider = await deps.provider_for(str(tenant_id))
-    classify_provider = await _operation_provider(deps, tenant_id, "classify", provider)
-    title_provider = await _operation_provider(deps, tenant_id, "title", provider)
-    entity_provider = await _operation_provider(deps, tenant_id, "entities", provider)
+    settings = model_settings(deps, tenant_id, provider)
     language = str(result.get("language") or "en")
-    # Relative dates resolve against the day it was RECORDED, not today.
-    started = getattr(meeting, "started_at", None) if meeting else None
-    meeting_date = (started or note.created_at or datetime.now(UTC)).date()
+    template_override = await _template_override(deps, tenant_id, template_name, language)
+    turns = transcript.turns_from_result(result)
+    turns = transcript.prepare_turns(turns, language=language).turns
+    if not turns:
+        return await _fail(deps, tenant_id, generation_id, "empty_transcript")
+    parts_key = generation.snapshot_key + PARTS_SUFFIX
+    done_parts = await _cached_parts(deps, tenant_id, generation_id, parts_key)
 
-    # The recording type decides which kinds are extracted; classify what the
-    # pipeline will read (adverts cut), windows sized to the writing model's context.
-    turns = windows.turns_from_result(result)
-    turns = windows.prepare_turns(turns).turns
-    built = windows.build_windows(
-        turns, max_chars=windows.window_chars(getattr(provider, "context_window", None))
-    )
-    recording_type, recording_source = await _recording_type(
-        classify_provider,
-        meeting=meeting,
-        template_family=template_family,
-        built=built,
-        turns=turns,
-        language=language,
-    )
-    family = types.family_for_recording_type(recording_type)
-    await _store_detected_type(
-        deps, tenant_id, note_id=note_id, recording_type=recording_type, source=recording_source
-    )
-    known_people, glossary = await _known_names(deps, tenant_id, result=result, meeting=meeting)
+    async def cache_parts(parts: list[str]) -> None:
+        await _cache_parts(deps, tenant_id, generation_id, parts_key, parts)
 
-    document = await pipeline.run(
-        result,
-        provider=provider,
-        role_by_key=template_roles,
-        language=language,
-        meeting_date=meeting_date,
-        family=family,
-        carried=carried,
-        counterpart=counterpart,
-        built=built,
-        recording_type=recording_type,
-        recording_type_source=recording_source,
-        name_candidates=known_people,
-        glossary=glossary,
-        entity_model_tier=deps.entity_model_tier,
-        entity_provider=entity_provider,
-        retry_budget_s=_retry_budget(deps, built),
-    )
-    # Lint, repair, fall back, record (stats.lint). Never raises.
-    document = await doclint.enforce(
-        document, regenerate=document.regenerator, known=frozenset(known_people)
-    )
-    # The title comes after the whole recording was read; one short call that cannot stop the note.
-    themes, title_facts = _title_context(document)
-    await _name_note(
-        deps,
-        tenant_id,
-        note_id=note_id,
-        generation_id=generation_id,
-        requested_by=generation.requested_by,
-        result=result,
-        provider=title_provider,
-        language=language,
-        themes=themes,
-        facts=title_facts,
-    )
+    throttle.begin()
+    try:
+        written = await writer.write(
+            turns,
+            provider=provider,
+            language=language,
+            recording_date=recording_date,
+            instruction_text=instructions,
+            template_name=template_name,
+            template_override=template_override,
+            temperature=settings.params.temperature,
+            max_output_tokens=settings.params.max_output_tokens,
+            done_parts=done_parts,
+            on_part=cache_parts,
+        )
+    except Exception:
+        # The job runner retries; the finished windows wait in the cache.
+        throttle.end()
+        raise
 
-    # ── Write #1: what the reader came for ──────────────────────────
-    items_sections = [s for s in document.sections if s.role in ITEM_ROLES]
-    doc_sections = [s for s in document.sections if s.role not in ITEM_ROLES]
+    parsed = note_markdown.parse(written.text, turns)
+    rows = item_rows(parsed, turns)
+    stats = dict(written.stats)
+    stats["items"] = len(rows)
+    stats["sections"] = len(parsed.sections)
+    stats["items_cited"] = sum(1 for r in rows if r["cites"])
+    # P3: the optional check — a mark on the rows, never a change to them or the text.
+    checked: checker.Checked | None = None
+    if deps.check_enabled and rows:
+        checked = await checker.check(rows, turns, provider=provider, language=language)
+        stats["check"] = checked.stats
+    stats["bad_cites"] = parsed.bad_cites
+    stats["unstructured"] = parsed.unstructured
+    # The template the note was written with: the one requested, or, under `auto`, the one
+    # the model named on its second line (``template_requested`` keeps the request).
+    stats["template_requested"] = template_name
+    stats["template_chosen"] = parsed.template_name
+    if template_name == writer.AUTO and parsed.template_name in writer.TEMPLATES:
+        stats["template"] = parsed.template_name
+    # 429s waited out under this run; the code that wrote it; the routing that answered.
+    stats["throttle"] = throttle.end()
+    stats["build"] = build_info.stamp(
+        build_sha=getattr(deps, "build_sha", "") or None,
+        prompt_version=prompts.PROMPT_VERSION,
+        effective_version=prompts.PROMPT_VERSION,
+        flags={},
+    )
+    stats["runtime"] = provenance(deps)
+    stats["language"] = language
+    # N0: the parameter set that wrote it — the pointer, never the values.
+    stats["model_params"] = settings.ref
+    stats["instructed"] = instructions is not None
 
+    backend = written.backend or getattr(provider, "backend_name", None) or "unknown"
     async with tenant_connection(deps.app_pool, tenant_id) as conn:
-        await gen_repo.mark(
-            conn,
-            generation_id=generation_id,
-            step=STEP_WRITE_ITEMS,
-            windows_total=document.windows_total,
-            windows_done=document.windows_done,
-            windows_failed=document.windows_failed,
-            failed_ranges=document.failed_ranges,
-            backend=document.backend,
-            model_id=document.model_id,
-        )
-        first = await writer.apply(
-            conn,
-            note_id=note_id,
-            sections=items_sections,
-            requested_by=generation.requested_by,
-            generation_id=generation_id,
-            prompt_version=prompts.PROMPT_VERSION,
-            step=STEP_WRITE_ITEMS,
-            previous_hashes=previous_hashes,
-        )
-        await _store_items(
+        stored = await gen_repo.replace_lines(
             conn,
             tenant_id=tenant_id,
             note_id=note_id,
             generation_id=generation_id,
-            sections=items_sections,
-            outcome=first,
-            family=family,
-            facts=document.facts,
+            rows=rows,
         )
-
-    # ── Write #2: the summary and the topics ────────────────────────
-    async with tenant_connection(deps.app_pool, tenant_id) as conn:
-        await gen_repo.mark(conn, generation_id=generation_id, step=STEP_WRITE_DOC)
-        second = await writer.apply(
-            conn,
-            note_id=note_id,
-            sections=doc_sections,
-            requested_by=generation.requested_by,
-            generation_id=generation_id,
-            prompt_version=prompts.PROMPT_VERSION,
-            step=STEP_WRITE_DOC,
-            previous_hashes=previous_hashes,
-        )
-        await _store_items(
-            conn,
-            tenant_id=tenant_id,
-            note_id=note_id,
-            generation_id=generation_id,
-            sections=doc_sections,
-            outcome=second,
-            family=family,
-            facts=document.facts,
-        )
-        # Verified facts no line cites: the "Detailed" view's rows.
-        await gen_repo.put_lines(
-            conn,
-            tenant_id=tenant_id,
-            note_id=note_id,
-            generation_id=generation_id,
-            rows=uncited_rows(document, family=family),
-        )
-
-        # Completions and judgements are not lines of the note.
-        ticked = await _apply_completions(conn, note_id=note_id, completions=document.completions)
-        await _store_judgements(
-            conn,
-            tenant_id=tenant_id,
-            note_id=note_id,
-            generation_id=generation_id,
-            judgements=document.judgements,
-            family=family,
-        )
-
-        stats = dict(document.stats)
-        stats["section_hashes"] = {**first.section_hashes, **second.section_hashes}
-        stats["suggested_sections"] = sorted(
-            {*first.suggested_sections, *second.suggested_sections}
-        )
-        stats["carried_ticked"] = ticked
-        stats["judgements"] = len(document.judgements)
         await gen_repo.supersede_previous(conn, note_id=note_id, keep=generation_id)
+        if checked is not None:
+            by_position = {int(r["position"]): str(r["item_key"]) for r in rows}
+            await gen_repo.set_checks(
+                conn,
+                generation_id=generation_id,
+                unsupported={
+                    by_position[p]: reason
+                    for p, reason in checked.unsupported.items()
+                    if p in by_position
+                },
+            )
+        # P3: the note itself — the writer's sections and title into a new version,
+        # beside what the author typed. Nothing changed = no version.
+        applied = await note_apply.apply(
+            conn,
+            note_id=note_id,
+            parsed=parsed,
+            requested_by=generation.requested_by,
+            prompt_version=prompts.PROMPT_VERSION,
+            generation_id=generation_id,
+        )
+        stats["section_hashes"] = applied.section_hashes
+        stats["sections_written"] = len(applied.written_sections)
+        stats["version_number"] = applied.version_number
+        stats["title_written"] = applied.title_written
         await gen_repo.mark(
             conn,
             generation_id=generation_id,
-            status=gen_repo.PARTIAL if document.partial else gen_repo.COMPLETE,
+            status=gen_repo.COMPLETE,
             step=None,
+            backend=written.backend,
+            model_id=written.model_id,
+            text=written.text,
             stats=stats,
             finished=True,
         )
-
-    await _shadow_run(
-        deps,
-        tenant_id,
-        generation_id,
-        result,
-        document,
-        role_by_key=template_roles,
-        language=language,
-        meeting_date=meeting_date,
-        family=family,
-        carried=carried,
-        counterpart=counterpart,
-    )
+    for row in rows:
+        generation_metrics.lines_stored.add(1, {"kind": str(row.get("kind") or "unknown")})
 
     # The transcript still lives in asr-service; a second copy is a retention decision
     # nobody made. The daily sweep catches snapshots whose worker died first.
-    await _discard_snapshot(deps, tenant_id, generation_id)
+    await _discard_snapshot(deps, tenant_id, generation_id, parts_key=parts_key)
 
-    written = len(first.written_sections) + len(second.written_sections)
-    suggested = len(first.suggested_sections) + len(second.suggested_sections)
-    backend = document.backend or "unknown"
     generation_metrics.generations.add(
-        1, {"outcome": "partial" if document.partial else "complete", "backend": backend}
+        1,
+        {
+            "outcome": "complete",
+            "backend": backend,
+            "instructed": "yes" if instructions else "no",
+        },
     )
-    generation_metrics.record_document(document.stats, backend=backend)
-    unsupported = document.stats.get("lines_unsupported") or {}
     logger.info(
         "note_generate.done",
         extra={
-            "windows": document.windows_total,
-            "failed": document.windows_failed,
-            "sections_written": written,
-            "sections_suggested": suggested,
-            # Counts only; never a line, a fact or a quote.
-            "facts_kept": document.stats.get("facts_kept", 0),
-            "facts_dropped_paraphrase": document.stats.get("facts_dropped_paraphrase", 0),
-            "lines_kept": document.stats.get("lines_kept", 0),
-            "lines_unsupported": sum(int(n) for n in unsupported.values()),
-            "excluded_ms": document.stats.get("excluded_ms", 0),
-            "speech_ms": document.stats.get("speech_ms", 0),
-            "noise_overridden": document.stats.get("noise_overridden", 0),
-            "summary_fallback": document.stats.get("summary_fallback"),
-            "summary_ladder": document.stats.get("summary_ladder"),
-            "topics_fallback": document.stats.get("topics_fallback"),
-            "topics_failure": document.stats.get("topics_failure"),
-            "adverts_cut": document.stats.get("adverts_cut", 0),
-            "lint_unresolved": (document.stats.get("lint") or {}).get("unresolved"),
-            "lint_error": bool((document.stats.get("lint") or {}).get("error")),
-            "prompt_version": document.stats.get("prompt_version"),
+            # Counts only; never a line or a quote.
+            "items_stored": stored,
+            "text_chars": len(written.text),
+            "words": stats.get("words"),
+            "windows": stats.get("windows"),
+            "calls": stats.get("calls"),
+            "bad_cites": parsed.bad_cites,
+            "unstructured": parsed.unstructured,
+            "merge_failed": stats.get("merge_failed"),
+            "prompt_version": prompts.PROMPT_VERSION,
+            "backend": backend,
+            "instructed": instructions is not None,
+            "temperature": settings.params.temperature,
+            "max_concurrency": settings.params.max_concurrency,
         },
     )
-    return {
-        "windows": document.windows_total,
-        "windows_failed": document.windows_failed,
-        "sections_written": written,
-        "sections_suggested": suggested,
-        "facts": len(document.facts),
+    return {"items_stored": stored, "text_chars": len(written.text)}
+
+
+# The words a cited turn carries with the row: a short turn whole, a long one cut around
+# the cited moment (``excerpt``), so the popover and the judge see what the bullet rests on.
+TURN_TEXT_WHOLE = 1_200
+TURN_TEXT_REACH = 700
+
+
+def cited_turn(turn: Any, times_ms: list[int]) -> dict[str, Any]:
+    text = str(turn.text)
+    start, end = int(turn.start_ms), int(turn.end_ms)
+    out: dict[str, Any] = {
+        "turn": int(turn.number),
+        "start_ms": start,
+        "end_ms": end,
+        "speaker": getattr(turn, "display_name", None) or turn.speaker_name or turn.speaker_label,
     }
+    if len(text) <= TURN_TEXT_WHOLE:
+        out["text"] = text
+        return out
+    inside = [t for t in times_ms if start <= t <= end]
+    at = inside[0] if inside else start
+    share = (at - start) / (end - start) if end > start else 0.0
+    centre = int(len(text) * min(1.0, max(0.0, share)))
+    lo, hi = max(0, centre - TURN_TEXT_REACH), min(len(text), centre + TURN_TEXT_REACH)
+    # Cut at word boundaries.
+    if lo > 0 and text.find(" ", lo) != -1:
+        lo = text.find(" ", lo) + 1
+    if hi < len(text):
+        space = text.rfind(" ", 0, hi)
+        hi = space if space > lo else hi
+    out["text"] = ("… " if lo > 0 else "") + text[lo:hi].strip() + (" …" if hi < len(text) else "")
+    out["excerpt"] = True
+    out["at_ms"] = at
+    return out
 
 
-async def _operation_provider(
-    deps: GenerationDeps, tenant_id: UUID, operation: str, default: Any
-) -> Any:
-    """The provider routed for one short operation, else `default`; a routing problem never stops the note."""
-    if deps.operation_provider_for is None:
-        return default
-    try:
-        return await deps.operation_provider_for(str(tenant_id), operation)
-    except Exception:  # noqa: BLE001
-        logger.warning("note_generate.operation_provider_failed", extra={"operation": operation})
-        return default
-
-
-def _title_context(document: Any) -> tuple[list[str], list[str]]:
-    """The note's themes and its five most specific statements, taken in turn from each third."""
-    from note_service.domain.meeting_doc import support as support_rules
-    from note_service.domain.meeting_doc import windows as windows_mod
-
-    brief = getattr(document, "brief", None) or {}
-    themes = [str(t) for t in brief.get("themes") or [] if str(t).strip()]
-    facts = [
-        f
-        for f in getattr(document, "facts", None) or []
-        if not f.evidence_only and f.person is None and f.figure is None
-    ]
-    if not facts:
-        return themes, []
-    language = str((document.stats or {}).get("language") or "en")
-    start = min(f.start_ms for f in facts)
-    end = max(f.end_ms for f in facts)
-    by_third: dict[int, list[Any]] = {1: [], 2: [], 3: []}
-    for fact in facts:
-        by_third[windows_mod.third_of(fact.start_ms, start, end)].append(fact)
-    for group in by_third.values():
-        group.sort(key=lambda f: -support_rules.specificity(f.text, language))
-    chosen: list[str] = []
-    while len(chosen) < note_title.CONTEXT_FACTS and any(by_third.values()):
-        for k in (1, 2, 3):
-            if by_third[k] and len(chosen) < note_title.CONTEXT_FACTS:
-                chosen.append(by_third[k].pop(0).text)
-    return themes, chosen
-
-
-async def _name_note(
-    deps: GenerationDeps,
-    tenant_id: UUID,
-    *,
-    note_id: UUID,
-    generation_id: UUID,
-    requested_by: UUID,
-    result: dict[str, Any],
-    provider: Any,
-    language: str,
-    themes: list[str] | None = None,
-    facts: list[str] | None = None,
-) -> None:
-    """Replace the placeholder title with one taken from the meeting.
-
-    The title source is read before the call (a person's title costs no call) and
-    again under the row lock in `note_title.apply`, so a concurrent rename wins.
-    """
-    try:
-        async with tenant_connection(deps.app_pool, tenant_id) as conn:
-            if await note_title.source_of(conn, note_id=note_id) != note_title.DEFAULT:
-                return
-        title = await note_title.suggest(
-            provider, result, language=language, themes=themes or (), facts=facts or ()
-        )
-        if title is None:
-            logger.info("note_generate.title_skipped")
-            return
-        async with tenant_connection(deps.app_pool, tenant_id) as conn:
-            written = await note_title.apply(
-                conn,
-                note_id=note_id,
-                title=title,
-                requested_by=requested_by,
-                generation_id=generation_id,
-            )
-        logger.info("note_generate.title_done", extra={"written": written})
-    except Exception:  # noqa: BLE001 — the note matters more than its name
-        logger.warning("note_generate.title_failed", exc_info=True)
-
-
-async def _store_items(
-    conn: Any,
-    *,
-    tenant_id: UUID,
-    note_id: UUID,
-    generation_id: UUID,
-    sections: list[RenderedSection],
-    outcome: writer.WriteOutcome,
-    family: Any = None,
-    facts: list[Any] | None = None,
-) -> None:
-    """Every written LINE is a row: text, citations, evidence of the first cited fact.
-    Placement: written when we wrote the section, suggested when the author had been in there."""
-    by_id = {f.item_key: f for section in sections for f in section.facts}
-    for fact in facts or []:
-        by_id.setdefault(fact.item_key, fact)
+def item_rows(parsed: note_markdown.ParsedNote, turns: list[Any]) -> list[dict[str, Any]]:
+    """One row per item, in the Markdown's order: the text as written, the turn it cites
+    as its evidence (quote, span, speaker), its kind and position. Pure."""
+    by_number = {int(t.number): t for t in turns}
     rows: list[dict[str, Any]] = []
-    for section in sections:
-        placement = (
-            writer.WRITTEN
-            if section.section_key in outcome.written_sections
-            or section.section_key in outcome.section_hashes
-            else writer.SUGGESTED
-        )
-        for line in section.lines:
-            row = line_row(line, section.section_key, placement, by_id, family=family)
-            if row is not None:
-                rows.append(row)
-    if rows:
-        stored = await gen_repo.put_lines(
-            conn, tenant_id=tenant_id, note_id=note_id, generation_id=generation_id, rows=rows
-        )
-        for row in rows:
-            generation_metrics.lines_stored.add(1, {"kind": row["kind"]})
-        logger.info("note_generate.lines_stored", extra={"rows": stored})
-
-
-# A line written from one fact keeps that fact's kind (recipient page, corrections routes).
-_ROW_KIND: Final[dict[str, str]] = {
-    "summary": "summary_sentence",
-    "framing": "framing",
-    "bullet": "topic_bullet",
-    "date": "date",
-    # A quote sub-point is a topic bullet row.
-    "quote": "topic_bullet",
-}
-# A line resting on several facts is as sure as its weakest one.
-_CERTAINTY_RANK: Final[dict[str, int]] = {
-    "fact": 0,
-    "estimate": 1,
-    "prediction": 2,
-    "opinion": 3,
-    "proposal": 4,
-    "allegation": 5,
-}
-
-
-def line_row(
-    line: Any, section_key: str, placement: str, by_id: dict[str, Any], *, family: Any = None
-) -> dict[str, Any] | None:
-    """The row for one written line, or None for a line with no evidence (a heading). Pure."""
-    from ..domain import lines as line_rules
-
-    cited = [by_id[i] for i in line.fact_ids if i in by_id]
-    if not cited or line.kind == "heading":
-        return None
-    first = cited[0]
-    content = line_rules.strip_marker(line.text)[1]
-    certainties = [f.certainty for f in cited if f.certainty]
-    holders = {f.attributed_to for f in cited}
-    corrections = list(
-        dict.fromkeys(
-            (c.surface, c.canonical, c.source) for f in cited for c in getattr(f, "corrections", ())
-        )
-    )
-    internal = family is not None and any(types.is_internal_kind(family, f.kind) for f in cited)
-    return {
-        # The corrections routes' own key rule: owner and due stripped.
-        "item_key": line_rules.key_of(content),
-        "kind": _ROW_KIND.get(line.kind, first.kind),
-        "section_key": section_key,
-        "text": content[:500],
-        "owner_label": first.owner_label,
-        "due_text": first.due_text,
-        "due_date": first.due_date,
-        "explicit": first.explicit,
-        "confidence": first.confidence,
-        "flags": list(first.flags),
-        "quote": first.quote,
-        "start_ms": first.start_ms,
-        "end_ms": first.end_ms,
-        "speaker_label": first.speaker_label,
-        "speaker_name": first.speaker_name,
-        "placement": placement,
-        "audience": "internal" if internal else "all",
-        "cites": [f.item_key for f in cited],
-        "certainty": max(certainties, key=lambda c: _CERTAINTY_RANK.get(c, 0))
-        if certainties
-        else None,
-        "attributed_to": next(iter(holders)) if len(holders) == 1 else None,
-        "corrections": [{"surface": s, "canonical": c, "source": src} for s, c, src in corrections],
-        # A figure row carries its verified fields, so a client draws the value without parsing.
-        "payload": first.figure.payload()
-        if getattr(first, "figure", None) is not None and line.kind == "figure"
-        else None,
-        # A sub-point names the bullet it sits under by that row's key.
-        "parent_key": line_rules.key_of(line_rules.strip_marker(line.parent)[1])
-        if getattr(line, "parent", None)
-        else None,
-        "mentions": [
+    keys: set[str] = set()
+    for position, (section, item) in enumerate(parsed.items):
+        key = lines.key_of(item.text) if item.text.strip() else ""
+        if not key or key in keys:
+            # Two lines with the same key (the same words, or an "Owner: task — due" line
+            # whose owner and due differ): both rows stay, the second under a key that
+            # includes its position. Never a dropped line.
+            key = item_key(normalise_text(f"{position}:{item.text}"))
+        keys.add(key)
+        cited = [by_number[n] for n in item.cites if n in by_number]
+        first = cited[0] if cited else None
+        # P3: every cited turn travels with the row, so a client lists them without the
+        # transcript. A long turn (a monologue of minutes) is cut to the words around the
+        # cited moment, placed by proportion since the turn has no word timings.
+        payload = {"turns": [cited_turn(t, item.times_ms) for t in cited[:8]]}
+        rows.append(
             {
-                "text": m.text,
-                "date": m.resolved.isoformat(),
-                "time": m.time.strftime("%H:%M") if m.time else None,
-                "direction": m.direction,
+                "item_key": key,
+                "kind": item.kind,
+                "section_key": section.key[:64],
+                "text": item.text,
+                "quote": (first.text if first is not None else "")[:2000],
+                "start_ms": int(first.start_ms) if first is not None else 0,
+                "end_ms": int(first.end_ms) if first is not None else 0,
+                "speaker_label": first.speaker_label if first is not None else None,
+                "speaker_name": first.speaker_name if first is not None else None,
+                "placement": "written",
+                "audience": "all",
+                "explicit": True,
+                "confidence": 1.0,
+                "flags": ["cite_nearest"] if item.cite_nearest else [],
+                "cites": [f"turn:{n}" for n in item.cites][:16],
+                "position": position,
+                "table_row": item.table_row,
+                "cite_nearest": item.cite_nearest,
+                "provenance": None,
+                "payload": payload if cited else None,
             }
-            for m in line.dates
-        ],
-    }
-
-
-def uncited_rows(document: Any, *, family: Any = None) -> list[dict[str, Any]]:
-    """``suggested`` rows for uncited facts (under the nearest topic, else the overview)
-    and ``evidence`` rows for evidence-only facts, cited or not. Pure."""
-    from ..domain.meeting_doc import render as render_rules
-    from ..domain.meeting_doc import roles as role_rules
-
-    cited = {i for s in document.sections for line in s.lines for i in line.fact_ids}
-    topics = [s for s in document.sections if s.role == role_rules.TOPICS and s.facts]
-    out: list[dict[str, Any]] = []
-    for fact in document.facts:
-        if fact.kind in ("completion", "judgement"):
-            continue
-        # Evidence-only facts always get a row: the evidence popover resolves citations by row.
-        if fact.item_key in cited and not fact.evidence_only:
-            continue
-        home = min(
-            topics,
-            key=lambda s, f=fact: min(abs(x.start_ms - f.start_ms) for x in s.facts),
-            default=None,
         )
-        line = render_rules.Line(fact.text, fact.kind, (fact.item_key,), fact.mentions)
-        section_key = home.section_key if home else role_rules.OVERVIEW_KEY
-        # Copies and unwritten figures are stored for evidence, never offered as a line.
-        placement = (
-            writer.EVIDENCE
-            if fact.evidence_only or getattr(fact, "figure", None) is not None
-            else writer.SUGGESTED
-        )
-        row = line_row(line, section_key, placement, {fact.item_key: fact}, family=family)
-        if row is not None:
-            out.append(row)
-    return out
+    return rows
 
 
-async def _recording_type(
-    provider: Any,
-    *,
-    meeting: Any,
-    template_family: types.Family,
-    built: list[Any],
-    turns: list[Any],
-    language: str,
-) -> tuple[str, str]:
-    """``(recording_type, source)``: the author's meeting type or specific template wins;
-    only an `auto` note on the generic template is classified."""
-    chosen = getattr(meeting, "meeting_type", None) or "auto"
-    if chosen != "auto":
-        outcome = (types.recording_type_for_meeting_type(chosen), classify.SOURCE_USER)
-    elif template_family.meeting_type != "auto":
-        # A template the author picked is their choice too.
-        outcome = (
-            types.recording_type_for_meeting_type(template_family.meeting_type),
-            classify.SOURCE_USER,
-        )
-    else:
-        context = (getattr(meeting, "calendar_context", None) or {}) if meeting else {}
-        span = (turns[-1].end_ms - turns[0].start_ms) if turns else 0
-        outcome = await classify.classify(
-            provider,
-            head="\n".join(w.render() for w in built[:2]),
-            language=language,
-            speakers=len({t.speaker_label for t in turns if t.speaker_label}) or 1,
-            minutes=span / 60_000,
-            calendar_title=str(context.get("title") or "") or None,
-            attendees=len(context.get("attendee_names") or []),
-        )
-    # `template` means the classifier could not answer: the meeting family.
-    metric = "failed" if outcome[1] == classify.SOURCE_TEMPLATE else outcome[1]
-    generation_metrics.classify.add(1, {"outcome": metric})
-    return outcome
-
-
-async def _known_names(
-    deps: GenerationDeps, tenant_id: UUID, *, result: dict, meeting: Any
-) -> tuple[frozenset[str], tuple[Any, ...]]:
-    """``(known people, glossary terms)``: ASR name candidates, roster, calendar
-    attendees, glossary persons. The glossary is read inside THIS tenant's
-    connection; an unreadable glossary costs the glossary tier, not the note."""
-    from ..domain import glossary_repository
-
-    people = {str(n) for n in result.get("name_candidates") or [] if n}
-    people |= {
-        str(n)
-        for n in (result.get("speaker_names") or {}).values()
-        if n and not str(n).startswith("Speaker ")
-    }
-    context = (getattr(meeting, "calendar_context", None) or {}) if meeting else {}
-    people |= {str(n) for n in context.get("attendee_names") or [] if n}
-    terms: tuple[Any, ...] = ()
+async def _template_override(
+    deps: GenerationDeps, tenant_id: UUID, name: str, language: str
+) -> str | None:
+    """The workspace's own text for the template (P2), in the note's language, else None."""
     try:
         async with tenant_connection(deps.app_pool, tenant_id) as conn:
-            terms = tuple(await glossary_repository.terms_for_matching(conn))
-    except Exception:  # noqa: BLE001
-        logger.warning("note_generate.glossary_unavailable", exc_info=True)
-    people |= {t.term for t in terms if t.kind == "person"}
-    return frozenset(people), terms
-
-
-async def _store_detected_type(
-    deps: GenerationDeps, tenant_id: UUID, *, note_id: UUID, recording_type: str, source: str
-) -> None:
-    """Record it on the note's meeting row; never stops a generation."""
-    detected_by = "user" if source == classify.SOURCE_USER else "model"
-    try:
-        async with tenant_connection(deps.app_pool, tenant_id) as conn:
-            await meetings.set_detected_type(
-                conn,
-                note_id=note_id,
-                detected=types.detected_value(recording_type),
-                detected_by=detected_by,
+            row = await templates_repo.fetch(
+                conn, tenant_id=tenant_id, name=name, language=prompts.language_of(language)
             )
-    except Exception:  # noqa: BLE001 — e.g. 0058 not applied yet
-        logger.warning("note_generate.recording_type_not_stored", exc_info=True)
+    except Exception:  # noqa: BLE001 — an unreadable override costs the override, not the note
+        logger.warning("note_generate.template_override_unavailable", exc_info=True)
+        return None
+    return row.markdown if row is not None else None
 
 
-def _counterpart(meeting: Any) -> str:
-    """The other side's name for the "Acme does" heading, from the calendar event's title."""
-    if meeting is None:
-        return ""
-    title = str((meeting.calendar_context or {}).get("title") or "")
-    # "Acme <> Us — Weekly" → "Acme"; no separator, no party name.
-    for sep in ("<>", "—", "–", "|", "/"):
-        if sep in title:
-            head = title.split(sep)[0].strip()
-            return head if 1 < len(head) <= 40 else ""
-    return ""
-
-
-async def _carried(conn: Any, *, note_id: UUID) -> list[tuple[str, str]]:
-    """``[(item_key, text)]`` of still-open items, read from THIS note's "Still open"
-    block: the visibility rule (ADR-0057) was applied at carry-in, and the worker
-    has no claims to re-apply it, so it must not reach into another note."""
-    rows = [
-        r
-        for r in await meetings.carried_items(conn, note_id=note_id)
-        if str(r["state"]) == carry_over.OPEN
-    ]
-    if not rows:
-        return []
-    note = await repo.fetch_note(conn, note_id=note_id)
-    version = await repo.fetch_version(conn, version_id=note.current_version_id) if note else None
-    if version is None:
-        return []
-
-    from ..domain import lines as line_rules
-
-    by_key: dict[str, str] = {}
-    for section in version.content.sections:
-        for line in line_rules.split_section(section.text or ""):
-            parts = line_rules.parts(line.content)
-            # The key is over the body of "- [ ] Owner: task — due".
-            by_key.setdefault(line_rules.key_of(parts.body), parts.body)
-
-    out: list[tuple[str, str]] = []
-    for row in rows[: carry_over.MAX_CARRIED]:
-        key = str(row["item_key"])
-        text = by_key.get(key)
-        if text:
-            out.append((key, text))
-    return out
-
-
-async def _apply_completions(conn: Any, *, note_id: UUID, completions: list[Any]) -> int:
-    """Tick off what the recording says was done, with the words: `done_mentioned`
-    (the machine heard so), never `done_marked` (a person ticked it)."""
-    ticked = 0
-    for fact in completions:
-        if not fact.refers_to_key:
-            continue
-        updated = await meetings.set_carried_state(
-            conn,
-            note_id=note_id,
-            item_key=fact.refers_to_key,
-            state=carry_over.DONE_MENTIONED,
-            done_quote=fact.quote,
-            done_start_ms=fact.start_ms,
-            done_end_ms=fact.end_ms,
-            done_speaker=fact.speaker_name,
-        )
-        ticked += 1 if updated else 0
-    return ticked
-
-
-async def _store_judgements(
-    conn: Any,
-    *,
-    tenant_id: UUID,
-    note_id: UUID,
-    generation_id: UUID,
-    judgements: list[Any],
-    family: Any,
-) -> None:
-    """Judgement values are stored as SUGGESTIONS only; the engine never writes field metadata."""
-    if not judgements:
-        return
-    await gen_repo.put_items(
-        conn,
-        tenant_id=tenant_id,
-        note_id=note_id,
-        generation_id=generation_id,
-        facts=[(f, f.judgement_field or "", writer.SUGGESTED) for f in judgements],
-        audience_of=lambda _f: "internal",
+async def _template_code(conn: Any, *, note_id: UUID) -> str | None:
+    """The code of the note's template (``meeting_notes_de``), or None."""
+    return await conn.fetchval(
+        "SELECT t.code FROM notes n JOIN templates t ON t.id = n.template_id WHERE n.id = $1",
+        note_id,
     )
 
 
-async def _role_map(conn: Any, *, note_id: UUID) -> tuple[dict[str, str], str | None]:
-    """``({section_key: role}, template code)`` for the note's template."""
-    from ..domain.repository import get_template
-
-    template_id = await conn.fetchval("SELECT template_id FROM notes WHERE id = $1", note_id)
-    if template_id is None:
-        return {}, None
-    row = await get_template(conn, template_id=template_id)
-    if row is None:
-        return {}, None
-    raw = row["schema_jsonb"]
-    if isinstance(raw, str):
-        raw = json.loads(raw)
-    from template_models import TemplateDefinition
-
+async def _cached_parts(
+    deps: GenerationDeps, tenant_id: UUID, generation_id: UUID, key: str
+) -> list[str]:
+    """Window outputs an earlier attempt of this generation finished; [] when none."""
     try:
-        definition = TemplateDefinition.model_validate(raw)
-    except Exception:  # noqa: BLE001
-        return {}, None
-    return roles.role_map(definition), str(row["code"])
+        raw = await deps.transcripts_store.get(
+            key=key, tenant_id=tenant_id, aad=generation_id.bytes
+        )
+        parts = json.loads(raw)
+        return [str(p) for p in parts] if isinstance(parts, list) else []
+    except Exception:  # noqa: BLE001 — no cache is the normal case
+        return []
+
+
+async def _cache_parts(
+    deps: GenerationDeps, tenant_id: UUID, generation_id: UUID, key: str, parts: list[str]
+) -> None:
+    try:
+        await deps.transcripts_store.put(
+            key=key,
+            plaintext=json.dumps(parts).encode("utf-8"),
+            tenant_id=tenant_id,
+            aad=generation_id.bytes,
+        )
+    except Exception:  # noqa: BLE001 — a cache miss costs a window, never the note
+        logger.warning("note_generate.parts_not_cached", exc_info=True)
+
+
+def provenance(deps: Any) -> dict[str, Any]:
+    """What produced this run: this worker's code and every routing override that landed
+    on its fallback. Names and versions only."""
+    fallbacks = getattr(deps, "fallbacks", None)
+    try:
+        landed = list(fallbacks()) if fallbacks is not None else []
+    except Exception:  # noqa: BLE001 — provenance never stops a note
+        landed = []
+    return {
+        "run_kind": "generation",
+        "build_sha": getattr(deps, "build_sha", "") or None,
+        "prompt_version": prompts.PROMPT_VERSION,
+        "fallbacks": landed,
+    }
 
 
 async def mark_dead(
@@ -815,63 +509,16 @@ async def _fail(
     return {"error_kind": error_kind}
 
 
-async def _discard_snapshot(deps: GenerationDeps, tenant_id: UUID, generation_id: UUID) -> None:
-    """Drop the run's transcript snapshot: row first, then the object (an orphan
-    object is swept within the day; a dangling row is not)."""
+async def _discard_snapshot(
+    deps: GenerationDeps, tenant_id: UUID, generation_id: UUID, *, parts_key: str | None = None
+) -> None:
+    """Drop the run's transcript snapshot and its window cache: row first, then the
+    objects (an orphan object is swept within the day; a dangling row is not)."""
     try:
         async with tenant_connection(deps.app_pool, tenant_id) as conn:
             key = await gen_repo.clear_snapshot(conn, generation_id=generation_id)
         if key:
             await deps.transcripts_store.delete(key=key)
+            await deps.transcripts_store.delete(key=parts_key or key + PARTS_SUFFIX)
     except Exception:  # noqa: BLE001 — the note is written; this is tidying
         logger.warning("note_generate.snapshot_not_discarded", exc_info=True)
-
-
-async def _shadow_run(
-    deps: GenerationDeps,
-    tenant_id: UUID,
-    generation_id: UUID,
-    transcript: dict,
-    live: Any,
-    **pipeline_kwargs: Any,
-) -> None:
-    """Run a candidate backend on this meeting and keep only the numbers; nothing it
-    produces is written. Sampled deterministically on the generation id, so a
-    re-run makes the same choice."""
-    if not deps.shadow_provider_for or deps.shadow_percent <= 0:
-        return
-    if generation_id.int % 100 >= deps.shadow_percent:
-        return
-
-    backend = "unknown"
-    started = time.monotonic()
-    try:
-        provider = await deps.shadow_provider_for(str(tenant_id))
-        if provider is None:
-            # Workspace has not acknowledged the candidate's processor: silently skip.
-            return
-        backend = getattr(provider, "backend_name", None) or backend
-        shadow = await pipeline.run(transcript, provider=provider, **pipeline_kwargs)
-    except Exception:  # noqa: BLE001 — a shadow run can never fail a note
-        generation_metrics.shadow_runs.add(1, {"backend": backend, "outcome": "error"})
-        logger.warning("note_generate.shadow_failed", extra={"backend": backend}, exc_info=True)
-        return
-
-    seconds = time.monotonic() - started
-    generation_metrics.shadow_seconds.record(seconds, {"backend": backend})
-    generation_metrics.shadow_runs.add(1, {"backend": backend, "outcome": "ok"})
-    generation_metrics.shadow_facts.add(len(shadow.facts), {"backend": backend, "verdict": "kept"})
-    # The live run is the only yardstick here; quality is measured by the gold-set harness.
-    delta = len(live.facts) - len(shadow.facts)
-    if delta > 0:
-        generation_metrics.shadow_facts.add(delta, {"backend": backend, "verdict": "missed"})
-    logger.info(
-        "note_generate.shadow_done",
-        extra={
-            "backend": backend,
-            "seconds": round(seconds, 1),
-            "facts": len(shadow.facts),
-            "live_facts": len(live.facts),
-            "windows_failed": shadow.windows_failed,
-        },
-    )

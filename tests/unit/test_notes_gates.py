@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import csv
 import importlib.util
 import json
 import re
@@ -63,6 +62,12 @@ def test_every_committed_checklist_names_a_meeting_and_known_checks() -> None:
         "guest_line",
         "chapters_min",
         "overview",
+        "headings_must_not_match",
+        "framing_must_not_contain",
+        "claims_row",
+        # The original generation's numbers and the sentinel of a regression case (B1)
+        "original_generation",
+        "sentinel",
         # Codes pinned per check
         "codes",
         # Lint findings allowed per code
@@ -223,97 +228,6 @@ def test_the_judge_sees_the_line_and_its_facts_and_never_the_transcript() -> Non
     assert usage.input_tokens == 20
 
 
-# ── Blind pairwise rating ───────────────────────────────────
-
-notes_pairs = _load("notes_pairs")
-
-
-def test_pairs_round_trip_from_notes_to_a_preference(tmp_path: Path, monkeypatch: Any) -> None:
-    local = tmp_path / "local"
-    monkeypatch.setattr(notes_pairs, "LOCAL", local)
-    corpus = REPO / "tests" / "fixtures" / "eval" / "notes"
-    a, b = local / "a", local / "b"
-    for folder, word in ((a, "pipeline"), (b, "baseline")):
-        folder.mkdir(parents=True)
-        for mid in ("m01_en_product_sync", "m06_de_news_podcast"):
-            (folder / f"{mid}.md").write_text(f"{word} note for {mid}", "utf-8")
-    out = local / "pairs"
-    assert notes_pairs.build(a, b, corpus, out, seed=1) == 0
-    key = {row["pair_id"]: row for row in csv.DictReader((out / "key.csv").open())}
-    assert len(key) == 2
-    text = (out / "p001.md").read_text("utf-8")
-    assert "## Note L" in text and "## Note R" in text and "## Transcript" in text
-    assert notes_pairs.OVERVIEW_QUESTION in text
-    sheet = list(csv.reader((out / "sheet.csv").open()))
-    assert sheet[0][-2:] == ["overview_L", "overview_R"]
-    assert all(len(row) == len(sheet[0]) for row in sheet)
-    # Raters: two prefer the pipeline on both pairs, one picks the baseline once.
-    rows = [
-        [
-            "pair_id",
-            "rater",
-            "preferred",
-            "accuracy",
-            "completeness",
-            "usefulness",
-            "readability",
-            "overview_L",
-            "overview_R",
-        ]
-    ]
-    for pid, k in key.items():
-        pipeline_side = "L" if k["left"] == "pipeline" else "R"
-        other = "R" if pipeline_side == "L" else "L"
-        # Ours: yes from every rater but r3 on p001 ("partly"); the
-        # baseline: "no" throughout.
-        ov = {pipeline_side: "yes", other: "no"}
-        rows += [
-            [pid, "r1", pipeline_side, 4, 4, 4, 4, ov["L"], ov["R"]],
-            [pid, "r2", pipeline_side, 5, 4, 4, 5, ov["L"], ov["R"]],
-        ]
-        r3 = dict(ov, **({pipeline_side: "partly"} if pid == "p001" else {}))
-        rows += [
-            [pid, "r3", other if pid == "p001" else pipeline_side, 3, 3, 3, 3, r3["L"], r3["R"]]
-        ]
-    ratings = out / "ratings.csv"
-    with ratings.open("w", newline="") as handle:
-        csv.writer(handle).writerows(rows)
-    result = notes_pairs.score(ratings, out / "key.csv", corpus)
-    assert result["pairs"] == 2 and result["raters"] == 3
-    assert result["overall"]["preference"] == 5 / 6
-    low, high = result["overall"]["ci95"]
-    assert 0 < low < 5 / 6 < high <= 1
-    assert set(result["by_language"]) == {"en", "de"}
-    assert result["inter_rater_agreement"] == 4 / 6
-    overview = result["overview"]
-    assert overview["pipeline"]["n"] == 6 and overview["pipeline"]["yes"] == 5 / 6
-    assert overview["baseline"]["no"] == 1.0
-    assert overview["gate_met"] is False  # 5/6 < 0.9
-
-
-def test_pairs_never_leave_the_local_folder(tmp_path: Path) -> None:
-    import pytest
-
-    with pytest.raises(SystemExit):
-        notes_pairs.build(tmp_path, tmp_path, tmp_path, REPO / "docs" / "eval" / "pairs")
-
-
-def test_wilson_interval() -> None:
-    low, high = notes_pairs.wilson(50, 100)
-    assert round(low, 3) == 0.404 and round(high, 3) == 0.596
-
-
-def test_the_scripted_run_gates_only_what_the_engine_guarantees() -> None:
-    assert notes_assert.family("must_not_contain[3]") == "must_not_contain"
-    assert notes_assert.family("every_line_cited") == "every_line_cited"
-    assert {
-        "speakers",
-        "must_not_contain",
-        "every_line_cited",
-        "no_marks",
-    } == notes_assert.ENGINE_CHECKS
-
-
 # ── Statements, not quotes ──────────────────────────────────────
 
 
@@ -390,138 +304,12 @@ def test_the_r02_checklist_checks_topics_marks_and_copies() -> None:
     assert not results["no_information_lines"]
 
 
-def test_the_topics_round_rates_topic_bullets_only() -> None:
-    ours = "Framing.\n\n## Swim platform\n- A hybrid\n  - fixed at the transom\n\n## Decisions\n- go blue"
-    assert notes_pairs.topic_lines(ours) == "## Swim platform\n- A hybrid\n  - fixed at the transom"
-    base = "Summary one.\nSummary two.\n\n- a decision\n\n- an action"
-    assert notes_pairs.topic_lines(base, "single_pass") == "- Summary one.\n- Summary two."
-
-
-# ── Figures, presenter, contact ─────────────────────────────────
-
-
-def test_the_f3_scorers() -> None:
-    gold = {
-        "figures": [
-            {"name": "beam", "value": "16.5", "unit": "feet", "qualifier": "a little over"},
-            {"name": "fuel tank", "value": "700", "unit": "gallons", "qualifier": "about"},
-            {"name": "cabins", "value": "3"},
-        ],
-        "presenter": {
-            "name": "Corvin Aldmere",
-            "role": "broker",
-            "organisation": "Harbourline Yachts",
-        },
-        "contact": ["Questions by email or as a comment below the video"],
-    }
-    produced = {
-        "facts": [
-            {
-                "figure": {
-                    "name": "Beam",
-                    "value": "16.5",
-                    "unit": "feet",
-                    "qualifier": "a little over",
-                }
-            },
-            {"figure": {"name": "Fuel tank", "value": "800", "unit": "gallons", "qualifier": ""}},
-        ]
-    }
-    lines = [
-        {"kind": "presenter", "text": "Presenter: Corvin Aldmere, broker with Harbourline Yachts"},
-        {"kind": "next_step", "text": "- Questions by email or as a comment below the video"},
-    ]
-    row = notes_scoring.score_f3(gold, produced, lines)
-    assert row["figure_recall"] == [1, 3]
-    assert row["figure_value_accuracy"] == [1, 2]  # the fuel figure is wrong: worse than none
-    assert row["qualifier_preservation"] == [1, 1]
-    assert row["presenter_accuracy"] == [3, 3]
-    assert row["contact_present"] == [1, 1]
-    gates = notes_scoring.f3_gates(notes_scoring.aggregate([row]))
-    assert gates["figure_value_accuracy == 1.0"] is False
-    assert gates["presenter_accuracy >= 0.9"] is True
-
-
-def test_the_r02_checklist_checks_figures_presenter_and_contact() -> None:
-    checklist = json.loads(
-        (notes_assert.ASSERTIONS / "r02_en_pardo_65gt.assertions.json").read_text("utf-8")
-    )
-    produced = {
-        "facts": [
-            {"figure": {"name": "Length overall", "value": "66", "unit": "feet", "qualifier": ""}},
-            {
-                "figure": {
-                    "name": "Water tank",
-                    "value": "300",
-                    "unit": "gallons",
-                    "qualifier": "just under",
-                }
-            },
-        ],
-        "lines": [
-            {"kind": "presenter", "fact_ids": ["p"], "text": checklist["presenter_line"]},
-            {"kind": "figure", "fact_ids": ["a"], "text": "| Length overall | 66 feet |"},
-            {"kind": "next_step", "fact_ids": ["c"], "text": "- Questions by email"},
-        ],
-    }
-    results = {name: ok for name, ok, _s in notes_assert.check(checklist, produced, _PARDO_LIKE)}
-    assert results["figures"] and results["figures_cited"]
-    assert results["presenter_line"] and results["contact_line"]
-
-
-# ── Support-gate calibration ────────
-
-support_calibration = _load("support_calibration")
-
-
-def test_calibration_picks_the_threshold_the_judge_agrees_with(tmp_path: Path) -> None:
-    records = []
-    # German: the judge accepts every line at ratio ≥ 0.35 and none below.
-    for n in range(40):
-        ratio = n / 40
-        records.append(
-            {
-                "language": "de",
-                "ratio": ratio,
-                "rules_ok": True,
-                "judge_supported": ratio >= 0.35,
-                "text": "SECRET LINE",
-            }  # fmt: skip
-        )
-    # English: too few lines to calibrate.
-    records += [
-        {"language": "en", "ratio": 0.6, "rules_ok": True, "judge_supported": True, "text": "x"}
-    ] * 5
-    # A line failing the number/name rules is unsupported at any threshold.
-    records.append(
-        {"language": "de", "ratio": 1.0, "rules_ok": False, "judge_supported": False, "text": "y"}
-    )
-    result = support_calibration.calibrate(records)
-    de = result["de"]
-    assert de["calibrated_threshold"] == 0.35
-    assert de["at_calibrated"]["agreement"] == 1.0 and de["meets_target"]
-    assert de["at_provisional"]["agreement"] < 1.0
-    assert result["en"]["calibrated_threshold"] is None
-    path = tmp_path / "lines.jsonl"
-    path.write_text("\n".join(json.dumps(r) for r in records), "utf-8")
-    out = tmp_path / "report.json"
-    import sys as _sys
-
-    argv = _sys.argv
-    _sys.argv = ["support_calibration.py", str(path), "--out", str(out)]
-    try:
-        assert support_calibration.main() == 0
-    finally:
-        _sys.argv = argv
-    assert "SECRET LINE" not in out.read_text("utf-8")
-
-
 def test_the_r03_checks_read_the_overview_the_guest_and_the_chapters() -> None:
     checklist = json.loads(
         (notes_assert.ASSERTIONS / "r03_de_palantir_podcast.assertions.json").read_text("utf-8")
     )
     framing = (
-        "Podcast-Folge über Palantir. Es sprechen Erzähler/in und als Gast Felix Holtermann "
+        "Sendung über Palantir. Es sprechen Erzähler/in und als Gast Felix Holtermann "
         "(Büroleiter beim Handelsblatt). Themen sind Thiel, Karp und Überwachung."
     )
     top = f"{framing}\n\nZunächst — Palantir wird 2004 gegründet."
@@ -627,99 +415,3 @@ def test_the_taxonomy_detectors() -> None:
     summary = notes_scoring.aggregate([row])
     assert summary["headings_per_10_min"] == 1.0
     assert summary["unspecific_bullet_rate"] == 2 / 3
-
-
-def test_the_lint_check_reads_the_engine_lint_per_code() -> None:
-    checklist = {"id": "x", "lint": {"D-ORIENT": 0, "D-VOL": 0}}
-    meeting = {
-        "language": "en",
-        "transcript": [{"t_start_ms": 0, "t_end_ms": 60_000, "text": "x", "speaker": "S"}],
-    }
-    produced = {
-        "sections": [{"section_key": "gen:x", "role": "topics", "title": "Pricing", "text": ""}],
-        "lines": [
-            {
-                "section_key": "gen:x",
-                "kind": "bullet",
-                "text": "- Acme pays 5 dollars",
-                "fact_ids": ["a"],
-            },
-            {
-                "section_key": "gen:x",
-                "kind": "bullet",
-                "text": "- Acme pays 6 dollars",
-                "fact_ids": ["a"],
-            },
-        ],
-        "facts": [],
-    }
-    results = {n: ok for n, ok, _s in notes_assert.check(checklist, produced, meeting)}
-    assert results == {"lint[D-ORIENT]": False, "lint[D-VOL]": True}  # no overview
-    assert taxonomy.check_codes("lint[D-ORIENT]") == ("D-ORIENT",)
-
-
-# ── The blind rubric ───────────────────────
-
-
-def test_rubric_round_trip_and_release_gate(tmp_path: Path, monkeypatch: Any) -> None:
-    local = tmp_path / "local"
-    monkeypatch.setattr(notes_pairs, "LOCAL", local)
-    corpus = REPO / "tests" / "fixtures" / "eval" / "notes"
-    arms = {"pipeline": local / "a", "comparison": local / "b"}
-    for arm, folder in arms.items():
-        folder.mkdir(parents=True)
-        for mid in ("m01_en_product_sync", "m06_de_news_podcast"):
-            (folder / f"{mid}.md").write_text(f"{arm} line one\n{arm} line two", "utf-8")
-    out = local / "rubric"
-    assert notes_pairs.rubric_build(arms, corpus, out, seed=2) == 0
-    key = {r["note_id"]: r for r in csv.DictReader((out / "rubric_key.csv").open())}
-    assert len(key) == 4
-    page = (out / "n001.md").read_text("utf-8")
-    assert "Q4 lines to check" in page and "Q7 band" in page and "Q8 Form" in page
-    rows = [["note_id", "rater", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8"]]
-    for note_id, k in key.items():
-        ours = k["arm"] == "pipeline"
-        for rater in ("r1", "r2", "r3"):
-            scores = [2] * 8 if ours else [1, 2, 2, 0, 0, 2, 2, 2]
-            if ours and rater == "r1":
-                scores[3] = 1  # one rater finds an unsupported line; the median stays 2
-            rows.append([note_id, rater, *scores])
-    ratings = out / "ratings.csv"
-    with ratings.open("w", newline="") as handle:
-        csv.writer(handle).writerows(rows)
-    result = notes_pairs.rubric_score(ratings, out / "rubric_key.csv")
-    assert result["arms"]["pipeline"]["mean_total"] == 16
-    assert result["arms"]["comparison"]["mean_total"] == 11  # the r03 comparison note's shape
-    assert result["release_gate"] == {
-        "mean_total": True,
-        "faithful_share": True,
-        "no_orientation_zero": True,
-    }
-
-
-# ── Composition scorers and gates ────────────────────────
-
-
-def test_the_d2_scorers_read_an_enforced_note_end_to_end() -> None:
-    sys.path.insert(0, str(REPO / "services" / "note-service" / "tests" / "unit"))
-    from meeting_doc_fakes import ScriptedProvider
-
-    harness = _load("notes_eval")
-    meeting = json.loads(
-        (REPO / "tests" / "fixtures" / "eval" / "notes" / "m06_de_news_podcast.json").read_text()
-    )
-    meeting["gold"]["roles"] = {"SPEAKER_1": "narrator"}
-    produced = asyncio.run(harness.run_pipeline(meeting, ScriptedProvider()))
-    row = notes_scoring.score_meeting(meeting, produced)
-    for key in ("headings_pass", "bullets_specific", "children", "lint_first_pass"):
-        assert key in row, key
-    assert row["subject_failures"] == 0
-    summary = notes_scoring.aggregate([row])
-    gates = notes_scoring.d2_gates(summary)
-    assert set(gates) >= {
-        "d2_lint_first_pass_90pct",
-        "d2_lint_after_regeneration_98pct",
-        "d2_no_subject_failures",
-        "d2_roles_correct_95pct",
-    }
-    assert gates["d2_no_subject_failures"]

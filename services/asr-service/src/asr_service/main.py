@@ -91,7 +91,6 @@ def create_app() -> FastAPI:
         title="ASR Service",
         description="Batch ASR orchestrator (upload, queue, fetch).",
         version="0.3.0",
-        openapi_version="3.1.0",
         lifespan=_lifespan,
         docs_url="/docs",
         redoc_url="/redoc",

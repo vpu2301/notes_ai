@@ -46,6 +46,8 @@ struct SettingsView: View {
                             ConnectorsView(calendar: app.calendar, google: app.googleCalendar, store: app.connectors)
                         case .dataAI:
                             DataAndAIView()
+                        case .writing:
+                            NoteWritingView()
                         case .billing:
                             BillingView()
                         case .account:
@@ -95,6 +97,7 @@ struct SettingsView: View {
             navRow("Names and terms", symbol: "character.book.closed", tab: .vocabulary)
             navRow("Connectors", symbol: "link", tab: .connectors)
             navRow("Data & AI", symbol: "lock.shield", tab: .dataAI)
+            navRow("Note writing", symbol: "text.quote", tab: .writing)
             // What the workspace pays is an admin's business (the API agrees).
             if app.activeWorkspace?.canManageMembers == true {
                 navRow("Billing", symbol: "creditcard", tab: .billing)
@@ -145,6 +148,7 @@ struct SettingsView: View {
         case .vocabulary: return "Names and terms"
         case .connectors: return "Connectors"
         case .dataAI: return "Data & AI"
+        case .writing: return "Note writing"
         case .billing: return "Billing"
         case .account: return "Account"
         case .advanced: return "Advanced"

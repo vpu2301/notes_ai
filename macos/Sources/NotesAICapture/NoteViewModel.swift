@@ -125,6 +125,9 @@ final class NoteViewModel: ObservableObject {
 
     // Evidence rows behind the note, the detail level, and the names to check.
     @Published private(set) var generatedRows: [GeneratedItem] = []
+    /// A3 — the note's respellings, shown over the transcript until the reader asks for the words as heard.
+    @Published private(set) var noteCorrections: [NoteCorrection] = []
+    @Published var showAsTranscribed = false
     @Published private(set) var detail: DetailLevel = .standard
     @Published private(set) var correctionBusy: String?
     @Published private(set) var correctionDone: [String: String] = [:]
@@ -354,6 +357,54 @@ final class NoteViewModel: ObservableObject {
     var generationNeedsProcessorAcknowledgement: Bool {
         generationErrorCode == "processor_unacknowledged"
             || (generation?.status == "failed" && generation?.errorKind == "processor_unacknowledged")
+    }
+
+    // MARK: - Write this note differently (N4)
+
+    /// This note's own instructions; nil until asked, or while the server has the feature off.
+    @Published private(set) var noteInstructions: AIInstructions?
+
+    static let notRewrittenText = "Saved; the note could not be rewritten right now."
+
+    /// Offered on an editable draft from a recording, once the server answered with the feature on.
+    var canWriteDifferently: Bool { editable && jobId != nil && noteInstructions != nil }
+    /// "Regenerate as…" (P2): an editable note with a recording.
+    var canRegenerate: Bool { editable && jobId != nil }
+
+    /// Asked once per note; a failure leaves the menu item hidden.
+    func loadNoteInstructions() async {
+        guard editable, jobId != nil, noteInstructions == nil else { return }
+        noteInstructions = try? await api.noteInstructions(noteId: noteId)
+    }
+
+    /// P2 — "Regenerate as…": write the note again with `template` from now on.
+    /// Returns `notRewrittenText` when the rewrite was refused (409).
+    func regenerate(as template: NoteTemplate) async throws -> String? {
+        do {
+            try await api.regenerate(noteId: noteId, template: template)
+        } catch APIError.http(status: 409, problem: _) {
+            return Self.notRewrittenText
+        }
+        await loadGeneration()
+        return nil
+    }
+
+    /// Saves `text` (nil removes the instructions), then writes the note again.
+    /// Returns `notRewrittenText` when the save held but the rewrite was refused (409).
+    func rewriteWithInstructions(_ text: String?) async throws -> String? {
+        if let text {
+            noteInstructions = try await api.putNoteInstructions(noteId: noteId, text: text)
+        } else {
+            try await api.deleteNoteInstructions(noteId: noteId)
+            noteInstructions = (try? await api.noteInstructions(noteId: noteId)) ?? noteInstructions
+        }
+        do {
+            try await api.regenerate(noteId: noteId)
+        } catch APIError.http(status: 409, problem: _) {
+            return Self.notRewrittenText
+        }
+        await loadGeneration()
+        return nil
     }
 
     /// Poll while the engine writes; when it stops, show what it wrote.
@@ -1661,6 +1712,15 @@ extension NoteViewModel {
             return
         }
         generatedRows = (try? await api.generatedItems(noteId: noteId)) ?? []
+        noteCorrections = generatedRows.isEmpty ? [] : ((try? await api.correctionsSummary(noteId: noteId)) ?? [])
+    }
+
+    /// The transcript paragraph as the reader asked for it: the note's spellings in place, or as heard.
+    func transcriptParagraph(_ paragraph: String) -> AttributedString {
+        if !showAsTranscribed, let substituted = NoteCorrection.substituted(paragraph, noteCorrections) {
+            return substituted
+        }
+        return EntityCorrection.underlined(paragraph, entityCorrections)
     }
 
     /// Evidence and the detail toggle only for the current note, and only when the engine wrote it.
@@ -1715,6 +1775,7 @@ extension NoteViewModel {
         let surface: String
         let canonical: String
         let source: String
+        var entity: String? = nil
 
         var id: String { "\(surface)→\(canonical)" }
     }
@@ -1730,7 +1791,8 @@ extension NoteViewModel {
                 let id = "\(c.surface)→\(c.canonical)"
                 if seen.insert(id).inserted {
                     fixed.append(Respelling(itemKey: row.itemKey, surface: c.surface,
-                                            canonical: c.canonical, source: c.source))
+                                            canonical: c.canonical, source: c.source,
+                                            entity: c.entity))
                 }
             }
             for name in Self.doubtedNames(in: row.text) where seenDoubt.insert(name).inserted {
@@ -1756,14 +1818,20 @@ extension NoteViewModel {
         correctionError = nil
         defer { correctionBusy = nil }
         do {
+            // F2-02: a person only with evidence of one; "Added" only when the saved entry holds the spelling.
+            var learned = false
             if accept {
-                _ = try await api.rememberTerm(respelling.canonical, kind: .person, heardAs: [respelling.surface])
+                let saved = try await api.rememberTerm(
+                    respelling.canonical, kind: respelling.entity == "person" ? .person : .term,
+                    heardAs: [respelling.surface], noteId: noteId)
+                learned = saved.heardAs.contains { $0.caseInsensitiveCompare(respelling.surface) == .orderedSame }
             }
             try await api.correctName(noteId: noteId, itemKey: respelling.itemKey,
                                       expectedVersion: version, accept: accept,
                                       surface: respelling.surface, canonical: respelling.canonical,
                                       source: respelling.source)
-            correctionDone[respelling.id] = accept ? "Added to the glossary" : "Put back as heard"
+            correctionDone[respelling.id] = !accept ? "Put back as heard"
+                : learned ? "Added to the glossary" : "Term saved; the heard spelling was not learned"
             if !accept { await load() }
         } catch {
             correctionError = AuthCopy.message(for: error)

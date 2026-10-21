@@ -115,7 +115,6 @@ def create_app() -> FastAPI:
             "Notification fan-out: in-app feed, WebSocket push (notifications.v1), and email."
         ),
         version="0.12.0",
-        openapi_version="3.1.0",
         lifespan=_lifespan,
         docs_url="/docs",
         redoc_url="/redoc",

@@ -56,7 +56,6 @@ def create_app() -> FastAPI:
         title="NLP Service",
         description="Sprint-05 NLP post-processing pipeline.",
         version="0.5.0",
-        openapi_version="3.1.0",
         lifespan=_lifespan,
         docs_url="/docs",
         redoc_url="/redoc",

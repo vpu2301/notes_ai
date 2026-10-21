@@ -326,6 +326,44 @@ struct MeetingTypePicker: View {
     }
 }
 
+/// P2 — the writer's template for the next note, as a compact menu ("Automatic ▾").
+struct NoteTemplateMenu: View {
+    @EnvironmentObject private var capture: CaptureViewModel
+
+    var body: some View {
+        DSMenu(width: 170, items: {
+            NoteTemplate.allCases.map { kind in
+                .item(kind.label, checked: kind == capture.template) { capture.template = kind }
+            }
+        }) {
+            HStack(spacing: 5) {
+                Text(capture.template.label)
+                    .font(.ds(12.5, .medium))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.dsIcon(9, .semibold))
+                    .foregroundStyle(DS.muted)
+            }
+            .fixedSize()
+            .foregroundStyle(DS.text1)
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(
+                RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
+                    .fill(DS.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DS.radiusSm, style: .continuous)
+                            .strokeBorder(DS.line, lineWidth: DS.hairline)
+                    )
+            )
+            .contentShape(Rectangle())
+        }
+        .disabled(capture.isRecording || capture.phase.isBusy)
+        .help("Template")
+        .accessibilityLabel("Template: \(capture.template.label)")
+    }
+}
+
 /// The kind of meeting as a compact menu ("Auto ▾"), for the menu-bar popover.
 struct MeetingTypeMenu: View {
     @EnvironmentObject private var capture: CaptureViewModel

@@ -60,6 +60,29 @@
   "decisions": [
    "Make the offer to candidate B",
    "A November start date is acceptable"
+  ],
+  "claims": [
+   {
+    "who": "B",
+    "claim": [
+     "November"
+    ],
+    "verdict": []
+   }
+  ],
+  "certainties": [
+   {
+    "match": "strongest on the system design",
+    "certainty": "opinion"
+   },
+   {
+    "match": "struggled with the concurrency",
+    "certainty": "opinion"
+   },
+   {
+    "match": "start date in November",
+    "certainty": "fact"
+   }
   ]
  }
 }

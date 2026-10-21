@@ -286,12 +286,16 @@ def test_code_switch_kept_and_translated_segments() -> None:
     assert asr_scoring.codeswitch(reference, spans, kept) == {
         "codeswitch_regions": 1,
         "codeswitch_covered": 1,
+        "codeswitch_ref_words": 5,
+        "codeswitch_errors": 0,
         "translated_segments": 0,
     }
     translated = _out(_seg(0, "Der Sprecher sagt"), _seg(3000, "wir werden mit Gewalt antworten"))
     assert asr_scoring.codeswitch(reference, spans, translated) == {
         "codeswitch_regions": 1,
         "codeswitch_covered": 0,
+        "codeswitch_ref_words": 5,
+        "codeswitch_errors": 5,
         "translated_segments": 1,
     }
 

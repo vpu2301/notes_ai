@@ -19,7 +19,7 @@ def catalogue(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
     async def _load(conn, *, language):  # noqa: ANN001
         return cat.get(language, [])
 
-    monkeypatch.setattr(rft.template_match, "load_candidates", _load)
+    monkeypatch.setattr(rft.template_catalog, "load_candidates", _load)
     return cat
 
 

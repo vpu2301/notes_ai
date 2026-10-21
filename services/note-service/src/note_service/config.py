@@ -204,21 +204,22 @@ class Settings(BaseSettings):
         default="6d64782d6465762d73686172652d6c696e6b2d6b65792d3030303030303030",
         alias="MDX_SHARE_LINK_HMAC_KEY_HEX",
     )
-    # Document engine. Without a chat backend no generation starts; the note keeps its transcript.
+    # The note writer. Without a chat backend no generation starts; the note keeps its transcript.
     note_generation_enabled: bool = Field(default=True, alias="MDX_NOTE_GENERATION_ENABLED")
     # How many generations one tenant may have in flight at once.
     note_generation_per_tenant: int = Field(default=3, alias="MDX_NOTE_GENERATION_PER_TENANT")
-    # One bounded model call per generation to respell unknown names. OFF: precision
-    # on the small model was 0/8; enable per environment only with an eval clearing 0.9.
-    note_entity_model_tier: bool = Field(default=False, alias="MDX_NOTE_ENTITY_MODEL_TIER")
+    # Note instructions (Sprint N1): the routes and the worker's use of the stored text.
+    # Off by default; dev compose and staging set it on, production stays off until N5.
+    note_instructions_enabled: bool = Field(default=False, alias="MDX_NOTE_INSTRUCTIONS_ENABLED")
+    note_instructions_max_chars: int = Field(default=12000, alias="MDX_NOTE_INSTRUCTIONS_MAX_CHARS")
+    # P3: one more model call after writing that marks bullets the transcript does not
+    # support (a mark, never a deletion). Off by default.
+    note_check_enabled: bool = Field(default=False, alias="MDX_NOTE_CHECK")
+    # The commit this image was built from (Dockerfile ARG BUILD_SHA); shown with every run.
+    build_sha: str = Field(default="", alias="MDX_BUILD_SHA")
     # `none` shows plans and changes nothing; `manual` changes the plan at once; `stripe` later.
     billing_provider: Literal["none", "manual"] = Field(
         default="none", alias="MDX_BILLING_PROVIDER"
-    )
-    # Past this many seconds per recording hour the coverage re-read is skipped and the
-    # thin third named as missing. Unset: no limit (no backend meets the 300 s target yet).
-    note_coverage_retry_budget_s_per_hour: float | None = Field(
-        default=None, alias="MDX_NOTE_COVERAGE_RETRY_BUDGET_S_PER_HOUR"
     )
     clip_max_span_ms: int = Field(default=60_000, alias="MDX_CLIP_MAX_SPAN_MS")
     clip_pad_ms: int = Field(default=300, alias="MDX_CLIP_PAD_MS")
@@ -232,14 +233,6 @@ class Settings(BaseSettings):
     # How long a transcript snapshot may outlive its run.
     generation_snapshot_hours: int = Field(
         default=24, ge=1, alias="MDX_NOTE_GENERATION_SNAPSHOT_HOURS"
-    )
-    # Shadow backend: runs beside the real one on a share of generations; its output is
-    # counted and thrown away, never stored or shown. Empty: no shadow runs.
-    note_generation_shadow_backend: str = Field(
-        default="", alias="MDX_NOTE_GENERATION_SHADOW_BACKEND"
-    )
-    note_generation_shadow_percent: int = Field(
-        default=5, ge=0, le=100, alias="MDX_NOTE_GENERATION_SHADOW_PERCENT"
     )
     background_jobs_interval_s: float = Field(
         default=86400.0, alias="MDX_BACKGROUND_JOBS_INTERVAL_S"

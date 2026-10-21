@@ -123,7 +123,7 @@ class SegmentDiagnostics(BaseModel):
     second_pass: bool = False
 
 
-DropReason = Literal["no_speech", "loop", "low_confidence_nonspeech", "artefact"]
+DropReason = Literal["no_speech", "loop", "low_confidence_nonspeech", "artefact", "artefact_outro"]
 
 
 class DroppedSegment(BaseModel):
@@ -203,6 +203,25 @@ class NoiseRegion(BaseModel):
     kind: NoiseKind
 
 
+class SegmentLanguage(BaseModel):
+    """Segment-level language check (Sprint B3 T2): segments looked at, those
+    suspected of another language (by the lexical test or a low ``avg_logprob``),
+    those decoded again in that language and kept because the decoder was surer,
+    those the backend gave no ``avg_logprob`` for, and those skipped at the deadline."""
+
+    segments: NonNegativeInt = 0
+    suspects: NonNegativeInt = 0
+    lexical: NonNegativeInt = 0
+    logprob: NonNegativeInt = 0
+    # Word-free stretches inside a speech run the identifier called another language.
+    gaps: NonNegativeInt = 0
+    switched: NonNegativeInt = 0
+    # Segments relabelled with the language their own words are in (text unchanged).
+    relabelled: NonNegativeInt = 0
+    unavailable: NonNegativeInt = 0
+    skipped: NonNegativeInt = 0
+
+
 class Diagnostics(BaseModel):
     """What the guards did to this transcript. Counts and timestamps only;
     lives in the stored artifact, not in a table."""
@@ -213,6 +232,7 @@ class Diagnostics(BaseModel):
     # None on artifacts stored before coverage was measured.
     coverage: Coverage | None = None
     second_pass: SecondPass = Field(default_factory=SecondPass)
+    segment_language: SegmentLanguage = Field(default_factory=SegmentLanguage)
     # Per decoded segment, in time order; empty on older artifacts.
     segments: list[SegmentDiagnostics] = Field(default_factory=list)
     dropped_segments: list[DroppedSegment] = Field(default_factory=list)

@@ -33,3 +33,91 @@ waivers:
       eval/notes/v2 report, for the same reason as the waivers above.
     owner: founder
     expires: 2026-12-31
+  - backend: hf_eu
+    prompt_version: "2026-10-18.6"
+    reason: >-
+      Sprint N2 (note instructions) added the FORM block and the heading-range field
+      to the compose prompts; with no writing profile the prompt text is unchanged.
+      hf_eu cannot be reached from this environment (the HF endpoints were never
+      created) and eval/notes/v2 holds no meetings (ADR-0068), so there is no report.
+      Waived on 2026-10-19; N2's numbers are synthetic, on mistral_eu.
+    owner: founder
+    expires: 2026-12-31
+  - backend: hf_eu
+    prompt_version: "2026-10-19.1"
+    reason: >-
+      Sprint N0 (writing style) added one line per style (formal, informal, academic) at
+      the head of the FORM block; `business`, the default, sends today's prompts. hf_eu is
+      not reachable from this environment (the HF endpoints were never created) and
+      eval/notes/v2 holds no meetings (ADR-0068). Waived on 2026-10-19; N0's numbers are
+      synthetic, on mistral_eu.
+    owner: founder
+    expires: 2026-12-31
+  - backend: hf_eu
+    prompt_version: "2026-10-19.2"
+    reason: >-
+      The concept's revision replaced the instructions' `register` (plain/formal lines)
+      with N0's `style`; with no instructions and the business style the prompts are
+      unchanged. hf_eu is not reachable from this environment and eval/notes/v2 holds no
+      meetings (ADR-0068). Waived on 2026-10-19.
+    owner: founder
+    expires: 2026-12-31
+  - backend: hf_eu
+    prompt_version: "2026-10-19.3"
+    reason: >-
+      Sprint B2: narrated addenda (extract/context/block/summary/title) selected only for
+      the broadcast and memo families, the outline step and the certainties reported,
+      unproven and refuted; meeting-family prompt strings are byte-identical (golden test
+      in tests/unit/test_meeting_doc_b2.py). hf_eu is not reachable from this environment
+      and eval/notes/v2 holds no meetings (ADR-0068); the numbers are the synthetic
+      m01–m11 runs and the r02 case on mistral_eu (docs/eval/notes-pipeline-2026-10-19-*).
+      Waived on 2026-10-19.
+    owner: founder
+    expires: 2026-12-31
+  - backend: hf_eu
+    prompt_version: "2026-10-20.1"
+    reason: >-
+      Sprint A1: the `statement` certainty, the holder rules (the original claimant, never
+      the relayer) and the holder re-ask. hf_eu is not reachable from this environment and
+      eval/notes/v2 holds no meetings (ADR-0068); the numbers are the synthetic m01–m11 runs
+      and the r02 case on mistral_eu (docs/eval/notes-pipeline-2026-10-20-*). Waived on
+      2026-10-20.
+    owner: founder
+    expires: 2026-12-31
+  - backend: hf_eu
+    prompt_version: "2026-10-20.3"
+    reason: >-
+      A1/A2 review step 3: the single-speaker addendum (one speaker or a memo: attribution
+      implicit) on the summary and block prompts. hf_eu is not reachable from this
+      environment and eval/notes/v2 holds no meetings (ADR-0068); the numbers are the
+      synthetic m01–m11 + r02 runs on mistral_eu.
+    owner: founder
+    expires: 2026-12-31
+  - backend: hf_eu
+    prompt_version: "2026-10-20.2"
+    reason: >-
+      Sprint A2: the run rule for attribution in the summary and block prompts (holder once,
+      as the subject of a reporting verb). hf_eu is not reachable from this environment and
+      eval/notes/v2 holds no meetings (ADR-0068); the numbers are the synthetic m01–m11 runs
+      and the r02 case on mistral_eu (docs/eval/notes-pipeline-2026-10-20-*). Waived on
+      2026-10-20.
+    owner: founder
+    expires: 2026-12-31
+  - backend: hf_eu
+    prompt_version: "2026-10-21"
+    reason: >-
+      Sprint R0 removed the old writing path and its prompts; PROMPT_VERSION now names the
+      writer prompt Sprint P1 adds. No generation can run until P1 lands, so there is no
+      report on any backend. hf_eu is not reachable from this environment and
+      eval/notes/v2 holds no meetings (ADR-0068). Waived on 2026-10-21.
+    owner: founder
+    expires: 2026-12-31
+  - backend: hf_eu
+    prompt_version: "2026-10-21.2"
+    reason: >-
+      Task P2a moved the writer's rules out of the system prompt into the instructions
+      text (writer_templates/instructions.default.md); the system text is one sentence.
+      hf_eu is not reachable from this environment and eval/notes/v2 holds no meetings
+      (ADR-0068). Waived on 2026-10-21.
+    owner: founder
+    expires: 2026-12-31

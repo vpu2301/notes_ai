@@ -1,0 +1,52 @@
+{
+ "id": "ml01_de_host_en_promise",
+ "sentinel": "German host + English conditional $5,000 promise: both chambers as the condition, every adult citizen as the recipient",
+ "speakers": {
+  "SPEAKER_1": "Lena Brandt",
+  "SPEAKER_2": "Robert Calder"
+ },
+ "must_contain_any": [
+  [
+   "5.000",
+   "5000",
+   "fünftausend"
+  ]
+ ],
+ "same_line": [
+  [
+   [
+    "5.000",
+    "5000",
+    "fünftausend"
+   ],
+   [
+    "erwachsen"
+   ],
+   [
+    "beide Kammern",
+    "beiden Kammern",
+    "Repräsentantenhaus und",
+    "und Senat",
+    "und den Senat",
+    "sowohl"
+   ]
+  ]
+ ],
+ "source_cited": [
+  {
+   "language": "en",
+   "match": [
+    "5.000",
+    "5000",
+    "fünftausend"
+   ]
+  }
+ ],
+ "must_not_contain": [
+  "seine Wähler",
+  "seinen Wählern",
+  "ihre Wähler",
+  "alle Wähler"
+ ],
+ "excluded_language_ms_max": 0
+}

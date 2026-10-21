@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getGeneration, regenerate } from "../api/generation";
 import { ApiError } from "../api/http";
 import { messageFor } from "../lib/errorCopy";
-import type { GenerationView } from "../api/types";
+import type { GenerationProvenance, GenerationView } from "../api/types";
 import { MAX_SHOWN_RANGES, excludedItems } from "../lib/generation";
 import { useToast } from "./Toaster";
 
@@ -140,18 +140,64 @@ export function GenerationStatus({
     );
   }
 
+  const details = <RunDetails provenance={view.provenance} />;
+  // What wrote it: the note instructions and the model settings — one sentence, one link
+  // to Settings › Note writing. The template is the header's pill.
+  const version = view.instructions?.version;
+  const settingsVersion = view.model_settings_version ?? 0;
+  const which = instructionsWording(view.instructions?.scope);
+  // The link sits on the most specific part: instructions, else settings.
+  const linkOn = version && which !== null ? "instructions" : "settings";
+  const link = (part: string, label: string) =>
+    linkOn === part ? <Link to="/settings/writing">{label}</Link> : label;
+  const parts: ReactNode[] = [];
+  if (version) {
+    parts.push(
+      <Fragment key="i">
+        {which === null ? (
+          "this note's instructions"
+        ) : (
+          <>
+            {which} instructions {link("instructions", `v${version}`)}
+          </>
+        )}
+        {view.instructions?.fallback === "stale" &&
+          " (workspace instructions used — the meeting type's text is being updated)"}
+      </Fragment>,
+    );
+  }
+  if (settingsVersion > 0) {
+    parts.push(<Fragment key="m">model settings {link("settings", `v${settingsVersion}`)}</Fragment>);
+  }
+  const written = (capital: boolean): ReactNode =>
+    parts.length ? (
+      <>
+        {capital ? "Written" : "written"} with{" "}
+        {parts.map((p, n) => (
+          <Fragment key={n}>
+            {n > 0 && " · "}
+            {p}
+          </Fragment>
+        ))}
+      </>
+    ) : null;
+  const instructed = written(false);
+
   if (view.status === "failed") {
     return (
-      <p className="banner banner-warn gen-status" role="status">
-        <span className="grow">
-          {REASONS[view.error_kind ?? ""] ?? "This note could not be written automatically."}
-        </span>
-        {canRegenerate && view.error_kind !== "budget_exceeded" && (
-          <button className="btn sm" disabled={busy} onClick={() => void again()}>
-            Try again
-          </button>
-        )}
-      </p>
+      <>
+        <p className="banner banner-warn gen-status" role="status">
+          <span className="grow">
+            {REASONS[view.error_kind ?? ""] ?? "This note could not be written automatically."}
+          </span>
+          {canRegenerate && view.error_kind !== "budget_exceeded" && (
+            <button className="btn sm" disabled={busy} onClick={() => void again()}>
+              Try again
+            </button>
+          )}
+        </p>
+        {details}
+      </>
     );
   }
 
@@ -179,22 +225,138 @@ export function GenerationStatus({
       .slice(0, 3)
       .join(", ");
     return (
-      <p className="banner banner-warn gen-status" role="status">
-        <span className="grow">
-          Some of the recording could not be read{minutes ? ` (around minute ${minutes})` : ""}. The
-          rest of the note is written from what was readable.
-        </span>
-        {canRegenerate && (
-          <button className="btn sm" disabled={busy} onClick={() => void again()}>
-            Write it again
-          </button>
-        )}
-        {excluded}
-      </p>
+      <>
+        <p className="banner banner-warn gen-status" role="status">
+          <span className="grow">
+            {minutes || !view.incomplete_reasons?.length ? (
+              <>
+                Some of the recording could not be read{minutes ? ` (around minute ${minutes})` : ""}.
+                The rest of the note is written from what was readable.
+                {instructed && <> · {instructed}</>}
+              </>
+            ) : (
+              <>
+                Parts of this note could not be fully verified. Unchecked points are offered for
+                review instead of being written as fact.
+                {instructed && <> · {instructed}</>}
+              </>
+            )}
+          </span>
+          {canRegenerate && (
+            <button className="btn sm" disabled={busy} onClick={() => void again()}>
+              Write it again
+            </button>
+          )}
+          {excluded}
+        </p>
+        {details}
+      </>
     );
   }
 
-  return view.status === "complete" ? excluded : null;
+  return view.status === "complete" ? (
+    <>
+      {instructed && <p className="help gen-instructions">{written(true)}</p>}
+      {excluded}
+      {details}
+    </>
+  ) : null;
+}
+
+/** "workspace", "client-call", …; null for a note's own instructions. */
+function instructionsWording(scope: string | undefined): string | null {
+  const words: Record<string, string> = {
+    client: "client-call",
+    team: "team-meeting",
+    sales: "sales-call",
+    one_on_one: "1:1",
+    interview: "interview",
+    broadcast: "broadcast",
+    memo: "memo",
+  };
+  if (scope === "note") return null;
+  return words[scope ?? ""] ?? "workspace";
+}
+
+const onOff = (value: boolean | null | undefined) => (value == null ? "unknown" : value ? "on" : "off");
+
+/**
+ * What produced this run, for a reviewer comparing results: the code, the prompt and
+ * profile versions, the flags as the run executed them and where they came from, and
+ * the models that actually answered. Collapsed; absent for runs from older servers.
+ */
+function RunDetails({ provenance: p }: { provenance?: GenerationProvenance | null }) {
+  if (!p) return null;
+  const from =
+    p.flags_source === "snapshot"
+      ? "pinned when the run was queued"
+      : p.flags_source === "deployment"
+        ? "this deployment's settings (run from before pinning)"
+        : null;
+  return (
+    <details className="gen-details muted" data-testid="run-details">
+      <summary>Run details</summary>
+      <dl>
+        <dt>Code</dt>
+        <dd>
+          {p.build_sha ?? "unknown"}
+          {p.pinned_build_sha && p.pinned_build_sha !== p.build_sha
+            ? ` (queued by ${p.pinned_build_sha})`
+            : ""}
+        </dd>
+        <dt>Prompts</dt>
+        <dd>
+          {p.prompt_version} · profile{" "}
+          {p.profile_version_id ? p.profile_version_id.slice(0, 8) : "bundled"}
+          {p.run_kind !== "generation" ? ` · ${p.run_kind}` : ""}
+        </dd>
+        <dt>Engine</dt>
+        <dd>
+          Multilingual evidence {onOff(p.multilingual_evidence)} · meaning checks{" "}
+          {onOff(p.fidelity)} · final check {onOff(p.final_check)}
+          {from ? ` — ${from}` : ""}
+          {p.flags_differ?.length ? (
+            <div>
+              The worker is set differently for {p.flags_differ.join(", ")}; this run used what was
+              pinned.
+            </div>
+          ) : null}
+        </dd>
+        <dt>Language</dt>
+        <dd>
+          {p.output_language ?? "unknown"}
+          {p.output_language_source ? ` (${p.output_language_source})` : ""}
+          {p.transcript_rev != null ? ` · transcript revision ${p.transcript_rev}` : ""}
+        </dd>
+        {p.stages?.length ? (
+          <>
+            <dt>Models</dt>
+            <dd>
+              {p.stages.map((s) => (
+                <div key={`${s.stage}-${s.backend}-${s.model_id}`}>
+                  {s.stage}: {s.model_id ?? s.backend ?? "unknown"} ({s.calls} calls
+                  {s.failed ? `, ${s.failed} failed` : ""})
+                </div>
+              ))}
+            </dd>
+          </>
+        ) : null}
+        {p.fallbacks?.length ? (
+          <>
+            <dt>Fallbacks</dt>
+            <dd>
+              {p.fallbacks.map((f) => (
+                <div key={f.kind}>
+                  {f.kind}: {f.backend} instead of {f.primary}
+                  {f.reason ? ` (${f.reason.replace(/_/g, " ")})` : ""}
+                </div>
+              ))}
+            </dd>
+          </>
+        ) : null}
+      </dl>
+    </details>
+  );
 }
 
 /** "Not included: 00:45–00:52 (background speech), …", each a link into the transcript. */

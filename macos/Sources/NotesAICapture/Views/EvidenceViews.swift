@@ -17,25 +17,44 @@ struct LineEvidenceView: View {
             if let chip = row.chipLabel {
                 EvidenceChip(text: chip, tone: .neutral)
             }
+            // B4: "Wörtlich" / "Paraphrase" / "Aus 2 Aussagen" — muted, in the note's language.
+            if let mark = row.provenanceLabel(language: model.generation?.language) {
+                EvidenceChip(text: mark, tone: .neutral)
+                    .help("What this line is")
+            }
             ForEach(row.respelled, id: \.surface) { c in
                 EvidenceChip(text: c.canonical, tone: .accent)
                     .help("heard as: \(c.surface)")
             }
-            Button {
-                open.toggle()
-            } label: {
-                Image(systemName: "text.quote")
-                    .font(.dsIcon(9, .semibold))
-                    .foregroundStyle(open ? DS.accentText : DS.muted.opacity(0.7))
-                    .frame(width: 18, height: 18)
-                    .background(Circle().fill(open ? DS.accentSoft : .clear))
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help("Show where this came from")
-            .accessibilityLabel("Show where this came from")
-            .popover(isPresented: $open, arrowEdge: .bottom) {
-                EvidencePopover(model: model, row: row) { open = false }
+            if !row.hasReference {
+                // P3: no transcript time on the line — a grey mark that opens nothing.
+                Circle().fill(DS.line).frame(width: 7, height: 7)
+                    .help("No reference")
+                    .accessibilityLabel("No reference")
+            } else {
+                Button {
+                    open.toggle()
+                } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "text.quote")
+                            .font(.dsIcon(9, .semibold))
+                            .foregroundStyle(open ? DS.accentText : (row.isUnsupported ? DS.warn : DS.muted.opacity(0.7)))
+                        if row.isUnsupported {
+                            // P3: the check call could not find it — a thin amber mark, the reason in the popover.
+                            Circle().fill(DS.warn).frame(width: 6, height: 6)
+                        }
+                    }
+                    .frame(height: 18)
+                    .padding(.horizontal, 2)
+                    .background(Capsule().fill(open ? DS.accentSoft : .clear))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .help(row.isUnsupported ? "Show where this came from (not found in the transcript)" : "Show where this came from")
+                .accessibilityLabel(row.isUnsupported ? "Show where this came from (not found in the transcript)" : "Show where this came from")
+                .popover(isPresented: $open, arrowEdge: .bottom) {
+                    EvidencePopover(model: model, row: row) { open = false }
+                }
             }
         }
         .fixedSize()
@@ -63,28 +82,63 @@ private struct EvidencePopover: View {
     let row: GeneratedItem
     let close: () -> Void
 
-    private var others: [String] { Array((row.cites ?? []).dropFirst()) }
+    /// Older rows cite fact keys; the popover names those lines instead of turns.
+    private var others: [String] { (row.citedTurns ?? []).isEmpty ? Array((row.cites ?? []).dropFirst()) : [] }
+    private var turns: [GeneratedItem.CitedTurn] { row.turnsCited }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let chip = row.chipLabel {
-                EvidenceChip(text: chip, tone: .neutral)
+            if row.isUnsupported {
+                Text("Not found in the transcript" + (row.checkReason.map { " — \($0)" } ?? ""))
+                    .font(.ds(12, .semibold))
+                    .foregroundStyle(DS.warn)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Text("“\(row.quote)”")
-                .font(.ds(13))
-                .foregroundStyle(DS.text1)
-                .lineSpacing(3)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                if let chip = row.chipLabel {
+                    EvidenceChip(text: chip, tone: .neutral)
+                }
+                if row.citeNearest == true {
+                    EvidenceChip(text: "Nearest match", tone: .neutral)
+                }
+            }
+            // B4: the claim row's verdict, the presenter's own words.
+            if let verdict = row.verdict, !verdict.isEmpty {
+                Text(verdict)
+                    .font(.ds(12, .semibold))
+                    .foregroundStyle(DS.text2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // P3: every cited turn, the first in full colour, its time highlighted.
+            ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(formatElapsed(ms: turn.momentMs))
+                            .font(.dsMono(11, .semibold))
+                            .foregroundStyle(DS.accentText)
+                            .padding(.horizontal, 4)
+                            .background(RoundedRectangle(cornerRadius: 3, style: .continuous).fill(DS.accentSoft))
+                        if let speaker = turn.speaker, !speaker.isEmpty {
+                            Text(speaker).font(.dsMono(11)).foregroundStyle(DS.muted)
+                        }
+                        if index == 0, let mark = row.provenanceLabel(language: model.generation?.language) {
+                            Text(mark).font(.dsMono(11)).foregroundStyle(DS.muted)
+                        }
+                    }
+                    Text("“\(turn.text)”")
+                        .font(.ds(13))
+                        .foregroundStyle(index == 0 ? DS.text1 : DS.text2)
+                        .lineSpacing(3)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             HStack(spacing: 10) {
-                Text(row.timeText + (row.speakerName.map { " · \($0)" } ?? ""))
-                    .font(.dsMono(11))
-                    .foregroundStyle(DS.muted)
                 Spacer(minLength: 0)
-                if model.canSeekTranscript {
+                if model.canSeekTranscript, let first = turns.first {
                     Button("Show in transcript") {
                         close()
-                        Task { await model.seekTranscript(to: row.startMs) }
+                        Task { await model.seekTranscript(to: first.momentMs) }
                     }
                     .buttonStyle(DSButtonStyle(kind: .secondary, size: 11.5, height: 24))
                 }

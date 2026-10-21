@@ -127,5 +127,21 @@ NOTE_GENERATION_FAILED: Final = "note.generation_failed"  # error_kind
 # Closed vocabulary and counts; never a processor's commercial terms.
 AI_SETTINGS_CHANGED: Final = "ai.settings_changed"  # tier, provider, generation_enabled
 AI_BUDGET_REACHED: Final = "ai.budget_reached"  # cents, budget_cents
+# ── Prompt profiles and experiments (S3) ────────────────────────────
+# Ids, version numbers, revisions and counts; never instruction text or note content.
+# ── Note instructions (N1) ──────────────────────────────────────────
+# Scope, version and counts; never the text, a guidance line or a term.
+AI_INSTRUCTIONS_CHANGED: Final = (
+    "ai.instructions_changed"  # scope, version, chars, compile_status, not_applied, dials
+)
+AI_INSTRUCTIONS_CLEARED: Final = "ai.instructions_cleared"  # scope, version
+# P2 — a workspace's own text for a built-in note template, and back to the built-in.
+AI_TEMPLATE_CHANGED: Final = "ai.template_changed"  # name, language, chars
+AI_TEMPLATE_RESET: Final = "ai.template_reset"  # name, language
+# N4 — one note's instructions ("Write this note differently"): counts only, target = note.
+NOTE_INSTRUCTIONS_CHANGED: Final = (
+    "note.instructions_changed"  # chars, compile_status, not_applied, dials, base scopes
+)
+NOTE_INSTRUCTIONS_CLEARED: Final = "note.instructions_cleared"  # (no payload keys)
 BILLING_PLAN_CHANGED: Final = "billing.plan_changed"  # from_plan, to_plan, provider
 BILLING_CODE_REDEEMED: Final = "billing.code_redeemed"  # from_plan, to_plan, days

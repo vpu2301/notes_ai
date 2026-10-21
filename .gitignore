@@ -57,6 +57,10 @@ scripts/eval/local/
 eval/asr/*/*/
 eval/notes/**/*.json
 !eval/notes/**/manifest.json
+# Synthetic code-switch cases (Sprint B3): script.json is tracked, the audio and the
+# generated reference/spans come from `make eval-asr-synthetic`.
+tests/fixtures/eval/asr/synthetic/*/reference.json
+tests/fixtures/eval/asr/synthetic/*/spans.json
 
 # Real data never enters git — only the app. DB dumps/backups, local
 # databases, recordings and exports stay on the machine (or in MinIO/S3).

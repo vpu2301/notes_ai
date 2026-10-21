@@ -13,10 +13,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from auth import Claims
-from note_service.domain.template_match import (
-    TemplateCandidate,
-    select_template,
-)
+from note_service.domain.template_catalog import TemplateCandidate, default_template
 from template_models import TemplateDefinition
 
 REQUESTER_SUB = UUID("11111111-1111-1111-1111-111111111111")
@@ -75,34 +72,16 @@ CATALOGUE = [
 ]
 
 
-# ── Auto-match (pure) ───────────────────────────────────────────────
+# ── The default template (pure) ────────────────────────────────────
 
 
-def test_interview_transcript_matches_interview_template() -> None:
-    choice = select_template(CATALOGUE, INTERVIEW_TRANSCRIPT)
-    assert choice is not None
-    assert choice.candidate.code == "interview_debrief_uk"
-    assert choice.mode == "auto"
-    assert choice.score >= 3
-
-
-def test_unrelated_transcript_falls_back_to_meeting_notes() -> None:
-    choice = select_template(CATALOGUE, "обговорили погоду і плани")
-    assert choice is not None
-    assert choice.candidate.code == "meeting_notes_uk"
-    assert choice.mode == "fallback"
+def test_the_general_meeting_notes_template_is_the_default() -> None:
+    choice = default_template(CATALOGUE)
+    assert choice is not None and choice.code == "meeting_notes_uk"
 
 
 def test_empty_catalogue_returns_none() -> None:
-    assert select_template([], INTERVIEW_TRANSCRIPT) is None
-
-
-def test_inflected_form_still_matches() -> None:
-    # «співбесіди» (genitive) must match template «Співбесіда з кандидатом».
-    choice = select_template(CATALOGUE, "після співбесіди кандидат надіслав тестове завдання")
-    assert choice is not None
-    assert choice.candidate.code == "interview_debrief_uk"
-    assert choice.mode == "auto"
+    assert default_template([]) is None
 
 
 # ── Endpoint ────────────────────────────────────────────────────────
@@ -176,7 +155,7 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     async def _load_candidates(conn, *, language):  # noqa: ANN001
         return CATALOGUE
 
-    monkeypatch.setattr(rft.template_match, "load_candidates", _load_candidates)
+    monkeypatch.setattr(rft.template_catalog, "load_candidates", _load_candidates)
 
     async def _next_code(conn, *, tenant_id):  # noqa: ANN001
         return "NOTE-2026-00042"
@@ -214,15 +193,15 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     )
 
 
-def test_assign_auto_selects_template_and_creates_note(rig: SimpleNamespace) -> None:
+def test_assign_takes_the_default_template_and_creates_note(rig: SimpleNamespace) -> None:
     resp = rig.client.post(
         "/v1/notes/from-transcript",
         json={"asr_job_id": str(JOB_ID)},
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert body["template_selection"] == "auto"
-    assert body["template_name"] == "Співбесіда з кандидатом"
+    assert body["template_selection"] == "fallback"
+    assert body["template_name"] == "Нотатки зустрічі"
     assert body["code"] == "NOTE-2026-00042"
 
     (call,) = rig.create_calls
@@ -240,7 +219,7 @@ def test_assign_auto_selects_template_and_creates_note(rig: SimpleNamespace) -> 
 
     (event,) = rig.audit_calls
     assert event["payload"]["source_asr_job_id"] == str(JOB_ID)
-    assert event["payload"]["template_selection"] == "auto"
+    assert event["payload"]["template_selection"] == "fallback"
 
 
 def test_assign_duplicate_job_conflicts(rig: SimpleNamespace) -> None:

@@ -24,6 +24,7 @@ from .. import audit_kinds
 from ..config import settings as app_settings
 from ..deps import get_state, requires
 from ..domain import ai_settings as rules
+from ..domain import model_params
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,32 @@ class SettingsView(BaseModel):
     None where nothing is routed."""
     writer: WriterView | None = None
     small_writer: WriterView | None = None
+    """The parameters as saved (every field; unset ones at their recommended value)."""
+    model_params: dict[str, Any] = Field(default_factory=dict)
+    """What runs: the saved values with the writer's backend caps applied."""
+    model_params_effective: dict[str, Any] = Field(default_factory=dict)
+    model_params_version: int = 0
+    """False: the stored object no longer validates; notes use the defaults ("Reset needed")."""
+    model_params_valid: bool = True
+    """Per field: min, max, step, recommended (`default`), and `cap`/`cap_source` where the
+    backend limits it."""
+    model_params_limits: dict[str, Any] = Field(default_factory=dict)
+    """What the eval measured per temperature (`{"temperature": {"0.4": rate|null}}`);
+    null until a gold-set run exists."""
+    model_params_measured: dict[str, Any] = Field(default_factory=dict)
+
+
+class ModelParamsBody(BaseModel):
+    """The whole parameter set: every field is required, so a client cannot clear a value
+    by leaving it out (a partial object is a 422)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    temperature: float
+    max_output_tokens: int | None
+    max_concurrency: int
+    ask_temperature: float
+    ask_max_tokens: int
 
 
 class AcknowledgedProcessor(BaseModel):
@@ -109,6 +136,9 @@ class UpdateSettingsRequest(BaseModel):
     """The exact processors the admin is agreeing to. Must cover every
     processor the new setting would route to, or the change is refused."""
     acknowledge: list[AcknowledgedProcessor] = Field(default_factory=list, max_length=50)
+    """N0 — the whole parameter set, or back to the recommended values."""
+    model_params: ModelParamsBody | None = None
+    reset_model_params: bool = False
 
 
 def _required_processors() -> list[rules.Processor]:
@@ -168,6 +198,37 @@ async def _plan(conn: Any, tenant_id: UUID) -> tuple[str, dict[str, Any]]:
     )
 
 
+def _caps(tenant_id: UUID) -> int | None:
+    """The writer's backend for this workspace: its parallel calls."""
+    try:
+        resolved = _registry().resolve(str(tenant_id), "write")
+    except Exception:  # noqa: BLE001 — no registry: nothing to cap by
+        return None
+    return resolved.caps.max_concurrency
+
+
+def _measured(start: Any = None) -> dict[str, Any]:
+    """`docs/eval/model-params-<PROMPT_VERSION>.json` (N5 writes it), else nulls. Looked
+    for above this module's directory: in a checkout it is the repo root; in the image
+    (`/deps/note_service/…`) there is none, and nothing is measured."""
+    import json
+    from pathlib import Path
+
+    from ..domain.prompts import PROMPT_VERSION
+
+    empty: dict[str, Any] = {"temperature": {"0.2": None, "0.4": None, "0.7": None}}
+    name = Path("docs") / "eval" / f"model-params-{PROMPT_VERSION}.json"
+    here = Path(start or __file__).resolve()
+    path = next((base / name for base in here.parents if (base / name).is_file()), None)
+    if path is None:
+        return empty
+    try:
+        data = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        return empty
+    return {"temperature": {k: data.get("temperature", {}).get(k) for k in empty["temperature"]}}
+
+
 def _view(
     row: rules.SettingsRow,
     *,
@@ -180,6 +241,11 @@ def _view(
     provider, tier, unacknowledged = rules.effective(row, processors)
     agreed = row.acknowledged_keys
     writer, small_writer = _writers()
+    concurrency_cap = _caps(claims.tid)
+    saved = model_params.from_stored(
+        row.model_params, tenant_id=row.tenant_id, version=row.model_params_version
+    )
+    running = model_params.effective(saved, max_concurrency=concurrency_cap)
     return SettingsView(
         provider=row.provider,
         tier=row.tier,
@@ -212,7 +278,35 @@ def _view(
         can_edit=bool(_ADMIN_ROLES & set(claims.roles)),
         writer=writer,
         small_writer=small_writer,
+        model_params=saved.model_dump(mode="json"),
+        model_params_effective=running.model_dump(mode="json"),
+        model_params_version=row.model_params_version,
+        model_params_valid=model_params.is_valid(row.model_params),
+        model_params_limits=model_params.limits(max_concurrency=concurrency_cap),
+        model_params_measured=_measured(),
     )
+
+
+def _next_model_settings(
+    row: rules.SettingsRow, body: UpdateSettingsRequest, tenant_id: UUID
+) -> tuple[model_params.ModelParams, list[str], bool]:
+    """``(params to save, changed parameter names, changed at all)``. A requested value
+    above the backend's cap is saved capped."""
+    before = model_params.from_stored(
+        row.model_params, tenant_id=tenant_id, version=row.model_params_version
+    )
+    after = before
+    if body.reset_model_params:
+        after = model_params.DEFAULT
+    elif body.model_params is not None:
+        try:
+            after = model_params.ModelParams.model_validate(body.model_params.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from None
+        after = model_params.effective(after, max_concurrency=_caps(tenant_id))
+    changed = model_params.changed_fields(before, after)
+    # A reset is a change even when the values were already the defaults (a new version).
+    return after, changed, bool(changed) or body.reset_model_params
 
 
 @router.get("/settings", response_model=SettingsView)
@@ -302,6 +396,7 @@ async def put_ai_settings(
             )
 
         personal = row.personal
+        params, params_changed, settings_changed = _next_model_settings(row, body, claims.tid)
         row = await rules.upsert(
             conn,
             tenant_id=claims.tid,
@@ -315,6 +410,10 @@ async def put_ai_settings(
                 else row.monthly_budget_cents
             ),
             updated_by=claims.sub,
+            model_params=params.model_dump(mode="json", exclude_defaults=True)
+            if settings_changed
+            else row.model_params,
+            model_params_version=row.model_params_version + (1 if settings_changed else 0),
         )
         row.personal = personal
         spend = await rules.month_to_date_cents(conn, tenant_id=claims.tid)
@@ -337,6 +436,17 @@ async def put_ai_settings(
             "provider": row.provider,
             "generation_enabled": row.generation_enabled,
             "acknowledged": len(row.acknowledged or []),
+            # N0: names of what changed; two operational values an auditor should see.
+            **(
+                {
+                    "model_params_changed": params_changed,
+                    "model_params_version": row.model_params_version,
+                    "temperature": params.temperature,
+                    "max_output_tokens": params.max_output_tokens,
+                }
+                if settings_changed
+                else {}
+            ),
         },
         severity=Severity.INFO,
     )

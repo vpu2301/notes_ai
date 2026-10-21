@@ -742,3 +742,70 @@ def test_accepting_a_line_that_has_moved_on_is_still_recorded(rig: SimpleNamespa
     )
     assert resp.status_code == 200, resp.text
     assert rig.store.corrections[0]["action"] == "correction_accepted"
+
+
+# ── F2-02: grammar is not a mishearing ──────────────────────────────
+
+
+def test_an_article_only_variant_is_never_learned_but_the_term_may_be_saved(
+    rig: SimpleNamespace,
+) -> None:
+    resp = rig.client.post(
+        "/v1/glossary",
+        json={"term": "Repräsentantenhaus", "kind": "term", "heard_as": ["Das Repräsentantenhaus"]},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["heard_as"] == [] and body["ignored_heard_as"] == ["Das Repräsentantenhaus"]
+    # Manual vocabulary for an institution stays supported.
+    assert body["term"] == "Repräsentantenhaus" and body["kind"] == "term"
+    assert rig.store.terms[0].heard_as == []
+
+
+def test_a_genuine_misspelling_is_learned() -> None:
+    from note_service.domain import entities
+
+    assert entities.is_correction("Fabian Reinbolt", "Fabian Reinbold")
+    assert not entities.is_correction("Die Behauptung", "Behauptung")
+    assert not entities.is_correction("Das Repräsentantenhaus", "Repräsentantenhaus")
+    assert not entities.is_correction("Trumps", "Trump")
+    # A different ending that is no grammar is a misheard name.
+    assert entities.is_correction("Sonnenfeld", "Sonnenfeldt")
+    assert not entities.is_correction("Україні", "України")
+
+
+def test_an_entry_saved_from_a_grammar_change_is_flagged_for_removal(rig: SimpleNamespace) -> None:
+    from note_service.domain.glossary_repository import GlossaryRow
+
+    rig.store.terms.append(
+        GlossaryRow(
+            id=TERM_ID,
+            term="Behauptung",
+            kind="person",
+            heard_as=["Die Behauptung"],
+            created_by=AUTHOR,
+            created_at=datetime(2026, 10, 18, tzinfo=UTC),
+            source_note_id=None,
+        )
+    )
+    [entry] = rig.client.get("/v1/glossary").json()
+    assert entry["suspect"] == "grammar_variant" and entry["can_delete"]
+    # Flagged, never removed by the server: the person decides.
+    assert len(rig.store.terms) == 1
+
+
+def test_a_stored_grammar_change_is_not_offered_as_a_name(rig: SimpleNamespace) -> None:
+    from note_service.routers import notes_generation as rgn
+
+    offered = rgn._undecided(
+        [
+            {
+                "surface": "Das Repräsentantenhaus",
+                "canonical": "Repräsentantenhaus",
+                "source": "recording",
+            },
+            {"surface": "Fabian Reinbolt", "canonical": "Fabian Reinbold", "source": "candidate"},
+        ],
+        set(),
+    )
+    assert [c["canonical"] for c in offered] == ["Fabian Reinbold"]

@@ -27,6 +27,7 @@ from db import tenant_connection
 
 from .. import audit_kinds
 from ..deps import get_state, requires
+from ..domain import entities
 from ..domain import glossary as rules
 from ..domain import glossary_repository as glossary_repo
 
@@ -57,6 +58,11 @@ class TermView(BaseModel):
     in_hint: bool = True
     # The note whose speaker rename added it, when it came from one.
     source_note_id: UUID | None = None
+    # F2-02: every "heard as" of it differs only by an article, an ending or capitals — a
+    # grammar change accepted as a name, offered for removal (never removed for anybody).
+    suspect: Literal["grammar_variant"] | None = None
+    # What this request asked to learn that is grammar, not a mishearing: not stored.
+    ignored_heard_as: list[str] = []
 
 
 class AddTermRequest(BaseModel):
@@ -77,7 +83,16 @@ class HintView(BaseModel):
     terms: int
 
 
-def _view(row: glossary_repo.GlossaryRow, claims: Claims) -> TermView:
+def _suspect(row: glossary_repo.GlossaryRow) -> Literal["grammar_variant"] | None:
+    variants = list(row.heard_as)
+    if variants and not any(entities.is_correction(h, row.term) for h in variants):
+        return "grammar_variant"
+    return None
+
+
+def _view(
+    row: glossary_repo.GlossaryRow, claims: Claims, ignored: list[str] | None = None
+) -> TermView:
     return TermView(
         id=row.id,
         term=row.term,
@@ -87,6 +102,8 @@ def _view(row: glossary_repo.GlossaryRow, claims: Claims) -> TermView:
         can_delete=row.created_by == claims.sub or bool(_ADMIN_ROLES & set(claims.roles)),
         in_hint=rules.is_vocabulary(row.term, row.kind),
         source_note_id=row.source_note_id,
+        suspect=_suspect(row),
+        ignored_heard_as=list(ignored or []),
     )
 
 
@@ -147,6 +164,13 @@ async def add_glossary_term(
             },
         )
 
+    # F2-02: an article, an ending or capitals is grammar, not a mishearing — never learned,
+    # whoever asks; the term itself may still be saved as vocabulary.
+    ignored = [h for h in heard_as if not entities.is_correction(h, term)]
+    heard_as = [h for h in heard_as if h not in ignored]
+    if ignored:
+        _terms_rejected.add(len(ignored), {"reason": "grammar_variant"})
+
     state = get_state()
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         source_note = body.note_id
@@ -158,7 +182,7 @@ async def add_glossary_term(
         if existing is not None:
             merged = await glossary_repo.merge_heard_as(conn, row=existing, heard_as=heard_as)
             response.status_code = status.HTTP_200_OK
-            return _view(merged, claims)
+            return _view(merged, claims, ignored)
 
         if await glossary_repo.count_terms(conn) >= rules.MAX_TERMS:
             raise HTTPException(
@@ -184,13 +208,13 @@ async def add_glossary_term(
             if again is None:
                 raise
             response.status_code = status.HTTP_200_OK
-            return _view(again, claims)
+            return _view(again, claims, ignored)
 
     payload: dict[str, object] = {"kind": body.kind, "heard_as_count": len(heard_as)}
     if source_note is not None:
         payload["note_id"] = str(source_note)
     await _audit(claims, audit_kinds.GLOSSARY_TERM_ADDED, payload)
-    return _view(row, claims)
+    return _view(row, claims, ignored)
 
 
 @router.delete("/{term_id}", status_code=status.HTTP_204_NO_CONTENT)

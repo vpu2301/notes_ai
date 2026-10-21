@@ -3,7 +3,15 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /** Routes the backend removed; no web source may call them again. */
-const REMOVED = ["/admin/users/invite"];
+const REMOVED = [
+  "/admin/users/invite",
+  // Sprint R0/P2: the old writing path's settings and every instructions preview.
+  "/v1/ai/prompt-profiles",
+  "/v1/ai/experiments",
+  "/v1/ai/runtime",
+  "/v1/ai/model-capabilities",
+  "/preview",
+];
 
 const SRC = resolve(__dirname, "../src");
 

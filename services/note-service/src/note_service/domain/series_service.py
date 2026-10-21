@@ -19,7 +19,7 @@ from . import access, action_items, carry_over
 from . import action_items_repository as items_repo
 from . import meetings_repository as meetings
 from . import notes_repository as repo
-from .meeting_doc import series as series_rules
+from . import series as series_rules
 
 logger = logging.getLogger(__name__)
 

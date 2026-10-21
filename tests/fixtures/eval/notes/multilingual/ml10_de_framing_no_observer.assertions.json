@@ -1,0 +1,21 @@
+{
+ "id": "ml10_de_framing_no_observer",
+ "sentinel": "A topic description cites no observer: no invented observer or allegation tag on the framing",
+ "framing_must_not_contain": [
+  "laut ",
+  "Vorwurf",
+  "Einschätzung —",
+  "Einschätzung:",
+  "Voraussichtlich —",
+  "Beobachter"
+ ],
+ "must_contain_any": [
+  [
+   "März"
+  ],
+  [
+   "Bundesstraße"
+  ]
+ ],
+ "excluded_language_ms_max": 0
+}

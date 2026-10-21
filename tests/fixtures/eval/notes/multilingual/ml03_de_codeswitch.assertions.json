@@ -1,0 +1,20 @@
+{
+ "id": "ml03_de_codeswitch",
+ "sentinel": "Code-switch within a sentence: one complete proposition (Friday release only if signed by Wednesday)",
+ "same_line": [
+  [
+   [
+    "Freitag"
+   ],
+   [
+    "Mittwoch"
+   ]
+  ]
+ ],
+ "must_contain_any": [
+  [
+   "Woche"
+  ]
+ ],
+ "excluded_language_ms_max": 0
+}

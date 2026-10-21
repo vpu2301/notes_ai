@@ -11,8 +11,8 @@ from typing import Final
 
 from note_models import NoteContent
 
+from . import families as types
 from . import lines as line_rules
-from .meeting_doc import types
 
 # What a client may see, in reading order; everything else is internal by omission.
 CLIENT_ROLES: Final[tuple[str, ...]] = (
@@ -22,6 +22,8 @@ CLIENT_ROLES: Final[tuple[str, ...]] = (
     types.DECISIONS,
     types.TOPICS,
     types.SPECIFICATIONS,
+    # B4: relayed claims with the speaker's verdict are not internal.
+    types.CLAIMS,
     types.REQUESTS,
     types.ACTION_ITEMS,
     types.OPEN_QUESTIONS,

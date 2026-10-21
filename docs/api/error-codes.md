@@ -207,6 +207,24 @@ codes.
 | `channel_layout_mismatch` | 422 | `POST /asr/jobs` | `channel_layout=mic_system` was declared but the file does not have exactly 2 channels. A client bug (the macOS app sends the field only for its own 2-channel files); retry without the field to upload as an ordinary recording. |
 | `local_speaker_name_invalid` | 422 | `POST /asr/jobs` | `local_speaker_name` is longer than 80 characters after collapsing whitespace. Send a shorter display name, or omit it. |
 
+## note-service — note instructions (N1)
+
+| Code | Status | Where | Meaning / client action |
+| --- | --- | --- | --- |
+| `not_available` | 404 | every `/v1/ai/instructions` and `/v1/notes/{id}/instructions` route | The feature is off in this deployment (`MDX_NOTE_INSTRUCTIONS_ENABLED`). Hide the card. |
+| `scope_unknown` | 404 | `/v1/ai/instructions/{scope}` | N4 — `scope` is not `workspace` or a meeting family (`client`, `team`, `sales`, `one_on_one`, `interview`, `broadcast`, `memo`). |
+| `text_too_long` | 413 | `PUT /v1/ai/instructions` | The sanitised text is longer than `max_chars` (12 000 since P2a). Nothing is saved or cut; shorten it. The detail never repeats the text. |
+| `budget_exceeded` | 429 | `PUT /v1/ai/instructions` | The workspace has spent its monthly AI budget; nothing was saved. `spent_cents`, `budget_cents`. |
+
+## note-service — note templates (P2)
+
+| Code | Status | Where | Meaning / client action |
+| --- | --- | --- | --- |
+| `template_unknown` | 404 | `/v1/ai/templates/{name}` | `name` is not one of `meeting`, `client_call`, `interview`, `broadcast`, `public_meeting`, `memo`, `auto`. |
+| `template_too_long` | 400 | `PUT /v1/ai/templates/{name}` | The markdown is longer than 4 000 characters. Nothing is saved; shorten it. |
+| `template_empty` | 400 | `PUT /v1/ai/templates/{name}` | The markdown is blank. Send text, or `DELETE` to go back to the built-in one. |
+| `template_no_sections` | 400 | `PUT /v1/ai/templates/{name}` | The markdown has no `## ` heading; a template needs at least one section. |
+
 ## note-service — reading somebody else's note
 
 Note reads carry no `code`; the client branches on the problem `type`.

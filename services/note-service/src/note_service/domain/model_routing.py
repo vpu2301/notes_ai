@@ -21,9 +21,8 @@ from ..config import settings
 logger = logging.getLogger(__name__)
 
 PROBE_TIMEOUT_S = 5.0
-# The operations a generation makes chat calls for, in the order the AI
-# settings page lists them.
-CHAT_OPERATIONS = ("summarize", "understand", "classify", "title", "entities")
+# The chat operations the service makes: the writer (P1) and "Ask this note".
+CHAT_OPERATIONS = ("write", "ask")
 
 
 def forced_overrides() -> dict[str, str]:
@@ -32,7 +31,7 @@ def forced_overrides() -> dict[str, str]:
     name = (settings.dev_chat_backend or "").strip()
     if not name:
         return {}
-    return {"chat": name, "classify": name, "title": name, "entities": name}
+    return {"chat": name}
 
 
 def load_registry(settings_source: Any = None, *, validate: bool = False) -> Registry:
@@ -76,11 +75,6 @@ async def probe_chat(
             f"chat backend {active.name!r} did not answer the startup probe in ENV={registry.env}",
         )
     switched = registry.fall_back("chat")
-    # The short operations follow: a laptop without the API names its notes locally.
-    for operation in ("classify", "title", "entities"):
-        op = registry.active_override(operation)
-        if op is not None and op.fallback and not op.is_fallback:
-            registry.fall_back(operation)
     logger.info("models.route", extra={"operation": "chat", **switched.log_fields()})
     return switched
 
@@ -111,7 +105,7 @@ def describe(registry: Registry | None) -> dict[str, Any] | None:
     """What the AI-settings page shows: who writes the notes right now.
 
     ``{"backend", "model_id", "processor", "region", "primary",
-    "fallback", "reason", "small": {...}}`` — names only, no URL, no key.
+    "fallback", "reason"}`` — names only, no URL, no key.
     """
     if registry is None:
         return None
@@ -139,8 +133,4 @@ def describe(registry: Registry | None) -> dict[str, Any] | None:
             "reason": over.reason,
         }
 
-    out = _one(active.name, active)
-    small = registry.active_override("classify")
-    if small is not None:
-        out["small"] = _one(small.name, small)
-    return out
+    return _one(active.name, active)

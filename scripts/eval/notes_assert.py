@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Regression checklists for the document engine: run the pipeline arm on every corpus
-meeting with an ``<id>.assertions.json`` and check the findings as data.
+"""Regression checklists and the global writer assertions, as data.
 
-    make eval-notes-assert BACKEND=dev_mac CORPUS=eval/notes/v2
+    make eval-notes-assert NOTE_IDS=<uuid>,<uuid>     # stored notes' newest generations
 
-Output is check names, indices, taxonomy codes and PASS/FAIL, never the string a check
-looks for. Exit 1 when any check fails.
+Sprint R0 removed the pipeline arm that produced a document to check; ``check()`` and
+``global_checks()`` stay as metrics and Sprint P3 rewires the live path to the notes the
+writer (P1) stores. Output is check names, indices, taxonomy codes and PASS/FAIL, never
+the string a check looks for. Exit 1 when any check fails.
 """
 
 from __future__ import annotations
@@ -16,18 +17,20 @@ import json
 import re
 import sys
 import unicodedata
+from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import REPO, load_registry  # noqa: E402
+import _normalize  # noqa: E402
+import _textrules  # noqa: E402
+from _common import REPO  # noqa: E402
 from notes_scoring import (  # noqa: E402
     copies_transcript,
     informs,
     recording_type_of,
     transcript_sentences,
 )
-from taxonomy import check_codes  # noqa: E402
 
 ASSERTIONS = REPO / "tests" / "fixtures" / "eval" / "notes" / "assertions"
 _CONTENT_KINDS_EXCLUDED = frozenset({"heading", "note"})
@@ -74,6 +77,98 @@ def checklist_for(meeting_file: Path) -> dict[str, Any] | None:
 _MARKS = re.compile(r"❝|\[↗\]|\b[0-9a-f]{16}\b")
 
 
+_HOLDER_SUFFIX = re.compile(
+    r"—\s*(?:laut|according to|за словами)\s+([^—.]+?)\s*[.!?]?\s*$", re.IGNORECASE
+)
+_IMPERSONAL = re.compile(
+    r"^\s*(?:it is claimed|it was claimed|es wird behauptet|es wurde behauptet|стверджується)\b",
+    re.IGNORECASE,
+)
+
+
+def global_checks(produced: dict[str, Any]) -> list[tuple[str, bool]]:
+    """A2's writer contract on every fixture: no two consecutive sentences with the same
+    holder suffix, no sentence opening impersonally, and an opening paragraph that is
+    never a bare type label."""
+    lines = [ln for ln in produced.get("lines", []) if (ln.get("text") or "").strip()]
+    sentences: list[str] = []
+    for ln in lines:
+        if ln.get("kind") in ("summary", "framing", "bullet", "key_point"):
+            sentences.extend(p.strip() for p in re.split(r"(?<=[.!?])\s+", ln["text"]) if p.strip())
+    repeated = False
+    previous: str | None = None
+    for sentence in sentences:
+        m = _HOLDER_SUFFIX.search(sentence)
+        holder = m.group(1).strip().casefold() if m else None
+        if holder and holder == previous:
+            repeated = True
+        previous = holder
+    impersonal = any(_IMPERSONAL.match(re.sub(r"^\s*[-•*]\s*", "", s)) for s in sentences)
+    labels = {
+        v.casefold().rstrip(".")
+        for table in _textrules.TYPE_LABELS.values()
+        for v in table.values()
+    }
+    first = next((ln["text"] for ln in lines if ln.get("kind") == "framing"), "")
+    bare = first.strip().rstrip(".").casefold() in labels if first.strip() else False
+    return [
+        ("no_repeated_holder_suffix", not repeated),
+        ("no_impersonal_claim", not impersonal),
+        ("p1_not_label", not bare),
+        ("holder_named_per_run", holder_named_per_run(produced)),
+        ("overview_first", overview_first(produced)),
+    ]
+
+
+_CLAIM_TYPES = frozenset(
+    {"opinion", "prediction", "estimate", "proposal", "allegation", "statement",
+     "reported", "unproven", "refuted"}
+)  # fmt: skip
+
+
+def holder_named_per_run(produced: dict[str, Any]) -> bool:
+    """A2 T5 (deterministic): a line resting on a claim-type fact with a holder names that
+    holder (its last word), or an earlier line of the same section already did — the run.
+    Read from the item rows' ``fact_ids`` (cites) and the facts' ``attributed_to``."""
+    facts = {f.get("item_key"): f for f in produced.get("facts") or []}
+    if not facts or (produced.get("stats") or {}).get("attribution_implicit"):
+        # Review step 3: one speaker or a memo — everything is theirs, no name is due.
+        return True
+    named_in: dict[str, set[str]] = {}
+    for ln in produced.get("lines", []):
+        text = _fold(ln.get("text") or "")
+        if not text or ln.get("kind") in ("heading", "note", "claim"):
+            continue
+        section = str(ln.get("section_key") or "")
+        seen = named_in.setdefault(section, set())
+        for fid in ln.get("fact_ids") or []:
+            fact = facts.get(fid)
+            if not fact or (fact.get("certainty") or "") not in _CLAIM_TYPES:
+                continue
+            # "Bernd Walzmann, Finanzminister": the name is what a line carries, not the role.
+            holder = _fold((fact.get("attributed_to") or "").split(",")[0])
+            if not holder:
+                continue
+            last = holder.split()[-1]
+            if last in text or holder in text:
+                seen.add(last)
+            elif last not in seen:
+                return False
+    return True
+
+
+def overview_first(produced: dict[str, Any]) -> bool:
+    """A2 T5: the first non-empty rendered section is the overview (role ``summary``); a
+    transcript section never precedes it."""
+    for section in produced.get("sections") or []:
+        text = str(section.get("text") or "")
+        has_lines = any((ln.get("text") or "").strip() for ln in section.get("lines") or [])
+        if not text.strip() and not has_lines:
+            continue
+        return section.get("role") == "summary"
+    return True
+
+
 def check(
     checklist: dict[str, Any], produced: dict[str, Any], meeting: dict[str, Any] | None = None
 ) -> list[tuple[str, bool, str]]:
@@ -82,8 +177,23 @@ def check(
     owners: dict[str, str] = checklist.get("sprint") or {}
     lines = [ln for ln in produced.get("lines", []) if ln.get("text", "").strip()]
     content = [ln for ln in lines if ln.get("kind") not in _CONTENT_KINDS_EXCLUDED]
-    everything = "\n".join([*(ln["text"] for ln in lines), produced.get("title") or ""])
+    titles = [str(s.get("title") or "") for s in produced.get("sections") or []]
+    everything = "\n".join([*(ln["text"] for ln in lines), *titles, produced.get("title") or ""])
     out: list[tuple[str, bool, str]] = []
+    # Review step 2: one normaliser with every scorer (reporting clauses and holder
+    # suffixes fold away; compounds match by suffix).
+    language = produced.get("language") or (meeting or {}).get("language") or "en"
+    holders = frozenset(
+        h
+        for h in (
+            *(checklist.get("speakers") or {}).values(),
+            *(f.get("attributed_to") or "" for f in produced.get("facts") or []),
+        )
+        if h and str(h).strip()
+    )
+
+    def _has(text: str, needle: str) -> bool:
+        return _normalize.contains(text, needle, language, holders=holders)
 
     def add(name: str, passed: bool, family: str) -> None:
         out.append((name, passed, owners.get(family, "")))
@@ -115,6 +225,27 @@ def check(
 
     for i, forbidden in enumerate(checklist.get("must_not_contain", [])):
         add(f"must_not_contain[{i}]", not _has(everything, forbidden), "must_not_contain")
+
+    # B1: no section heading shaped like this (a timestamp, a bare name).
+    # A2: three checks on every fixture, whatever the checklist says — the writer contract.
+    for name, held in global_checks(produced):
+        add(f"global.{name}", held, "global")
+    # B4: a row of the claims table — who, words of the claim, the speaker's verdict.
+    claim_rows = [ln for ln in produced.get("lines", []) if ln.get("kind") == "claim"]
+    for i, want in enumerate(checklist.get("claims_row", [])):
+        found = any(
+            any(_has(ln["text"], t) for t in want.get("claim", []))
+            and (not want.get("who") or _has(ln["text"], want["who"]))
+            and (not want.get("verdict") or any(_has(ln["text"], v) for v in want["verdict"]))
+            for ln in claim_rows
+        )
+        add(f"claims_row[{i}]", found, "claims_row")
+    for i, pattern in enumerate(checklist.get("headings_must_not_match", [])):
+        add(
+            f"headings_must_not_match[{i}]",
+            not any(re.search(pattern, t.strip()) for t in titles if t.strip()),
+            "headings_must_not_match",
+        )
 
     for i, group in enumerate(checklist.get("must_contain_any", [])):
         add(
@@ -161,25 +292,7 @@ def check(
     if checklist.get("no_marks"):
         text = "\n".join([produced.get("note_text") or "", *(ln["text"] for ln in lines)])
         add("no_marks", not _MARKS.search(text), "no_marks")
-    # Figures with values and qualifiers, the presenter line, the contact line.
-    if "figures" in checklist:
-        from notes_scoring import _name_match, _value
-
-        made = [f["figure"] for f in produced.get("facts", []) if f.get("figure")]
-        right = 0
-        for want in checklist["figures"]:
-            value = _value(want["value"])
-            if any(
-                _name_match(want["name"], m["name"])
-                and _value(m["value"]) == value
-                and (m.get("qualifier") or "") == want.get("qualifier", "")
-                for m in made
-            ):
-                right += 1
-        need = int(checklist.get("figures_min", len(checklist["figures"])))
-        add("figures", right >= need, "figures")
-        rows = [ln for ln in lines if ln.get("kind") == "figure"]
-        add("figures_cited", bool(rows) and all(ln.get("fact_ids") for ln in rows), "figures")
+    # The presenter line, the contact line.
     if "presenter_line" in checklist:
         # The presenter is named in paragraph 1 from the verified fields; every one must be there.
         want = checklist["presenter_line"].split(":", 1)[-1]
@@ -210,14 +323,63 @@ def check(
         add("chapters_min", len(headed) >= int(checklist["chapters_min"]), "chapters_min")
     if "overview" in checklist:
         add_overview(checklist["overview"], produced, add)
-    # At most this many lint findings per taxonomy code.
-    if checklist.get("lint") and meeting is not None:
-        from notes_scoring import lint_produced
+    # Multilingual evidence: a claim kept whole, cited to its original, never dropped for its language.
+    for i, groups in enumerate(checklist.get("same_line", [])):
+        add(
+            f"same_line[{i}]",
+            any(all(any(_has(ln["text"], m) for m in group) for group in groups) for ln in lines),
+            "same_line",
+        )
+    facts_by_id = {f.get("item_key"): f for f in produced.get("facts") or []}
+    for i, want in enumerate(checklist.get("source_cited", [])):
+        add(
+            f"source_cited[{i}]",
+            any(
+                any(_has(ln["text"], m) for m in want["match"])
+                and any(
+                    (facts_by_id.get(fid) or {}).get("source_language") == want["language"]
+                    for fid in ln.get("fact_ids") or []
+                )
+                for ln in lines
+            ),
+            "source_cited",
+        )
+    framing = " ".join(ln["text"] for ln in lines if ln.get("kind") in ("framing", "presenter"))
+    for i, forbidden in enumerate(checklist.get("framing_must_not_contain", [])):
+        add(f"framing_must_not_contain[{i}]", not _has(framing, forbidden), "framing")
+    for i, group in enumerate(checklist.get("framing_must_contain_any", [])):
+        add(f"framing_must_contain_any[{i}]", any(_has(framing, alt) for alt in group), "framing")
+    for prop in checklist.get("propositions", []):
+        # An important proposition: every group's alternatives in ONE written line.
+        add(
+            f"proposition[{prop['id']}]",
+            any(
+                all(any(_has(ln["text"], alt) for alt in group) for group in prop["all"])
+                for ln in content
+            ),
+            "propositions",
+        )
+    if checklist.get("no_grammar_corrections"):
+        # F2-02: an article, an ending or capitals is never offered as a name correction.
+        from note_service.domain import entities
 
-        linted = lint_produced(meeting, produced)
-        found = (linted.get("unresolved") or {}) if linted is not None else None
-        for code, limit in sorted(checklist["lint"].items()):
-            add(f"lint[{code}]", found is not None and found.get(code, 0) <= int(limit), "lint")
+        grammar = [
+            (c[0], c[1])
+            for f in produced.get("facts") or []
+            for c in f.get("corrections") or []
+            if not entities.is_correction(str(c[0]), str(c[1]))
+        ]
+        add("no_grammar_corrections", not grammar, "corrections")
+    for i, want in enumerate(checklist.get("count_max", [])):
+        hits = sum(1 for ln in lines if any(_has(ln["text"], m) for m in want["match"]))
+        add(f"count_max[{i}]", hits <= int(want["max"]), "count_max")
+    if "excluded_language_ms_max" in checklist:
+        add(
+            "excluded_language_ms_max",
+            int(stats.get("excluded_language_ms") or 0)
+            <= int(checklist["excluded_language_ms_max"]),
+            "excluded_language_ms_max",
+        )
     for i, topic in enumerate(checklist.get("topics", [])):
         under = [
             ln
@@ -236,7 +398,7 @@ def check(
 
 def add_overview(want: dict[str, Any], produced: dict[str, Any], add: Any) -> None:
     """The top of the note (F3 amendment §2.9): ``overview.<check>``."""
-    from note_service.domain.meeting_doc.overview import TYPE_LABELS
+    type_labels = _textrules.TYPE_LABELS
 
     top = next(
         (s for s in produced.get("sections") or [] if s.get("section_key") == "gen:overview"),
@@ -255,7 +417,7 @@ def add_overview(want: dict[str, Any], produced: dict[str, Any], add: Any) -> No
     if want.get("names_recording_type"):
         language = produced.get("language", "en")
         kind = (produced.get("stats") or {}).get("recording_type") or ""
-        label = (TYPE_LABELS.get(language) or TYPE_LABELS["en"]).get(kind, "")
+        label = (type_labels.get(language) or type_labels["en"]).get(kind, "")
         add("overview.names_recording_type", bool(label) and _has(first, label), "overview")
     if "names_guest" in want:
         add("overview.names_guest", _has(first, want["names_guest"]), "overview")
@@ -271,95 +433,303 @@ def add_overview(want: dict[str, Any], produced: dict[str, Any], add: Any) -> No
         )
 
 
-# The deterministic stand-in model CI runs: a check that passes there fails
-# only when the ENGINE changed.
-SCRIPTED = "scripted"
-# What the engine guarantees whatever a model says; other checks are shown, not gated.
-ENGINE_CHECKS = frozenset({"speakers", "must_not_contain", "every_line_cited", "no_marks"})
-ENGINE_CHECK_NAMES = frozenset(
-    {
-        "overview.prose_paragraphs_min",
-        "overview.bullets_above_first_heading",
-        "excluded_reasons[0]",
-    }
-)
-
-
 def family(name: str) -> str:
     return name.split("[", 1)[0].split(".", 1)[0]
 
 
-def _scripted_provider() -> Any:
-    tests = REPO / "services" / "note-service" / "tests" / "unit"
-    sys.path.insert(0, str(tests))
-    from meeting_doc_fakes import ScriptedProvider
+# Release targets (docs/development/ai-notes-quality/stabilization/README.md): acceptance
+# targets, not measured performance.
+TARGET_SUPPORTED: Final = 0.95
+TARGET_RECALL: Final = 0.90
+TARGET_DUPLICATES: Final = 0.05
+# Check families whose failure is a critical distortion, never averaged away.
+CRITICAL_FAMILIES: Final = frozenset(
+    {"must_not_contain", "same_line", "source_cited", "framing_must_not_contain",
+     "framing_must_contain_any", "no_grammar_corrections", "hedged_must_keep"}
+)  # fmt: skip
+DUPLICATE_JACCARD: Final = 0.8
 
-    return ScriptedProvider()
+
+def _tokens(text: str) -> frozenset[str]:
+    return frozenset(w for w in re.findall(r"\w+", _fold(text)) if len(w) > 2)
 
 
-async def main(backend_name: str, corpus: Path) -> int:
-    from notes_eval import EngineBlindError, run_pipeline
-
-    from models import ProviderError, build_chat_provider
-
-    if not corpus.is_dir():
-        print(f"corpus not found: {corpus}", file=sys.stderr)
-        return 3
-    cases = [
-        (path, checklist)
-        for path in sorted(corpus.glob("*.json"))
-        if not path.name.endswith(".assertions.json")
-        and (checklist := checklist_for(path)) is not None
+def duplicate_bullets(lines: list[dict[str, Any]]) -> tuple[int, int]:
+    """``(bullets repeating an earlier bullet, bullets)``: Jaccard >= 0.8 on content words."""
+    bullets = [
+        _tokens(ln["text"])
+        for ln in lines
+        if ln.get("kind") in ("bullet", "key_point") and ln.get("text")
     ]
-    if not cases:
-        print(f"no checklists for the meetings in {corpus}", file=sys.stderr)
-        return 3
+    repeats = sum(
+        1
+        for i, b in enumerate(bullets)
+        if b and any(len(b & a) / len(b | a) >= DUPLICATE_JACCARD for a in bullets[:i] if a)
+    )
+    return repeats, len(bullets)
 
-    if backend_name == SCRIPTED:
-        provider = _scripted_provider()
-    else:
-        resolved = load_registry().backend(backend_name, expect_kind="chat")
-        provider = build_chat_provider(resolved)
-    failures = 0
-    try:
-        for path, checklist in cases:
-            meeting = json.loads(path.read_text("utf-8"))
-            gold = meeting.setdefault("gold", {})
-            # The checklist's roster is what a person would have named.
-            gold.setdefault("speakers", dict(checklist.get("speakers") or {}))
-            try:
-                produced = await run_pipeline(meeting, provider)
-            except (ProviderError, EngineBlindError) as exc:
-                print(f"{meeting['id']}: RUN FAILED ({type(exc).__name__})")
-                failures += 1
+
+class Report:
+    """The release-target summary over every run, each figure with its denominator."""
+
+    def __init__(self) -> None:
+        self.runs = 0
+        self.critical: list[str] = []
+        self.weight_covered = 0.0
+        self.weight_total = 0.0
+        self.final = Counter[str]()
+        self.duplicates = [0, 0]
+        self.seconds = 0.0
+        self.tokens = 0
+        self.fallbacks = 0
+        self.incomplete = 0
+
+    def add(
+        self,
+        label: str,
+        checklist: dict[str, Any],
+        results: list[tuple[str, bool, str]],
+        produced: dict[str, Any],
+    ) -> None:
+        self.runs += 1
+        for name, ok, _sprint in results:
+            if not ok and family(name) in CRITICAL_FAMILIES:
+                self.critical.append(f"{label}: {name}")
+        weights = {p["id"]: float(p.get("weight", 1)) for p in checklist.get("propositions", [])}
+        for name, ok, _sprint in results:
+            if name.startswith("proposition["):
+                key = name[len("proposition[") : -1]
+                self.weight_total += weights.get(key, 1.0)
+                self.weight_covered += weights.get(key, 1.0) if ok else 0.0
+        stats = produced.get("stats") or {}
+        final = stats.get("final_check") or {}
+        if final.get("ran"):
+            self.final.update(
+                {
+                    k: int(v)
+                    for k, v in final.items()
+                    if isinstance(v, int) and not isinstance(v, bool)
+                }
+            )
+        repeats, bullets = duplicate_bullets(produced.get("lines") or [])
+        self.duplicates[0] += repeats
+        self.duplicates[1] += bullets
+        self.seconds += float(produced.get("seconds") or 0)
+        self.tokens += int(produced.get("input_tokens") or 0) + int(
+            produced.get("output_tokens") or 0
+        )
+        self.fallbacks += int(bool(stats.get("summary_fallback") or stats.get("topics_fallback")))
+        self.incomplete += int(bool(stats.get("incomplete")))
+
+    def print(self) -> None:
+        def pct(a: float, b: float) -> str:
+            return f"{a / b:.0%} ({a:g}/{b:g})" if b else "not measured (0)"
+
+        f = self.final
+        checked = (
+            f["supported"]
+            + f["repaired"]
+            + f["contradicted"]
+            + f["insufficient_evidence"]
+            + f["undecided"]
+        )
+        print(f"\n== release targets over {self.runs} runs (acceptance targets, not a claim) ==")
+        print(f"critical sentinel failures: {len(self.critical)} (target 0)")
+        for line in self.critical:
+            print(f"  {line}")
+        print(
+            f"final claims: {f['claims']} asserted; {f['fact_text']} verbatim verified facts; "
+            f"{checked} checked by meaning, of which supported or repaired "
+            f"{pct(f['supported'] + f['repaired'], checked)} (target {TARGET_SUPPORTED:.0%}); "
+            f"restored to their fact {f['restored']}; held for review {f['unverified']}"
+        )
+        print(
+            f"weighted important-proposition recall: {pct(self.weight_covered, self.weight_total)} "
+            f"(target {TARGET_RECALL:.0%}; only cases with annotated propositions)"
+        )
+        print(f"duplicate bullets: {pct(*self.duplicates)} (target <= {TARGET_DUPLICATES:.0%})")
+        print(
+            f"runs incomplete: {self.incomplete}/{self.runs}; with a composition fallback: "
+            f"{self.fallbacks}/{self.runs}; time {self.seconds:.0f}s; tokens {self.tokens}"
+        )
+
+
+DEFAULT_STORE_DSN = "postgresql://postgres:postgres@localhost:5432/notes"
+_STORED_KIND = {"summary_sentence": "summary", "topic_bullet": "bullet", "framing": "framing"}
+
+
+def _stored_lines(sections: list[dict[str, Any]], rows: list[Any]) -> list[dict[str, Any]]:
+    """The rendered sections split into lines the global checks read, each line joined
+    to its stored row (citations, kind) by text; a transcript or typed section has none."""
+    by_text = {str(r["text"]).strip(): r for r in rows if r["cites"]}
+    out: list[dict[str, Any]] = []
+    for section in sections:
+        first_paragraph = section.get("role") == "summary"
+        for raw in str(section.get("text") or "").splitlines():
+            text = raw.strip()
+            if not text:
                 continue
-            shown = results = check(checklist, produced, meeting)
-            if backend_name == SCRIPTED:
-                results = [
-                    r
-                    for r in results
-                    if family(r[0]) in ENGINE_CHECKS or r[0] in ENGINE_CHECK_NAMES
-                ]
-            passed = sum(1 for _n, ok, _s in results if ok)
-            print(f"{meeting['id']}: {passed}/{len(results)} checks pass")
-            gated = {name for name, _ok, _s in results}
-            for name, ok, sprint in shown:
-                owner = f"  ({sprint})" if sprint else ""
-                codes = check_codes(name, checklist)
-                owner += f"  [{','.join(codes)}]" if codes else ""
-                verdict = ("PASS" if ok else "FAIL") if name in gated else "----"
-                note = "" if name in gated else "  (needs a model)"
-                print(f"  {verdict}  {name}{owner}{note}")
-            failures += len(results) - passed
+            if text.startswith("#"):
+                out.append(
+                    {
+                        "section_key": section["section_key"],
+                        "kind": "heading",
+                        "text": text.lstrip("# "),
+                        "fact_ids": [],
+                    }
+                )
+                continue
+            if text.startswith("|"):
+                kind = "claim"
+            elif text[:2] in ("- ", "* ", "• "):
+                kind = "bullet"
+            elif first_paragraph:
+                kind, first_paragraph = "framing", False
+            else:
+                kind = "summary"
+            content = re.sub(r"^[-*•]\s*", "", text)
+            row = by_text.get(content) or by_text.get(content[:500])
+            if row is not None:
+                kind = _STORED_KIND.get(str(row["kind"]), kind)
+            out.append(
+                {
+                    "section_key": section["section_key"],
+                    "kind": kind,
+                    "text": content,
+                    "fact_ids": list(row["cites"]) if row is not None else [],
+                }
+            )
+    return out
+
+
+async def produced_from_store(dsn: str, note_id: str) -> dict[str, Any] | None:
+    """Task 4 step 7: a stored note's newest generation in the shape the global checks
+    read — sections and lines from the current version, facts and citations from the
+    generated items, numbers from the generation's stats. Content stays in this
+    process; only pass/fail leaves it."""
+    import asyncpg
+
+    sys.path.insert(0, str(REPO / "services" / "note-service" / "src"))
+    from note_service.domain import roles
+    from template_models import TemplateDefinition
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        gen = await conn.fetchrow(
+            """SELECT id, stats FROM note_generations
+               WHERE note_id = $1 AND status IN ('complete', 'partial')
+               ORDER BY created_at DESC LIMIT 1""",
+            note_id,
+        )
+        if gen is None:
+            return None
+        rows = await conn.fetch(
+            """SELECT item_key, kind, section_key, text, cites, certainty, attributed_to, flags
+               FROM note_generated_items WHERE note_id = $1 AND generation_id = $2""",
+            note_id,
+            gen["id"],
+        )
+        version = await conn.fetchrow(
+            """SELECT v.content_jsonb, t.schema_jsonb FROM notes n
+               JOIN note_versions v ON v.id = n.current_version_id
+               LEFT JOIN templates t ON t.id = n.template_id WHERE n.id = $1""",
+            note_id,
+        )
     finally:
-        if hasattr(provider, "aclose"):
-            await provider.aclose()
-    return 1 if failures else 0
+        await conn.close()
+    if version is None:
+        return None
+    content = version["content_jsonb"]
+    content = json.loads(content) if isinstance(content, str) else content
+    schema = version["schema_jsonb"]
+    schema = json.loads(schema) if isinstance(schema, str) else schema
+    role_map: dict[str, str] = {}
+    if schema:
+        try:
+            role_map = {
+                k: str(v)
+                for k, v in roles.role_map(TemplateDefinition.model_validate(schema)).items()
+            }
+        except Exception:  # noqa: BLE001 — an unreadable template leaves the roles unknown
+            role_map = {}
+    sections = [
+        {
+            "section_key": str(sec.get("section_key") or ""),
+            "title": sec.get("title"),
+            "role": role_map.get(str(sec.get("section_key") or "")),
+            "text": sec.get("text") or "",
+            "lines": [],
+        }
+        for sec in content.get("sections") or []
+    ]
+    stats = gen["stats"]
+    stats = json.loads(stats) if isinstance(stats, str) else (stats or {})
+    return {
+        "sections": sections,
+        "lines": _stored_lines(sections, rows),
+        # Every stored row is a written line with its citations; a cited fact's certainty
+        # and holder are what the row recorded for it (one holder when its facts agree).
+        "facts": [
+            {
+                "item_key": cite,
+                "certainty": r["certainty"],
+                "attributed_to": r["attributed_to"],
+                "flags": list(r["flags"] or []),
+            }
+            for r in rows
+            for cite in (r["cites"] or [])
+        ],
+        "stats": stats,
+    }
+
+
+async def check_stored(dsn: str, note_ids: tuple[str, ...]) -> int:
+    """The global assertions on stored notes; prints pass/fail per assertion per note."""
+    failed = 0
+    for note_id in note_ids:
+        produced = await produced_from_store(dsn, note_id)
+        if produced is None:
+            print(f"{note_id[:8]}: no complete generation")
+            failed += 1
+            continue
+        results = global_checks(produced)
+        print(
+            f"{note_id[:8]}: {sum(ok for _n, ok in results)}/{len(results)} global assertions"
+            f" ({len(produced['lines'])} lines, {len(produced['facts'])} facts)"
+        )
+        for name, ok in results:
+            print(f"  {'PASS' if ok else 'FAIL'}  {name}")
+            failed += 0 if ok else 1
+    return 1 if failed else 0
+
+
+def main(*_args: Any, **_kwargs: Any) -> int:
+    """The live path (produce a note, then check it) returns with Sprint P3, reading the
+    notes the writer stores. Until then only ``--note-ids`` runs."""
+    print(
+        "notes_assert: the live path was removed with the old writing path (Sprint R0);"
+        " use --note-ids on stored notes, or wait for Sprint P3",
+        file=sys.stderr,
+    )
+    return 3
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--backend", required=True)
-    ap.add_argument("--corpus", type=Path, default=REPO / "tests" / "fixtures" / "eval" / "notes")
+    ap.add_argument(
+        "--note-ids",
+        default="",
+        help="run the global assertions on these stored notes' newest generations"
+        " (no model call; content never leaves the process)",
+    )
+    ap.add_argument("--dsn", default=DEFAULT_STORE_DSN, help="with --note-ids: the notes DB")
     args = ap.parse_args()
-    sys.exit(asyncio.run(main(args.backend, args.corpus)))
+    if args.note_ids:
+        sys.exit(
+            asyncio.run(
+                check_stored(
+                    args.dsn, tuple(i.strip() for i in args.note_ids.split(",") if i.strip())
+                )
+            )
+        )
+    sys.exit(main())

@@ -1,0 +1,7 @@
+The recording's date is {{date}}; if unknown, write relative dates as spoken ("tomorrow", "Tuesday"), never as a calendar date.
+
+Write what was said, by whom. Use the template for the sections: keep its headings and order, drop a section with nothing in it, add none. Inside a section write short bullets, one point each, with the numbers, names and identifiers inside the bullet, copied exactly (bill numbers, times, section numbers). End every bullet with the transcript time it rests on: [12:34] or [12:34, 41:02]. Use quotation marks only where the exact words matter.
+
+When someone states an assessment, warning or position, say who — "Jäger: …", "Councilmember Torres said …" — once, then continue in that person's voice without repeating the name on every line. When a speaker reports someone else's claim, say whose claim it is and what the speaker said about it. Do not turn an expectation into a past event. Do not write what was not said. A recited or performed passage (poem, song, reading) is one line naming the performer and the subject, nothing more.
+
+The first line is the title: the subject and, when there is one, the single most important fact. Then the sections. About {{words}} words in total; shorter is fine when the recording has less in it. Write in {{language}}. Plain Markdown only: "## " for sections, "- " for bullets, a table only for votes (item, result, ayes/nays as spoken) or for reported claims (who, claim, what the speaker said about it, time).

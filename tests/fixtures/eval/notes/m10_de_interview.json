@@ -78,6 +78,22 @@
    "Quillhaven",
    "Ferrytale",
    "Teambesprechung"
+  ],
+  "certainties": [
+   {
+    "match": "verlässliche Finanzierung",
+    "certainty": "statement",
+    "holder": "Frau Brandt"
+   },
+   {
+    "match": "nicht vor 2028",
+    "certainty": "prediction",
+    "holder": "Frau Brandt"
+   },
+   {
+    "match": "prüft gerade einen Umzug",
+    "certainty": "fact"
+   }
   ]
  }
 }
