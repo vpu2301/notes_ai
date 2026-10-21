@@ -6,32 +6,8 @@ import type {
   AiSettingsUpdate,
   ModelParamLimit,
   ModelParams,
-  WritingStyle,
 } from "../api/types";
 import { ConfirmDialog } from "./ConfirmDialog";
-
-const STYLES: ReadonlyArray<readonly [WritingStyle, string, string]> = [
-  [
-    "business",
-    "Business",
-    "An executive record of what was said and decided — the notes as they are today.",
-  ],
-  [
-    "formal",
-    "Formal",
-    "Full forms and no colloquial words; titles and surnames as given; one claim per sentence.",
-  ],
-  [
-    "informal",
-    "Informal",
-    "Plain, direct wording with short sentences and short headings; no figure tables.",
-  ],
-  [
-    "academic",
-    "Academic",
-    "Precise and hedged: who argues what, every qualifier kept, figures with their units.",
-  ],
-];
 
 type Field = keyof ModelParams;
 
@@ -39,13 +15,7 @@ const FIELDS: ReadonlyArray<{ key: Field; label: string; help: string; unit?: st
   {
     key: "temperature",
     label: "Temperature",
-    help: "How freely the writer words a line. 0 = the same wording every time. Higher: more varied phrasing; lines the verifier cannot support are dropped, so notes may get shorter.",
-  },
-  {
-    key: "context_window_tokens",
-    label: "Context window",
-    unit: "tokens",
-    help: "How much of the recording the writer reads at once. Larger: fewer passes, better cross-references, more memory and cost per call.",
+    help: "How freely the writer words a line. 0 = the same wording every time. Higher: more varied phrasing.",
   },
   {
     key: "max_output_tokens",
@@ -57,16 +27,6 @@ const FIELDS: ReadonlyArray<{ key: Field; label: string; help: string; unit?: st
     key: "max_concurrency",
     label: "Parallel calls",
     help: "Parallel calls per note. Faster notes, more load on the model.",
-  },
-  {
-    key: "facts_per_window",
-    label: "Facts per pass",
-    help: "How many facts the reader may take from one pass. Fewer: sharper notes on noisy recordings; more: longer notes.",
-  },
-  {
-    key: "retries",
-    label: "Second reading",
-    help: "Whether a thin part of the recording is read a second time. Thorough: better coverage, slower.",
   },
   {
     key: "ask_temperature",
@@ -81,68 +41,18 @@ const FIELDS: ReadonlyArray<{ key: Field; label: string; help: string; unit?: st
   },
 ];
 
-const RETRIES: Record<string, string> = { off: "Off", standard: "Standard", thorough: "Thorough" };
-
 const fmt = (v: number | string | null | undefined, unit?: string): string =>
   v === null || v === undefined
     ? "Set by the model"
     : typeof v === "number"
       ? `${v.toLocaleString("en-US")}${unit ? ` ${unit}` : ""}`
-      : (RETRIES[v] ?? v);
+      : v;
 
 interface Props {
   settings: AiSettings;
   busy: boolean;
   /** `done`: the toast, or one built from the saved settings (to name the new version). */
   onSave: (body: AiSettingsUpdate, done: string | ((saved: AiSettings) => string)) => Promise<void>;
-}
-
-/**
- * Settings → Data & AI → Note writing: the writing style (N0) — business is today's notes.
- * When the workspace's note instructions name a style, that one is used and the picker
- * says so; it stays usable (changing it does not change the instructions).
- */
-export function WritingStyleCard({
-  settings,
-  busy,
-  onSave,
-  overriddenBy = null,
-}: Props & { overriddenBy?: string | null }) {
-  const style = settings.writing_style ?? "business";
-  const editable = settings.can_edit;
-  const named = STYLES.find(([v]) => v === overriddenBy)?.[1];
-  return (
-    <section className="card pad settings-card" aria-label="Writing style">
-      <h2 className="settings-h">Writing style</h2>
-      <div className="seg" role="group" aria-label="Writing style">
-        {STYLES.map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            className="seg-opt"
-            aria-pressed={style === value}
-            disabled={!editable || busy}
-            onClick={() => {
-              if (style !== value)
-                void onSave(
-                  { writing_style: value },
-                  `Notes will be written in the ${label.toLowerCase()} style.`,
-                );
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <p className="help">{STYLES.find(([v]) => v === style)?.[2]}</p>
-      {named && (
-        <p className="help">
-          Overridden by your instructions: notes are written in the {named.toLowerCase()} style.
-        </p>
-      )}
-      {!editable && <p className="help">Only a workspace admin can change this.</p>}
-    </section>
-  );
 }
 
 /**
@@ -179,25 +89,7 @@ export function ModelBehaviourCard({ settings, busy, onSave }: Props) {
 
   const input = (key: Field, limit: ModelParamLimit) => {
     const value = draft?.[key];
-    if (key === "retries") {
-      return (
-        <div className="seg" role="group" aria-label="Second reading">
-          {(limit.options ?? []).map((o) => (
-            <button
-              key={o}
-              type="button"
-              className="seg-opt"
-              aria-pressed={value === o}
-              disabled={busy}
-              onClick={() => set("retries", o as ModelParams["retries"])}
-            >
-              {RETRIES[o] ?? o}
-            </button>
-          ))}
-        </div>
-      );
-    }
-    const nullable = key === "context_window_tokens" || key === "max_output_tokens";
+    const nullable = key === "max_output_tokens";
     return (
       <span className="param-input">
         {(key === "temperature" || key === "ask_temperature") && (
@@ -245,8 +137,7 @@ export function ModelBehaviourCard({ settings, busy, onSave }: Props) {
         </summary>
         <p className="help">
           The settings the writing model works with. The recommended values are what notes use
-          unless you change them; the model's own configuration may cap a value. Extraction and
-          every check always run at temperature 0. Reasoning effort is set by the deployment.
+          unless you change them; the model's own configuration may cap a value.
         </p>
         <div className="model-tier">
           <h3 className="settings-sub">Quality tier</h3>

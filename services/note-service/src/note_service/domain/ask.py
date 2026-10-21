@@ -124,7 +124,7 @@ class NoteAsker:
                     self._settings_source.cached if self._settings_source is not None else None
                 ),
             )
-        resolved = self._registry.resolve(workspace_id, "understand")
+        resolved = self._registry.resolve(workspace_id, "ask")
         provider = self._providers.get(resolved.name)
         if provider is None:
             provider = build_chat_provider(resolved)

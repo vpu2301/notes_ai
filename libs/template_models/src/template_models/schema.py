@@ -117,7 +117,7 @@ SectionRole = Literal[
     "judgement",
     "custom",
 ]
-"""What a section is for. See `note_service.domain.meeting_doc.roles`."""
+"""What a section is for. See `note_service.domain.roles`."""
 
 
 class TemplateSection(_Strict):
@@ -136,7 +136,7 @@ class TemplateSection(_Strict):
     # Per-section synthesis guidance; empty = none. Editing it is cosmetic.
     synthesis_prompt: str = Field(default="", max_length=2_000)
     # What the section is FOR, independent of its name; consumers decide by role, not id.
-    # Optional: older templates have none and `meeting_doc.roles.role_of` falls back to an id map.
+    # Optional: older templates have none and `roles.role_of` falls back to an id map.
     role: SectionRole | None = None
     # 2..50 for choice/multi_choice, empty for every other field_type.
     options: tuple[ChoiceOption, ...] = Field(default_factory=tuple)

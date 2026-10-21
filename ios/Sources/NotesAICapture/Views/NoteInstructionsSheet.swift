@@ -1,20 +1,19 @@
 import SwiftUI
 
-/// "Write this note differently…" (N4): instructions for this note only, added to the
-/// workspace's, then the note is written again.
+/// "Write this note differently…": instructions for this note only, added to the
+/// workspace's, then the note is written again (P2: the writer reads the text as it is).
 struct NoteInstructionsSheet: View {
     @ObservedObject var model: NoteViewModel
     let onClose: () -> Void
 
     @State private var draft = ""
-    @State private var preview: AIInstructions?
     @State private var working = false
     @State private var error: String?
     @State private var notice: String?
 
     private var current: AIInstructions? { model.noteInstructions }
     private var hasInstructions: Bool { (current?.version ?? 0) > 0 }
-    private var maxChars: Int { current?.maxChars ?? 8000 }
+    private var maxChars: Int { current?.maxChars ?? 4000 }
     private var tooLong: Bool { draft.count > maxChars }
     private var blocked: Bool { working || !model.online }
 
@@ -35,7 +34,16 @@ struct NoteInstructionsSheet: View {
                             RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
                                 .strokeBorder(DS.line, lineWidth: DS.hairline)
                         )
-                        .onChange(of: draft) { _, _ in preview = nil }
+                        .overlay(alignment: .topLeading) {
+                            if draft.isEmpty {
+                                Text(AIInstructions.skeleton)
+                                    .font(.system(size: 15 - 2, design: .monospaced))
+                                    .foregroundStyle(DS.muted)
+                                    .padding(8 + 5)
+                                    .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
+                            }
+                        }
                     HStack {
                         if !model.online {
                             Text("Needs a connection").font(.dsMeta).foregroundStyle(DS.muted)
@@ -46,10 +54,7 @@ struct NoteInstructionsSheet: View {
                             .foregroundStyle(draft.count > maxChars - 200 ? DS.warn : DS.muted)
                     }
                     HStack(spacing: 8) {
-                        Button("Check") { Task { await check() } }
-                            .buttonStyle(DSButtonStyle(kind: .secondary))
-                            .disabled(blocked || tooLong || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        Button("Save and rewrite") { Task { await rewrite(draft) } }
+                        Button("Regenerate this note with the new instructions") { Task { await rewrite(draft) } }
                             .buttonStyle(DSButtonStyle(kind: .primary))
                             .disabled(blocked || tooLong || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         if hasInstructions {
@@ -65,7 +70,6 @@ struct NoteInstructionsSheet: View {
                     if let notice {
                         DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill", text: notice)
                     }
-                    if let preview { readout(preview) }
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -80,57 +84,6 @@ struct NoteInstructionsSheet: View {
             }
         }
         .onAppear { draft = current?.text ?? "" }
-    }
-
-    /// What the writer took from the text, as the Data & AI card shows it.
-    private func readout(_ i: AIInstructions) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if i.compileStatus == "failed" {
-                DSNotice(tone: .warn, symbol: "exclamationmark.triangle.fill",
-                         text: AIInstructions.failedText)
-            }
-            if !i.understood.isEmpty {
-                heading("Understood")
-                bullets(i.understood)
-            }
-            if !i.guidance.isEmpty {
-                heading("Also passed to the writer as wording guidance")
-                bullets(i.guidance)
-            }
-            if !i.notApplied.isEmpty {
-                heading("Not applied")
-                bullets(i.notApplied.map { "“\($0.text)” — \($0.message)" })
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .dsCard()
-    }
-
-    private func heading(_ text: String) -> some View {
-        Text(text).font(.ds(15 - 2, .semibold)).foregroundStyle(DS.text1).padding(.top, 4)
-    }
-
-    private func bullets(_ lines: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("•").foregroundStyle(DS.muted)
-                    Text(line).fixedSize(horizontal: false, vertical: true)
-                }
-                .font(.dsMeta).foregroundStyle(DS.text2)
-            }
-        }
-    }
-
-    private func check() async {
-        working = true
-        error = nil
-        defer { working = false }
-        do {
-            preview = try await model.previewNoteInstructions(draft)
-        } catch {
-            self.error = AuthCopy.message(for: error)
-        }
     }
 
     /// nil removes the instructions. Closes on success; a refused rewrite keeps the sheet open to say so.

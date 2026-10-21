@@ -123,7 +123,7 @@ class SegmentDiagnostics(BaseModel):
     second_pass: bool = False
 
 
-DropReason = Literal["no_speech", "loop", "low_confidence_nonspeech", "artefact"]
+DropReason = Literal["no_speech", "loop", "low_confidence_nonspeech", "artefact", "artefact_outro"]
 
 
 class DroppedSegment(BaseModel):

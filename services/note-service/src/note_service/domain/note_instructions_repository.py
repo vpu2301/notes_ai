@@ -160,52 +160,6 @@ async def fetch_many(
     return {r["scope"]: _row(r) for r in records}
 
 
-async def mark_types_stale(conn: asyncpg.Connection, *, tenant_id: UUID) -> int:
-    """Every type row of the tenant, after its workspace text changed: until the recompile
-    job has run, the worker uses the workspace row instead (a stale child never runs)."""
-    status = await conn.execute(
-        "UPDATE workspace_note_instructions SET compile_status = 'stale'"
-        " WHERE tenant_id = $1 AND scope <> 'workspace'",
-        tenant_id,
-    )
-    return int(str(status).rsplit(" ", 1)[-1] or 0)
-
-
-async def set_compiled(
-    conn: asyncpg.Connection,
-    *,
-    tenant_id: UUID,
-    scope: str,
-    profile: dict[str, Any],
-    profile_hash: str,
-    compile_status: str,
-    compile_error_kind: str | None,
-    compiler_version: str,
-    backend: str | None,
-    base_versions: dict[str, int],
-) -> Row | None:
-    """A recompile of the same text (the recompile job): the version stays."""
-    record = await conn.fetchrow(
-        f"""
-        UPDATE workspace_note_instructions SET
-            profile = $3::jsonb, profile_hash = $4, compile_status = $5,
-            compile_error_kind = $6, compiler_version = $7, backend = $8, base_versions = $9::jsonb
-        WHERE tenant_id = $1 AND scope = $2
-        RETURNING {_COLUMNS}
-        """,
-        tenant_id,
-        scope,
-        json.dumps(profile),
-        profile_hash,
-        compile_status,
-        compile_error_kind,
-        compiler_version,
-        backend,
-        json.dumps(base_versions),
-    )
-    return _row(record) if record is not None else None
-
-
 # ── One note's instructions (N4) ───────────────────────────────────
 
 _NOTE_COLUMNS: Final = (

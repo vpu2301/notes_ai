@@ -114,9 +114,8 @@ def render_rich_text(text: str, *, line_mark: Callable[[str], str] | None = None
     def flush_para() -> None:
         nonlocal para
         if para:
-            rendered = _paragraph(para)
-            suffix = mark(" ".join(p.strip() for p in para)) if rendered.endswith("</p>") else ""
-            html.append(rendered[:-4] + suffix + "</p>" if suffix else rendered)
+            # A3: no provenance marker on a paragraph (the opening, the summary) — lines only.
+            html.append(_paragraph(para))
             para = []
 
     def flush_list() -> None:

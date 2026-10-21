@@ -8,7 +8,7 @@ import pytest
 
 from note_models import NoteContent, NoteSection
 from note_service.domain import client_view, lines
-from note_service.domain.meeting_doc import types
+from note_service.domain import families as types
 
 TRANSCRIPT = "Tom: we can send the assets Monday.\n\nAnna: perfect.\n\nTom: agreed."
 
@@ -197,16 +197,3 @@ def test_an_engine_marked_line_counts_as_hidden_like_a_typed_mark() -> None:
     )
     assert doc.is_empty
     assert "decisions" in doc.hidden_sections
-
-
-def test_what_a_buyer_objected_to_is_internal_in_a_sales_call() -> None:
-    sales = types.family_for_template("sales_call")
-    for kind in ("objection", "competitor_mention", "budget_timeline"):
-        assert types.is_internal_kind(sales, kind)
-    # …but what was DECIDED is not.
-    assert not types.is_internal_kind(sales, "decision")
-
-
-def test_a_judgement_is_internal_in_every_family() -> None:
-    for family in types.FAMILIES:
-        assert types.is_internal_kind(family, "judgement")

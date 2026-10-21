@@ -63,6 +63,16 @@
   "open_questions": [
    "Ob der Wartungsvertrag mit angeboten wird — nächste Woche zu klären"
   ],
-  "claims": []
+  "claims": [],
+  "certainties": [
+   {
+    "match": "können wir am fünfzehnten nicht liefern",
+    "certainty": "prediction"
+   },
+   {
+    "match": "Prototyp ist fertig",
+    "certainty": "statement"
+   }
+  ]
  }
 }

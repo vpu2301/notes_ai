@@ -91,8 +91,6 @@ class SettingsView(BaseModel):
     None where nothing is routed."""
     writer: WriterView | None = None
     small_writer: WriterView | None = None
-    """N0 — the writing style (business = today's executive record)."""
-    writing_style: str = "business"
     """The parameters as saved (every field; unset ones at their recommended value)."""
     model_params: dict[str, Any] = Field(default_factory=dict)
     """What runs: the saved values with the writer's backend caps applied."""
@@ -115,11 +113,8 @@ class ModelParamsBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     temperature: float
-    context_window_tokens: int | None
     max_output_tokens: int | None
     max_concurrency: int
-    facts_per_window: int
-    retries: str
     ask_temperature: float
     ask_max_tokens: int
 
@@ -141,8 +136,7 @@ class UpdateSettingsRequest(BaseModel):
     """The exact processors the admin is agreeing to. Must cover every
     processor the new setting would route to, or the change is refused."""
     acknowledge: list[AcknowledgedProcessor] = Field(default_factory=list, max_length=50)
-    """N0 — the writing style, the whole parameter set, or back to the recommended values."""
-    writing_style: Literal["business", "formal", "informal", "academic"] | None = None
+    """N0 — the whole parameter set, or back to the recommended values."""
     model_params: ModelParamsBody | None = None
     reset_model_params: bool = False
 
@@ -204,13 +198,13 @@ async def _plan(conn: Any, tenant_id: UUID) -> tuple[str, dict[str, Any]]:
     )
 
 
-def _caps(tenant_id: UUID) -> tuple[int | None, int | None]:
-    """The writer's backend for this workspace: its context window and parallel calls."""
+def _caps(tenant_id: UUID) -> int | None:
+    """The writer's backend for this workspace: its parallel calls."""
     try:
-        resolved = _registry().resolve(str(tenant_id), "summarize")
+        resolved = _registry().resolve(str(tenant_id), "write")
     except Exception:  # noqa: BLE001 — no registry: nothing to cap by
-        return None, None
-    return resolved.caps.context_window, resolved.caps.max_concurrency
+        return None
+    return resolved.caps.max_concurrency
 
 
 def _measured(start: Any = None) -> dict[str, Any]:
@@ -220,7 +214,7 @@ def _measured(start: Any = None) -> dict[str, Any]:
     import json
     from pathlib import Path
 
-    from ..domain.meeting_doc.prompts import PROMPT_VERSION
+    from ..domain.prompts import PROMPT_VERSION
 
     empty: dict[str, Any] = {"temperature": {"0.2": None, "0.4": None, "0.7": None}}
     name = Path("docs") / "eval" / f"model-params-{PROMPT_VERSION}.json"
@@ -247,13 +241,11 @@ def _view(
     provider, tier, unacknowledged = rules.effective(row, processors)
     agreed = row.acknowledged_keys
     writer, small_writer = _writers()
-    window_cap, concurrency_cap = _caps(claims.tid)
+    concurrency_cap = _caps(claims.tid)
     saved = model_params.from_stored(
         row.model_params, tenant_id=row.tenant_id, version=row.model_params_version
     )
-    running = model_params.effective(
-        saved, context_window=window_cap, max_concurrency=concurrency_cap
-    )
+    running = model_params.effective(saved, max_concurrency=concurrency_cap)
     return SettingsView(
         provider=row.provider,
         tier=row.tier,
@@ -286,23 +278,20 @@ def _view(
         can_edit=bool(_ADMIN_ROLES & set(claims.roles)),
         writer=writer,
         small_writer=small_writer,
-        writing_style=row.writing_style,
         model_params=saved.model_dump(mode="json"),
         model_params_effective=running.model_dump(mode="json"),
         model_params_version=row.model_params_version,
         model_params_valid=model_params.is_valid(row.model_params),
-        model_params_limits=model_params.limits(
-            context_window=window_cap, max_concurrency=concurrency_cap
-        ),
+        model_params_limits=model_params.limits(max_concurrency=concurrency_cap),
         model_params_measured=_measured(),
     )
 
 
 def _next_model_settings(
     row: rules.SettingsRow, body: UpdateSettingsRequest, tenant_id: UUID
-) -> tuple[str, model_params.ModelParams, list[str], bool]:
-    """``(style, params to save, changed parameter names, changed at all)``. A requested
-    value above the backend's cap is saved capped."""
+) -> tuple[model_params.ModelParams, list[str], bool]:
+    """``(params to save, changed parameter names, changed at all)``. A requested value
+    above the backend's cap is saved capped."""
     before = model_params.from_stored(
         row.model_params, tenant_id=tenant_id, version=row.model_params_version
     )
@@ -314,19 +303,10 @@ def _next_model_settings(
             after = model_params.ModelParams.model_validate(body.model_params.model_dump())
         except ValueError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from None
-        window_cap, concurrency_cap = _caps(tenant_id)
-        after = model_params.effective(
-            after, context_window=window_cap, max_concurrency=concurrency_cap
-        )
-    style = body.writing_style or row.writing_style
+        after = model_params.effective(after, max_concurrency=_caps(tenant_id))
     changed = model_params.changed_fields(before, after)
     # A reset is a change even when the values were already the defaults (a new version).
-    return (
-        style,
-        after,
-        changed,
-        bool(changed) or style != row.writing_style or body.reset_model_params,
-    )
+    return after, changed, bool(changed) or body.reset_model_params
 
 
 @router.get("/settings", response_model=SettingsView)
@@ -416,9 +396,7 @@ async def put_ai_settings(
             )
 
         personal = row.personal
-        style, params, params_changed, settings_changed = _next_model_settings(
-            row, body, claims.tid
-        )
+        params, params_changed, settings_changed = _next_model_settings(row, body, claims.tid)
         row = await rules.upsert(
             conn,
             tenant_id=claims.tid,
@@ -432,7 +410,6 @@ async def put_ai_settings(
                 else row.monthly_budget_cents
             ),
             updated_by=claims.sub,
-            writing_style=style,
             model_params=params.model_dump(mode="json", exclude_defaults=True)
             if settings_changed
             else row.model_params,
@@ -462,11 +439,10 @@ async def put_ai_settings(
             # N0: names of what changed; two operational values an auditor should see.
             **(
                 {
-                    "writing_style": row.writing_style,
                     "model_params_changed": params_changed,
                     "model_params_version": row.model_params_version,
                     "temperature": params.temperature,
-                    "context_window_tokens": params.context_window_tokens,
+                    "max_output_tokens": params.max_output_tokens,
                 }
                 if settings_changed
                 else {}

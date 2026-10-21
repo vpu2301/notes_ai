@@ -58,29 +58,35 @@ jobs:
       - name: Stack model
         run: make dev-model ARGS=start
 
-      - name: Pipeline arm
-        run: make eval-notes BACKEND=dev_mac ARM=pipeline CORPUS="${{ steps.corpus.outputs.path }}"
+      # Sprint P3: the writer (P1) writes the corpus and the scoring harness measures it
+      # the same way the six assessed recordings are measured (docs/eval/writer-v2-<date>.md).
+      - name: Write and score the corpus
+        run: make score-notes-fixtures BACKEND=dev_mac CORPUS="${{ steps.corpus.outputs.path }}" LABEL=nightly
 
-      - name: Single-pass baseline arm
-        run: make eval-notes BACKEND=dev_mac ARM=single_pass CORPUS="${{ steps.corpus.outputs.path }}"
-
-      - name: Regression checklists
-        # Reported, not gating; the comparison below is the gate.
-        continue-on-error: true
-        run: make eval-notes-assert BACKEND=dev_mac CORPUS="${{ steps.corpus.outputs.path }}"
-
-      - name: Compare against the committed baseline
+      - name: Regression against the committed baseline
         run: |
           set -euo pipefail
-          today="$(date -u +%Y-%m-%d)"
-          uv run python scripts/eval/compare_notes.py --baseline "$BASELINE_PIPELINE" \
-            --current "docs/eval/notes-pipeline-${today}-dev_mac.json" \
-            --max-unsupported-rise "$MAX_UNSUPPORTED_RISE" --max-recall-drop "$MAX_RECALL_DROP"
+          baseline=docs/eval/writer-v2-baseline.json
+          latest=$(ls -t docs/eval/writer-v2-*-nightly.json | head -1)
+          if [ ! -f "$baseline" ]; then echo "no baseline committed yet: $latest is the first"; exit 0; fi
+          uv run python - "$baseline" "$latest" <<'PY'
+          import json, statistics, sys
+          base, now = (json.load(open(p)) for p in sys.argv[1:3])
+          def mean(rows, key):
+              vals = [r[key] for r in rows if isinstance(r.get(key), (int, float))]
+              return statistics.fmean(vals) if vals else None
+          drop = (mean(base["rows"], "hand_recall") or 0) - (mean(now["rows"], "hand_recall") or 0)
+          rise = (mean(now["rows"], "judge_unsupported_rate") or 0) - (mean(base["rows"], "judge_unsupported_rate") or 0)
+          print(f"recall drop {drop:.3f} (max {MAX_RECALL_DROP}), unsupported rise {rise:.3f} (max {MAX_UNSUPPORTED_RISE})".replace("MAX_RECALL_DROP", "${{ env.MAX_RECALL_DROP }}").replace("MAX_UNSUPPORTED_RISE", "${{ env.MAX_UNSUPPORTED_RISE }}"))
+          sys.exit(1 if drop > float("${{ env.MAX_RECALL_DROP }}") or rise > float("${{ env.MAX_UNSUPPORTED_RISE }}") else 0)
+          PY
 
       - name: Keep the reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: notes-reports
-          path: docs/eval/notes-*-dev_mac.json
+          path: |
+            docs/eval/writer-v2-*.md
+            docs/eval/writer-v2-*.json
           retention-days: 30

@@ -166,9 +166,24 @@ class GoldClaim(_Model):
     verdict: list[str] = Field(default_factory=list)
 
 
+class GoldCertainty(_Model):
+    """A1: the certainty and holder of one fact, matched by ``match`` — a phrase of its
+    quote or text. ``holder`` is the claimant (never the relayer), or None when nobody
+    named holds it; the scorer compares holders by their last word, case-insensitive."""
+
+    match: str = Field(min_length=3)
+    certainty: Literal[
+        "fact", "estimate", "prediction", "opinion", "proposal", "allegation",
+        "reported", "unproven", "refuted", "statement",
+    ]  # fmt: skip
+    holder: str | None = None
+
+
 class Gold(_Model):
     # v1/v2: strings; v3: KeyFact objects. One file uses one.
     key_facts: list[str | KeyFact] = Field(default_factory=list)
+    # A1: certainty and holder labels on the facts the checklists name.
+    certainties: list[GoldCertainty] = Field(default_factory=list)
     # B4: the relayed claims the note's claims table must carry.
     claims: list[GoldClaim] = Field(default_factory=list)
     actions: list[Action] = Field(default_factory=list)

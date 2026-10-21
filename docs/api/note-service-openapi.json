@@ -35,97 +35,6 @@
         "title": "AcknowledgedProcessor",
         "type": "object"
       },
-      "ActivateRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "evaluation_ref": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Evaluation Ref"
-          },
-          "expected_active_revision": {
-            "minimum": 0.0,
-            "title": "Expected Active Revision",
-            "type": "integer"
-          },
-          "version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Version Id"
-          }
-        },
-        "required": [
-          "version_id",
-          "expected_active_revision"
-        ],
-        "title": "ActivateRequest",
-        "type": "object"
-      },
-      "ActiveView": {
-        "additionalProperties": false,
-        "properties": {
-          "activated_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Activated At"
-          },
-          "activated_by": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Activated By"
-          },
-          "profile_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profile Version Id"
-          },
-          "revision": {
-            "title": "Revision",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "profile_version_id",
-          "revision"
-        ],
-        "title": "ActiveView",
-        "type": "object"
-      },
       "AddTermRequest": {
         "additionalProperties": false,
         "properties": {
@@ -597,44 +506,6 @@
         "title": "CancelRequest",
         "type": "object"
       },
-      "CapabilitiesView": {
-        "additionalProperties": false,
-        "properties": {
-          "models": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Models",
-            "type": "array"
-          },
-          "stage_operations": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Stage Operations",
-            "type": "object"
-          },
-          "writer": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Writer"
-          }
-        },
-        "required": [
-          "models",
-          "stage_operations"
-        ],
-        "title": "CapabilitiesView",
-        "type": "object"
-      },
       "CarriedItemView": {
         "additionalProperties": false,
         "properties": {
@@ -887,6 +758,62 @@
           "label"
         ],
         "title": "ChoiceOption",
+        "type": "object"
+      },
+      "CitedTurn": {
+        "additionalProperties": false,
+        "properties": {
+          "at_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At Ms"
+          },
+          "end_ms": {
+            "title": "End Ms",
+            "type": "integer"
+          },
+          "excerpt": {
+            "default": false,
+            "title": "Excerpt",
+            "type": "boolean"
+          },
+          "speaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speaker"
+          },
+          "start_ms": {
+            "title": "Start Ms",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "turn": {
+            "title": "Turn",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "turn",
+          "start_ms",
+          "end_ms",
+          "text"
+        ],
+        "title": "CitedTurn",
         "type": "object"
       },
       "ClientSectionView": {
@@ -1591,6 +1518,26 @@
             "title": "Asr Job Id",
             "type": "string"
           },
+          "template": {
+            "anyOf": [
+              {
+                "enum": [
+                  "meeting",
+                  "client_call",
+                  "interview",
+                  "broadcast",
+                  "public_meeting",
+                  "memo",
+                  "auto"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          },
           "template_id": {
             "anyOf": [
               {
@@ -1737,40 +1684,6 @@
           "content"
         ],
         "title": "CreateNoteRequest",
-        "type": "object"
-      },
-      "CreateProfileRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "copy_of_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Copy Of Version Id"
-          },
-          "description": {
-            "default": "",
-            "maxLength": 2000,
-            "title": "Description",
-            "type": "string"
-          },
-          "name": {
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "CreateProfileRequest",
         "type": "object"
       },
       "CreateResponse": {
@@ -2014,56 +1927,6 @@
         "title": "EditCommentRequest",
         "type": "object"
       },
-      "EstimateView": {
-        "additionalProperties": false,
-        "properties": {
-          "cost_known": {
-            "title": "Cost Known",
-            "type": "boolean"
-          },
-          "estimate_cents": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Estimate Cents"
-          },
-          "requests": {
-            "default": 0,
-            "title": "Requests",
-            "type": "integer"
-          },
-          "runs": {
-            "title": "Runs",
-            "type": "integer"
-          },
-          "sources": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Sources",
-            "type": "array"
-          },
-          "token_cap": {
-            "title": "Token Cap",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "runs",
-          "estimate_cents",
-          "token_cap",
-          "cost_known",
-          "sources"
-        ],
-        "title": "EstimateView",
-        "type": "object"
-      },
       "EventView": {
         "additionalProperties": false,
         "properties": {
@@ -2282,183 +2145,6 @@
         "title": "ExcludedRange",
         "type": "object"
       },
-      "ExperimentSummary": {
-        "additionalProperties": false,
-        "properties": {
-          "candidates": {
-            "items": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "title": "Candidates",
-            "type": "array"
-          },
-          "cost_known": {
-            "title": "Cost Known",
-            "type": "boolean"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "repetitions": {
-            "title": "Repetitions",
-            "type": "integer"
-          },
-          "sources": {
-            "title": "Sources",
-            "type": "integer"
-          },
-          "spent_cents": {
-            "title": "Spent Cents",
-            "type": "number"
-          },
-          "state": {
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "state",
-          "candidates",
-          "sources",
-          "repetitions",
-          "cost_known",
-          "spent_cents",
-          "created_at"
-        ],
-        "title": "ExperimentSummary",
-        "type": "object"
-      },
-      "ExperimentView": {
-        "additionalProperties": false,
-        "properties": {
-          "budget_cap_cents": {
-            "title": "Budget Cap Cents",
-            "type": "integer"
-          },
-          "candidates": {
-            "items": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "title": "Candidates",
-            "type": "array"
-          },
-          "cost_known": {
-            "title": "Cost Known",
-            "type": "boolean"
-          },
-          "error_kind": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error Kind"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "length": {
-            "title": "Length",
-            "type": "string"
-          },
-          "output_language": {
-            "title": "Output Language",
-            "type": "string"
-          },
-          "repetitions": {
-            "title": "Repetitions",
-            "type": "integer"
-          },
-          "reserved_cents": {
-            "title": "Reserved Cents",
-            "type": "number"
-          },
-          "runs": {
-            "items": {
-              "$ref": "#/components/schemas/RunView"
-            },
-            "title": "Runs",
-            "type": "array"
-          },
-          "sources": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Sources",
-            "type": "array"
-          },
-          "spent_cents": {
-            "title": "Spent Cents",
-            "type": "number"
-          },
-          "stale": {
-            "default": false,
-            "title": "Stale",
-            "type": "boolean"
-          },
-          "state": {
-            "title": "State",
-            "type": "string"
-          },
-          "token_cap": {
-            "title": "Token Cap",
-            "type": "integer"
-          },
-          "tokens_used": {
-            "title": "Tokens Used",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "state",
-          "sources",
-          "candidates",
-          "repetitions",
-          "length",
-          "output_language",
-          "budget_cap_cents",
-          "reserved_cents",
-          "spent_cents",
-          "cost_known",
-          "token_cap",
-          "tokens_used",
-          "error_kind",
-          "runs"
-        ],
-        "title": "ExperimentView",
-        "type": "object"
-      },
       "FieldType": {
         "description": "Sprint-06 shipped the first kinds; sprint-13 adds the two choice\nkinds. Adding enum members is additive to the *model*; changing an\nexisting section's ``field_type`` remains a STRUCTURAL edit\n(ADR-0016).",
         "enum": [
@@ -2632,6 +2318,45 @@
             ],
             "title": "Certainty"
           },
+          "check": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ok",
+                  "unsupported"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check"
+          },
+          "check_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Reason"
+          },
+          "cite_nearest": {
+            "default": false,
+            "title": "Cite Nearest",
+            "type": "boolean"
+          },
+          "cited_turns": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CitedTurn"
+            },
+            "title": "Cited Turns",
+            "type": "array"
+          },
           "cites": {
             "default": [],
             "items": {
@@ -2759,6 +2484,11 @@
             "title": "Placement",
             "type": "string"
           },
+          "position": {
+            "default": 0,
+            "title": "Position",
+            "type": "integer"
+          },
           "provenance": {
             "anyOf": [
               {
@@ -2808,6 +2538,18 @@
           "start_ms": {
             "title": "Start Ms",
             "type": "integer"
+          },
+          "table_row": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Row"
           },
           "text": {
             "title": "Text",
@@ -3078,6 +2820,28 @@
             "title": "Suggested Sections",
             "type": "array"
           },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
           "transcript_rev": {
             "anyOf": [
               {
@@ -3121,17 +2885,6 @@
               }
             ],
             "title": "Windows Total"
-          },
-          "writing_style": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Writing Style"
           }
         },
         "required": [
@@ -3243,6 +2996,7 @@
       },
       "InstructionsView": {
         "additionalProperties": false,
+        "description": "The stored text. The ``profile``, ``understood``, ``guidance`` and ``not_applied``\nfields are the shape clients read; since Sprint R0 nothing compiles the text, so they\nare empty and ``compile_status`` is always ``compiled``.",
         "properties": {
           "base_versions": {
             "additionalProperties": {
@@ -3268,6 +3022,11 @@
           },
           "compile_status": {
             "title": "Compile Status",
+            "type": "string"
+          },
+          "default_text": {
+            "default": "",
+            "title": "Default Text",
             "type": "string"
           },
           "extends": {
@@ -3317,6 +3076,15 @@
             },
             "title": "Scopes",
             "type": "array"
+          },
+          "source": {
+            "default": "workspace",
+            "enum": [
+              "workspace",
+              "default"
+            ],
+            "title": "Source",
+            "type": "string"
           },
           "stale": {
             "default": false,
@@ -3962,21 +3730,6 @@
             "title": "Ask Temperature",
             "type": "number"
           },
-          "context_window_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Context Window Tokens"
-          },
-          "facts_per_window": {
-            "title": "Facts Per Window",
-            "type": "integer"
-          },
           "max_concurrency": {
             "title": "Max Concurrency",
             "type": "integer"
@@ -3992,10 +3745,6 @@
             ],
             "title": "Max Output Tokens"
           },
-          "retries": {
-            "title": "Retries",
-            "type": "string"
-          },
           "temperature": {
             "title": "Temperature",
             "type": "number"
@@ -4003,11 +3752,8 @@
         },
         "required": [
           "temperature",
-          "context_window_tokens",
           "max_output_tokens",
           "max_concurrency",
-          "facts_per_window",
-          "retries",
           "ask_temperature",
           "ask_max_tokens"
         ],
@@ -4115,6 +3861,35 @@
           "template_schema_version"
         ],
         "title": "NoteContent",
+        "type": "object"
+      },
+      "NoteCorrectionSummary": {
+        "description": "A3 T3 \u2014 one respelling the current generation applied: what the transcript says\n(``surface``), what the note says (``canonical``), and on how many lines.",
+        "properties": {
+          "canonical": {
+            "title": "Canonical",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "surface": {
+            "title": "Surface",
+            "type": "string"
+          }
+        },
+        "required": [
+          "surface",
+          "canonical",
+          "source",
+          "count"
+        ],
+        "title": "NoteCorrectionSummary",
         "type": "object"
       },
       "NoteCreatedResponse": {
@@ -4867,100 +4642,6 @@
         "title": "PresenceView",
         "type": "object"
       },
-      "PreviewRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "config": {
-            "$ref": "#/components/schemas/ProfileConfig"
-          },
-          "language": {
-            "default": "en",
-            "pattern": "^(en|de|uk)$",
-            "title": "Language",
-            "type": "string"
-          },
-          "mode": {
-            "default": "test",
-            "enum": [
-              "production",
-              "test"
-            ],
-            "title": "Mode",
-            "type": "string"
-          }
-        },
-        "required": [
-          "config"
-        ],
-        "title": "PreviewRequest",
-        "type": "object"
-      },
-      "PreviewView": {
-        "additionalProperties": false,
-        "properties": {
-          "bundled": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Bundled",
-            "type": "object"
-          },
-          "calls": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/ResolvedCallView"
-            },
-            "title": "Calls",
-            "type": "array"
-          },
-          "effective": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Effective",
-            "type": "object"
-          },
-          "flags": {
-            "additionalProperties": true,
-            "default": {},
-            "title": "Flags",
-            "type": "object"
-          },
-          "language": {
-            "title": "Language",
-            "type": "string"
-          },
-          "problems": {
-            "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Problems",
-            "type": "array"
-          },
-          "required_variables": {
-            "additionalProperties": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "default": {},
-            "title": "Required Variables",
-            "type": "object"
-          }
-        },
-        "required": [
-          "problems",
-          "effective",
-          "language",
-          "bundled"
-        ],
-        "title": "PreviewView",
-        "type": "object"
-      },
       "PreviousNoteRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5046,160 +4727,6 @@
           "acknowledged"
         ],
         "title": "ProcessorView",
-        "type": "object"
-      },
-      "ProfileConfig": {
-        "additionalProperties": false,
-        "description": "One complete configuration. ``stages[stage] = None`` keeps the bundled text;\n``models[stage] = None`` keeps the workspace's routing.",
-        "properties": {
-          "length": {
-            "default": "standard",
-            "enum": [
-              "short",
-              "standard",
-              "detailed"
-            ],
-            "title": "Length",
-            "type": "string"
-          },
-          "models": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "title": "Models",
-            "type": "object"
-          },
-          "output_language": {
-            "default": "auto",
-            "title": "Output Language",
-            "type": "string"
-          },
-          "params": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/StageParams"
-            },
-            "title": "Params",
-            "type": "object"
-          },
-          "stages": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "title": "Stages",
-            "type": "object"
-          }
-        },
-        "title": "ProfileConfig",
-        "type": "object"
-      },
-      "ProfileView": {
-        "additionalProperties": false,
-        "properties": {
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "versions": {
-            "items": {
-              "$ref": "#/components/schemas/VersionSummary"
-            },
-            "title": "Versions",
-            "type": "array"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "description",
-          "created_at",
-          "versions"
-        ],
-        "title": "ProfileView",
-        "type": "object"
-      },
-      "ProfilesView": {
-        "additionalProperties": false,
-        "properties": {
-          "active": {
-            "$ref": "#/components/schemas/ActiveView"
-          },
-          "algorithm_version": {
-            "title": "Algorithm Version",
-            "type": "string"
-          },
-          "can_edit": {
-            "title": "Can Edit",
-            "type": "boolean"
-          },
-          "contract_version": {
-            "title": "Contract Version",
-            "type": "string"
-          },
-          "max_stage_chars": {
-            "title": "Max Stage Chars",
-            "type": "integer"
-          },
-          "profiles": {
-            "items": {
-              "$ref": "#/components/schemas/ProfileView"
-            },
-            "title": "Profiles",
-            "type": "array"
-          },
-          "stages": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Stages",
-            "type": "array"
-          },
-          "variables": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Variables",
-            "type": "array"
-          }
-        },
-        "required": [
-          "active",
-          "profiles",
-          "can_edit",
-          "contract_version",
-          "algorithm_version",
-          "stages",
-          "max_stage_chars",
-          "variables"
-        ],
-        "title": "ProfilesView",
         "type": "object"
       },
       "PromptCall": {
@@ -5517,6 +5044,34 @@
         "title": "RedeemRequest",
         "type": "object"
       },
+      "RegenerateRequest": {
+        "additionalProperties": false,
+        "description": "P2: ``template`` \u2014 write the note with this template from now on (``auto`` = the\nmodel chooses). Omitted: the note's current choice.",
+        "properties": {
+          "template": {
+            "anyOf": [
+              {
+                "enum": [
+                  "meeting",
+                  "client_call",
+                  "interview",
+                  "broadcast",
+                  "public_meeting",
+                  "memo",
+                  "auto"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          }
+        },
+        "title": "RegenerateRequest",
+        "type": "object"
+      },
       "RelocateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5557,41 +5112,6 @@
           "reason"
         ],
         "title": "ReportRequest",
-        "type": "object"
-      },
-      "ResolvedCallView": {
-        "additionalProperties": false,
-        "description": "One call a run makes and its exact system text: where the text comes from\n(``profile``, ``bundled``, ``not_applied`` \u2014 the flags send no profile text \u2014 or\n``code``, read-only here), and its sha256 (what the run's request hash must equal).",
-        "properties": {
-          "call": {
-            "title": "Call",
-            "type": "string"
-          },
-          "sha": {
-            "title": "Sha",
-            "type": "string"
-          },
-          "source": {
-            "title": "Source",
-            "type": "string"
-          },
-          "stage": {
-            "title": "Stage",
-            "type": "string"
-          },
-          "system": {
-            "title": "System",
-            "type": "string"
-          }
-        },
-        "required": [
-          "call",
-          "stage",
-          "source",
-          "sha",
-          "system"
-        ],
-        "title": "ResolvedCallView",
         "type": "object"
       },
       "ResponseAck": {
@@ -5714,63 +5234,6 @@
         "title": "RestoreRequest",
         "type": "object"
       },
-      "ReviewRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "blind": {
-            "title": "Blind",
-            "type": "boolean"
-          },
-          "comment": {
-            "default": "",
-            "maxLength": 4000,
-            "title": "Comment",
-            "type": "string"
-          },
-          "findings": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "maxItems": 100,
-            "title": "Findings",
-            "type": "array"
-          },
-          "preference": {
-            "enum": [
-              "a",
-              "b",
-              "tie",
-              "neither"
-            ],
-            "title": "Preference",
-            "type": "string"
-          },
-          "revealed": {
-            "default": false,
-            "title": "Revealed",
-            "type": "boolean"
-          },
-          "run_a_id": {
-            "format": "uuid",
-            "title": "Run A Id",
-            "type": "string"
-          },
-          "run_b_id": {
-            "format": "uuid",
-            "title": "Run B Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "run_a_id",
-          "run_b_id",
-          "blind",
-          "preference"
-        ],
-        "title": "ReviewRequest",
-        "type": "object"
-      },
       "RevokeAllResult": {
         "additionalProperties": false,
         "properties": {
@@ -5783,154 +5246,6 @@
           "notes"
         ],
         "title": "RevokeAllResult",
-        "type": "object"
-      },
-      "RunView": {
-        "additionalProperties": false,
-        "properties": {
-          "artifact_available": {
-            "title": "Artifact Available",
-            "type": "boolean"
-          },
-          "candidate_index": {
-            "title": "Candidate Index",
-            "type": "integer"
-          },
-          "config": {
-            "additionalProperties": true,
-            "title": "Config",
-            "type": "object"
-          },
-          "cost_cents": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cost Cents"
-          },
-          "error_kind": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error Kind"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "latency_ms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Latency Ms"
-          },
-          "metrics": {
-            "additionalProperties": true,
-            "title": "Metrics",
-            "type": "object"
-          },
-          "repetition": {
-            "title": "Repetition",
-            "type": "integer"
-          },
-          "source_index": {
-            "title": "Source Index",
-            "type": "integer"
-          },
-          "state": {
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "candidate_index",
-          "source_index",
-          "repetition",
-          "state",
-          "metrics",
-          "error_kind",
-          "cost_cents",
-          "latency_ms",
-          "artifact_available",
-          "config"
-        ],
-        "title": "RunView",
-        "type": "object"
-      },
-      "RuntimeView": {
-        "additionalProperties": false,
-        "description": "F1-01 \u2014 what a note generated now is pinned with in this deployment: the code, the\nflags (``fidelity`` includes the final check), the prompt and algorithm versions. Profile\ninstructions apply only with ``multilingual_evidence`` on; a test run always uses it.",
-        "properties": {
-          "algorithm_version": {
-            "title": "Algorithm Version",
-            "type": "string"
-          },
-          "build_sha": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Build Sha"
-          },
-          "fidelity": {
-            "title": "Fidelity",
-            "type": "boolean"
-          },
-          "multilingual_evidence": {
-            "title": "Multilingual Evidence",
-            "type": "boolean"
-          },
-          "profile_instructions_apply": {
-            "title": "Profile Instructions Apply",
-            "type": "boolean"
-          },
-          "prompt_version": {
-            "title": "Prompt Version",
-            "type": "string"
-          }
-        },
-        "required": [
-          "build_sha",
-          "multilingual_evidence",
-          "fidelity",
-          "prompt_version",
-          "algorithm_version",
-          "profile_instructions_apply"
-        ],
-        "title": "RuntimeView",
-        "type": "object"
-      },
-      "SaveVersionRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "config": {
-            "$ref": "#/components/schemas/ProfileConfig"
-          }
-        },
-        "required": [
-          "config"
-        ],
-        "title": "SaveVersionRequest",
         "type": "object"
       },
       "ScopeRef": {
@@ -5954,7 +5269,7 @@
       },
       "ScopeState": {
         "additionalProperties": false,
-        "description": "One scope that has a text: its version and whether it waits for a recompile.",
+        "description": "One scope that has a text: its version.",
         "properties": {
           "scope": {
             "title": "Scope",
@@ -6389,11 +5704,6 @@
                 "type": "null"
               }
             ]
-          },
-          "writing_style": {
-            "default": "business",
-            "title": "Writing Style",
-            "type": "string"
           }
         },
         "required": [
@@ -6881,6 +6191,14 @@
             "title": "Line Marks",
             "type": "object"
           },
+          "line_times": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "Line Times",
+            "type": "object"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -7228,27 +6546,6 @@
         "title": "SourceJobLink",
         "type": "object"
       },
-      "SourceRef": {
-        "additionalProperties": false,
-        "properties": {
-          "note_id": {
-            "format": "uuid",
-            "title": "Note Id",
-            "type": "string"
-          },
-          "transcript_rev": {
-            "minimum": 1.0,
-            "title": "Transcript Rev",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "note_id",
-          "transcript_rev"
-        ],
-        "title": "SourceRef",
-        "type": "object"
-      },
       "SpaceBody": {
         "additionalProperties": false,
         "properties": {
@@ -7373,153 +6670,6 @@
         "title": "StageModel",
         "type": "object"
       },
-      "StageParams": {
-        "additionalProperties": false,
-        "description": "Per-stage call settings; only what the bound backend supports is accepted.",
-        "properties": {
-          "max_output_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Output Tokens"
-          },
-          "reasoning": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reasoning"
-          },
-          "seed": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Seed"
-          },
-          "temperature": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Temperature"
-          },
-          "timeout_s": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Timeout S"
-          }
-        },
-        "title": "StageParams",
-        "type": "object"
-      },
-      "StartExperimentRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "budget_cap_cents": {
-            "maximum": 1000000.0,
-            "minimum": 0.0,
-            "title": "Budget Cap Cents",
-            "type": "integer"
-          },
-          "candidate_version_ids": {
-            "items": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "maxItems": 2,
-            "minItems": 1,
-            "title": "Candidate Version Ids",
-            "type": "array"
-          },
-          "idempotency_key": {
-            "maxLength": 200,
-            "minLength": 8,
-            "title": "Idempotency Key",
-            "type": "string"
-          },
-          "length": {
-            "default": "standard",
-            "enum": [
-              "short",
-              "standard",
-              "detailed"
-            ],
-            "title": "Length",
-            "type": "string"
-          },
-          "output_language": {
-            "default": "auto",
-            "pattern": "^(auto|en|de|uk)$",
-            "title": "Output Language",
-            "type": "string"
-          },
-          "repetitions": {
-            "default": 3,
-            "maximum": 3.0,
-            "minimum": 1.0,
-            "title": "Repetitions",
-            "type": "integer"
-          },
-          "sources": {
-            "items": {
-              "$ref": "#/components/schemas/SourceRef"
-            },
-            "maxItems": 12,
-            "title": "Sources",
-            "type": "array"
-          },
-          "suite": {
-            "anyOf": [
-              {
-                "const": "critical",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Suite"
-          }
-        },
-        "required": [
-          "candidate_version_ids",
-          "budget_cap_cents",
-          "idempotency_key"
-        ],
-        "title": "StartExperimentRequest",
-        "type": "object"
-      },
       "StartMeetingRequest": {
         "additionalProperties": false,
         "properties": {
@@ -7566,6 +6716,26 @@
             "format": "date-time",
             "title": "Started At",
             "type": "string"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "enum": [
+                  "meeting",
+                  "client_call",
+                  "interview",
+                  "broadcast",
+                  "public_meeting",
+                  "memo",
+                  "auto"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
           },
           "template_id": {
             "anyOf": [
@@ -7763,6 +6933,31 @@
           "terms"
         ],
         "title": "SynonymGroupOut",
+        "type": "object"
+      },
+      "TemplateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "language": {
+            "enum": [
+              "en",
+              "de",
+              "uk"
+            ],
+            "title": "Language",
+            "type": "string"
+          },
+          "markdown": {
+            "maxLength": 40000,
+            "title": "Markdown",
+            "type": "string"
+          }
+        },
+        "required": [
+          "language",
+          "markdown"
+        ],
+        "title": "TemplateBody",
         "type": "object"
       },
       "TemplateDefinition": {
@@ -8135,6 +7330,68 @@
         "title": "TemplateSummary",
         "type": "object"
       },
+      "TemplateView": {
+        "additionalProperties": false,
+        "properties": {
+          "can_edit": {
+            "title": "Can Edit",
+            "type": "boolean"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "markdown": {
+            "title": "Markdown",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "builtin",
+              "workspace"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          }
+        },
+        "required": [
+          "name",
+          "language",
+          "source",
+          "markdown",
+          "can_edit"
+        ],
+        "title": "TemplateView",
+        "type": "object"
+      },
       "TermView": {
         "additionalProperties": false,
         "properties": {
@@ -8426,23 +7683,6 @@
               }
             ],
             "title": "Tier"
-          },
-          "writing_style": {
-            "anyOf": [
-              {
-                "enum": [
-                  "business",
-                  "formal",
-                  "informal",
-                  "academic"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Writing Style"
           }
         },
         "title": "UpdateSettingsRequest",
@@ -8538,164 +7778,6 @@
           "code"
         ],
         "title": "VerifyRequest",
-        "type": "object"
-      },
-      "VersionSummary": {
-        "additionalProperties": false,
-        "properties": {
-          "compatible": {
-            "title": "Compatible",
-            "type": "boolean"
-          },
-          "content_hash": {
-            "title": "Content Hash",
-            "type": "string"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "created_by": {
-            "format": "uuid",
-            "title": "Created By",
-            "type": "string"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "incompatible_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Incompatible Reason"
-          },
-          "version_number": {
-            "title": "Version Number",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "version_number",
-          "content_hash",
-          "created_by",
-          "created_at",
-          "compatible"
-        ],
-        "title": "VersionSummary",
-        "type": "object"
-      },
-      "VersionView": {
-        "additionalProperties": false,
-        "properties": {
-          "algorithm_version": {
-            "title": "Algorithm Version",
-            "type": "string"
-          },
-          "calls": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/ResolvedCallView"
-            },
-            "title": "Calls",
-            "type": "array"
-          },
-          "compatible": {
-            "title": "Compatible",
-            "type": "boolean"
-          },
-          "config": {
-            "$ref": "#/components/schemas/ProfileConfig"
-          },
-          "content_hash": {
-            "title": "Content Hash",
-            "type": "string"
-          },
-          "contract_version": {
-            "title": "Contract Version",
-            "type": "string"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "created_by": {
-            "format": "uuid",
-            "title": "Created By",
-            "type": "string"
-          },
-          "effective": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Effective",
-            "type": "object"
-          },
-          "flags": {
-            "additionalProperties": true,
-            "default": {},
-            "title": "Flags",
-            "type": "object"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "incompatible_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Incompatible Reason"
-          },
-          "language": {
-            "title": "Language",
-            "type": "string"
-          },
-          "profile_id": {
-            "format": "uuid",
-            "title": "Profile Id",
-            "type": "string"
-          },
-          "schema_version": {
-            "title": "Schema Version",
-            "type": "string"
-          },
-          "version_number": {
-            "title": "Version Number",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "profile_id",
-          "version_number",
-          "config",
-          "content_hash",
-          "contract_version",
-          "schema_version",
-          "algorithm_version",
-          "created_by",
-          "created_at",
-          "compatible",
-          "effective",
-          "language"
-        ],
-        "title": "VersionView",
         "type": "object"
       },
       "Viewer": {
@@ -9712,504 +8794,6 @@
         ]
       }
     },
-    "/v1/ai/experiments": {
-      "get": {
-        "description": "The workspace's recent experiments: states and counts, no content.",
-        "operationId": "list_experiments_v1_ai_experiments_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ExperimentSummary"
-                  },
-                  "title": "Response List Experiments V1 Ai Experiments Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Experiments",
-        "tags": [
-          "ai"
-        ]
-      },
-      "post": {
-        "description": "Queue every candidate on the same frozen sources. A retry with the same\n``idempotency_key`` returns the first experiment: a paid run is never doubled.",
-        "operationId": "start_experiment_v1_ai_experiments_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StartExperimentRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperimentView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Start Experiment",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/experiments/estimate": {
-      "post": {
-        "description": "What starting this experiment would reserve, through the same checks as a start\n(access, revision, processors). Queues nothing.",
-        "operationId": "estimate_experiment_v1_ai_experiments_estimate_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StartExperimentRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EstimateView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Estimate Experiment",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/experiments/{experiment_id}": {
-      "get": {
-        "operationId": "get_experiment_v1_ai_experiments__experiment_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "experiment_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Experiment Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperimentView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Experiment",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/experiments/{experiment_id}/cancel": {
-      "post": {
-        "description": "Stops what has not started. A run already in flight may finish, and its cost\nstays accounted; completed results are kept.",
-        "operationId": "cancel_experiment_v1_ai_experiments__experiment_id__cancel_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "experiment_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Experiment Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExperimentView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Cancel Experiment",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/experiments/{experiment_id}/reviews": {
-      "get": {
-        "description": "Reviews whose source the caller can still read; comments may quote it.",
-        "operationId": "list_reviews_v1_ai_experiments__experiment_id__reviews_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "experiment_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Experiment Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response List Reviews V1 Ai Experiments  Experiment Id  Reviews Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Reviews",
-        "tags": [
-          "ai"
-        ]
-      },
-      "post": {
-        "description": "A preference and factual findings for one pair of runs on the same source and\nrepetition. The reviewer must be able to read that source's transcript.",
-        "operationId": "add_review_v1_ai_experiments__experiment_id__reviews_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "experiment_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Experiment Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReviewRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Add Review V1 Ai Experiments  Experiment Id  Reviews Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Add Review",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/experiments/{experiment_id}/runs/{run_id}/artifact": {
-      "get": {
-        "description": "The produced note of one run \u2014 only for someone who can read the source's\ntranscript now (access is checked again on every read).",
-        "operationId": "get_artifact_v1_ai_experiments__experiment_id__runs__run_id__artifact_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "experiment_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Experiment Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "run_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Run Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Artifact V1 Ai Experiments  Experiment Id  Runs  Run Id  Artifact Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Artifact",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
     "/v1/ai/instructions": {
       "delete": {
         "operationId": "delete_instructions_v1_ai_instructions_delete",
@@ -10299,7 +8883,7 @@
         ]
       },
       "put": {
-        "description": "Save and compile. Identical text is not compiled again (unless the compiler changed\nor the last compile failed); a failed compile is saved with the empty profile and says\nso \u2014 it is not an error. An empty text clears the instructions.",
+        "description": "Save. Identical text is not a new version; an empty text clears the instructions.",
         "operationId": "put_instructions_v1_ai_instructions_put",
         "parameters": [
           {
@@ -10352,66 +8936,6 @@
           }
         },
         "summary": "Put Instructions",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/instructions/preview": {
-      "post": {
-        "description": "What saving this text would do: compiled, nothing written. Capped per hour.",
-        "operationId": "preview_instructions_v1_ai_instructions_preview_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstructionsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InstructionsView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Preview Instructions",
         "tags": [
           "ai"
         ]
@@ -10524,7 +9048,7 @@
         ]
       },
       "put": {
-        "description": "A meeting type's text, compiled together with the workspace text.",
+        "description": "A meeting type's text, extending the workspace text.",
         "operationId": "put_scoped_instructions_v1_ai_instructions__scope__put",
         "parameters": [
           {
@@ -10586,630 +9110,6 @@
           }
         },
         "summary": "Put Scoped Instructions",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/instructions/{scope}/preview": {
-      "post": {
-        "description": "A type text's combined readout (with the workspace text), nothing written.",
-        "operationId": "preview_scoped_instructions_v1_ai_instructions__scope__preview_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "scope",
-            "required": true,
-            "schema": {
-              "title": "Scope",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstructionsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InstructionsView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Preview Scoped Instructions",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/model-capabilities": {
-      "get": {
-        "description": "Registered backends this deployment offers and whether this workspace has\nacknowledged their processor; the parameters each supports, and why not the rest.",
-        "operationId": "model_capabilities_v1_ai_model_capabilities_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CapabilitiesView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Model Capabilities",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/prompt-profiles": {
-      "get": {
-        "description": "Every member may see how this workspace's notes are written.",
-        "operationId": "list_profiles_v1_ai_prompt_profiles_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProfilesView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Profiles",
-        "tags": [
-          "ai"
-        ]
-      },
-      "post": {
-        "operationId": "create_profile_v1_ai_prompt_profiles_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateProfileRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProfileView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Profile",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/prompt-profiles/history": {
-      "get": {
-        "operationId": "history_v1_ai_prompt_profiles_history_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response History V1 Ai Prompt Profiles History Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "History",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/prompt-profiles/preview": {
-      "post": {
-        "description": "An unsaved draft, validated and resolved. Saves nothing.",
-        "operationId": "preview_v1_ai_prompt_profiles_preview_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PreviewRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PreviewView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Preview",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/prompt-profiles/{profile_id}/activate": {
-      "post": {
-        "description": "Move the active pointer \u2014 activation and rollback alike \u2014 atomically from the\nrevision the admin saw. Future generations only; queued ones keep their pin.",
-        "operationId": "activate_v1_ai_prompt_profiles__profile_id__activate_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "profile_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Profile Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ActivateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ActiveView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Activate",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/prompt-profiles/{profile_id}/versions": {
-      "post": {
-        "description": "Validate and save an immutable version. It does not activate: what writes the\nworkspace's notes changes only through ``activate``.",
-        "operationId": "save_version_v1_ai_prompt_profiles__profile_id__versions_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "profile_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Profile Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SaveVersionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VersionSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Save Version",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/prompt-profiles/{profile_id}/versions/{version_id}": {
-      "get": {
-        "description": "The configuration and its effective instructions \u2014 the same function a\ngeneration uses \u2014 with no secret in it (bindings are backend names).",
-        "operationId": "get_version_v1_ai_prompt_profiles__profile_id__versions__version_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "profile_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Profile Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "version_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Version Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "language",
-            "required": false,
-            "schema": {
-              "default": "en",
-              "pattern": "^(en|de|uk)$",
-              "title": "Language",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "mode",
-            "required": false,
-            "schema": {
-              "default": "test",
-              "enum": [
-                "production",
-                "test"
-              ],
-              "title": "Mode",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VersionView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Version",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/ai/runtime": {
-      "get": {
-        "operationId": "runtime_v1_ai_runtime_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuntimeView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Runtime",
         "tags": [
           "ai"
         ]
@@ -11318,6 +9218,286 @@
           }
         },
         "summary": "Put Ai Settings",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/v1/ai/templates": {
+      "get": {
+        "description": "Every template, in `language` (default: every language), built-in or overridden.",
+        "operationId": "list_templates_v1_ai_templates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "uk",
+                    "en",
+                    "de"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Language"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateView"
+                  },
+                  "title": "Response List Templates V1 Ai Templates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Templates",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/v1/ai/templates/{name}": {
+      "delete": {
+        "description": "Back to the built-in text. Idempotent.",
+        "operationId": "delete_template_v1_ai_templates__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
+              "default": "en",
+              "enum": [
+                "en",
+                "de",
+                "uk"
+              ],
+              "title": "Language",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Template",
+        "tags": [
+          "ai"
+        ]
+      },
+      "get": {
+        "operationId": "get_template_v1_ai_templates__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
+              "default": "en",
+              "enum": [
+                "en",
+                "de",
+                "uk"
+              ],
+              "title": "Language",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Template",
+        "tags": [
+          "ai"
+        ]
+      },
+      "put": {
+        "description": "This workspace's text for the template; the writer reads it from the next note on.",
+        "operationId": "put_template_v1_ai_templates__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Template",
         "tags": [
           "ai"
         ]
@@ -14035,6 +12215,86 @@
         ]
       }
     },
+    "/v1/notes/{note_id}/corrections/summary": {
+      "get": {
+        "description": "A3 \u2014 the respellings the note's current generation applied, for the transcript\ntab's \"heard as\" marker. The surfaces are transcript words, so the read goes through\nthe same rules as the items.",
+        "operationId": "corrections_summary_v1_notes__note_id__corrections_summary_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Note Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "purpose",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReadPurpose"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Purpose"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NoteCorrectionSummary"
+                  },
+                  "title": "Response Corrections Summary V1 Notes  Note Id  Corrections Summary Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Corrections Summary",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
     "/v1/notes/{note_id}/dates/{item_key}.ics": {
       "get": {
         "operationId": "date_ics_v1_notes__note_id__dates__item_key__ics_get",
@@ -14488,7 +12748,7 @@
         ]
       },
       "post": {
-        "description": "Write the note again from the recording.\n\nSafe to press: the writer rewrites only sections nobody has edited\nsince the last run, so the author's own text survives a regenerate\nexactly as it survives the first pass.",
+        "description": "Write the note again from the recording, with the template the body names (P2) or\nthe note's current one. The items of the newest run replace the older run's.",
         "operationId": "regenerate_v1_notes__note_id__generation_post",
         "parameters": [
           {
@@ -14518,6 +12778,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RegenerateRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "content": {
@@ -14655,7 +12932,7 @@
         ]
       },
       "put": {
-        "description": "Save this note's text, compiled with its parents. Empty text removes it. The client\nthen rewrites the note (``POST \u2026/generation``).",
+        "description": "Save this note's text. Empty text removes it. The client then rewrites the note\n(``POST \u2026/generation``).",
         "operationId": "put_note_instructions_v1_notes__note_id__instructions_put",
         "parameters": [
           {
@@ -14718,76 +12995,6 @@
           }
         },
         "summary": "Put Note Instructions",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/v1/notes/{note_id}/instructions/preview": {
-      "post": {
-        "description": "The combined readout (workspace, type, this text), nothing written. Capped per hour\nper workspace, with the workspace previews.",
-        "operationId": "preview_note_instructions_v1_notes__note_id__instructions_preview_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "note_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Note Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstructionsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InstructionsView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Preview Note Instructions",
         "tags": [
           "ai"
         ]

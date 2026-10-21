@@ -81,7 +81,7 @@ import { CorrectionsPanel } from "../components/CorrectionsPanel";
 import { useGeneratedLines } from "../lib/useGeneratedLines";
 import { lineKey, stripMarker } from "../lib/itemKey";
 import type { CommentAnchorKind } from "../api/types";
-import type { GeneratedItem, TranscriptNoise } from "../api/types";
+import type { GeneratedItem, NoteTemplate, TranscriptNoise } from "../api/types";
 import { isTranscript, parseRichText } from "../lib/richText";
 import {
   isOtherLanguage,
@@ -91,7 +91,16 @@ import {
   promptEchoLine,
   transcriptCopyText,
 } from "../lib/transcriptText";
-import { correctionsBanner, unifiedFromTitle, unifiedParts } from "../lib/corrections";
+import {
+  asTranscribedLabel,
+  correctionsBanner,
+  heardAsTitle,
+  noteCorrectionParts,
+  unifiedFromTitle,
+  unifiedParts,
+} from "../lib/corrections";
+import { getCorrectionsSummary } from "../api/generation";
+import type { NoteCorrection } from "../api/types";
 import { EntityReviewSheet } from "../components/EntityReviewSheet";
 import { messageFor } from "../lib/errorCopy";
 import { pickableNames, segmentIndicesOf, speakerInitials, speakerTint } from "../lib/speakers";
@@ -103,6 +112,7 @@ import { ShareDialog } from "../components/ShareDialog";
 import { CommentsPanel, NOTE_ANCHOR, useComments, type CommentAnchor } from "../components/CommentsPanel";
 import { SectionNav } from "../components/SectionNav";
 import { NoteInstructionsSheet } from "../components/NoteInstructionsSheet";
+import { RegenerateSheet } from "../components/RegenerateSheet";
 import { PresenceAvatars } from "../components/PresenceAvatars";
 import { canCommentNote, canEditNote, canManageNote, readOnlyStrip } from "../lib/noteLevel";
 import { Skeleton } from "../components/Skeleton";
@@ -400,6 +410,8 @@ export interface SpeakersRelabelled {
 
 interface TranscriptViewProps {
   jobId: string;
+  /** The note the transcript belongs to: its respellings are shown over the transcript (A3). */
+  noteId?: string;
   /** A speaker was renamed on the job — the note body may want to follow. */
   onSpeakerRenamed?: (from: string, to: string) => void;
   /** A speaker was merged into another (display names) — the note body follows. */
@@ -636,6 +648,7 @@ function SpeakerNameInput({
 
 export function TranscriptView({
   jobId,
+  noteId,
   onSpeakerRenamed,
   onSpeakersMerged,
   onSpeakerMergeUndone,
@@ -664,6 +677,24 @@ export function TranscriptView({
   const [focusTurn, setFocusTurn] = useState(0);
   const [relabelRunning, setRelabelRunning] = useState(false);
   const turnRefs = useRef<(HTMLDivElement | null)[]>([]);
+  // A3: the note's respellings, shown in place of what was heard until the reader asks otherwise.
+  const [noteCorrections, setNoteCorrections] = useState<NoteCorrection[]>([]);
+  const [showAsTranscribed, setShowAsTranscribed] = useState(false);
+
+  useEffect(() => {
+    if (!noteId) return;
+    let gone = false;
+    getCorrectionsSummary(noteId)
+      .then((list) => {
+        if (!gone) setNoteCorrections(list);
+      })
+      .catch(() => {
+        // No summary (not generated, or no access): the transcript is shown as heard.
+      });
+    return () => {
+      gone = true;
+    };
+  }, [noteId]);
 
   useEffect(() => {
     if (!undo) return;
@@ -1153,6 +1184,17 @@ export function TranscriptView({
             Include markers
           </label>
         )}
+        {noteCorrections.length > 0 && (
+          <label className="help transcript-include-langs">
+            <input
+              type="checkbox"
+              className="chk"
+              checked={showAsTranscribed}
+              onChange={(e) => setShowAsTranscribed(e.target.checked)}
+            />
+            {asTranscribedLabel(result.language)}
+          </label>
+        )}
         <button className="btn ghost sm" onClick={() => void copy()} disabled={turns.length === 0}>
           {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />} {copied ? "Copied" : "Copy"}
         </button>
@@ -1302,17 +1344,25 @@ export function TranscriptView({
             </div>
             {t.paragraphs.map((p, j) => (
               <p key={j} className="turn-text">
-                {unifiedParts(p, result.entity_corrections).map((part, k) =>
-                  part.correction ? (
-                    <span
-                      key={k}
-                      className={`unified-spelling ${hoverSpelling === part.text ? "hovered" : ""}`}
-                      title={unifiedFromTitle(part.correction, result.language)}
-                    >
-                      {part.text}
+                {(showAsTranscribed ? [{ text: p }] : noteCorrectionParts(p, noteCorrections)).map((np, h) =>
+                  np.heard ? (
+                    <span key={h} className="heard-as" title={heardAsTitle(np.heard, result.language)}>
+                      {np.text}
                     </span>
                   ) : (
-                    <Fragment key={k}>{part.text}</Fragment>
+                    unifiedParts(np.text, result.entity_corrections).map((part, k) =>
+                      part.correction ? (
+                        <span
+                          key={`${h}-${k}`}
+                          className={`unified-spelling ${hoverSpelling === part.text ? "hovered" : ""}`}
+                          title={unifiedFromTitle(part.correction, result.language)}
+                        >
+                          {part.text}
+                        </span>
+                      ) : (
+                        <Fragment key={`${h}-${k}`}>{part.text}</Fragment>
+                      ),
+                    )
                   ),
                 )}
               </p>
@@ -1465,6 +1515,8 @@ export function NoteEditorPage() {
   const [templateName, setTemplateName] = useState<string | null>(null);
   /** What the latest generation took the recording to be. */
   const [recordingType, setRecordingType] = useState<string | null>(null);
+  /** The template the latest generation was written with (P2); null under automatic choice. */
+  const [writerTemplate, setWriterTemplate] = useState<NoteTemplate | null>(null);
   /** The language the latest generation wrote in; its labels follow it, not the viewer's locale. */
   const [noteLanguage, setNoteLanguage] = useState<string | null>(null);
   /** A moment to open the transcript at ("Not included" link). */
@@ -1509,6 +1561,7 @@ export function NoteEditorPage() {
   const [showComments, setShowComments] = useState(false);
   // N4 — "Write this note differently…"; a rewrite remounts the status line on the new run.
   const [writingDifferently, setWritingDifferently] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [generationKey, setGenerationKey] = useState(0);
   const [commentAnchor, setCommentAnchor] = useState<CommentAnchor>(NOTE_ANCHOR);
   // Comments need a server that knows levels (W3); an older one sends no `my_level`.
@@ -1909,10 +1962,19 @@ export function NoteEditorPage() {
   const generated = !viewing && genRows.length > 0;
   const genSectionKeys = useMemo(() => generatedSectionKeys(genRows), [genRows]);
   const blocks = generated && detail === "short" ? allBlocks.filter((b) => b.key === "gen:overview") : allBlocks;
+  // P3: "Show in transcript" opens the transcript tab at the cited moment.
+  const seekTranscript = jobId
+    ? (ms: number) => {
+        setSeek({ ms, key: Date.now() });
+        setTab("transcript");
+      }
+    : undefined;
   const lineExtra: LineExtra | undefined = generated
     ? (raw) => {
         const row = genByKey.get(lineKey(raw));
-        return row ? <LineEvidence noteId={noteId} row={row} rowsByKey={genByKey} language={noteLanguage} /> : null;
+        return row ? (
+          <LineEvidence noteId={noteId} row={row} rowsByKey={genByKey} language={noteLanguage} onSeek={seekTranscript} />
+        ) : null;
       }
     : undefined;
   const alsoSaid = generated && detail === "detailed" ? uncitedBySection(genRows, shownContent) : null;
@@ -2053,12 +2115,19 @@ export function NoteEditorPage() {
     { label: "Download Markdown", icon: <FileDownIcon size={14} />, onClick: onMarkdown },
   );
   if (editable && jobId) {
-    menu.push({
-      label: "Write this note differently…",
-      icon: <SparkleIcon size={14} />,
-      sep: true,
-      onClick: () => setWritingDifferently(true),
-    });
+    menu.push(
+      {
+        label: "Regenerate as…",
+        icon: <SparkleIcon size={14} />,
+        sep: true,
+        onClick: () => setRegenerating(true),
+      },
+      {
+        label: "Write this note differently…",
+        icon: <SparkleIcon size={14} />,
+        onClick: () => setWritingDifferently(true),
+      },
+    );
   }
   if (!viewing && !guest && spaces.length > 0) {
     const current = spaceOf[noteId];
@@ -2173,7 +2242,11 @@ export function NoteEditorPage() {
           <span className="doc-pill" title={`Updated ${relativeTime(note.updated_at)}`}>
             {formatDateTime(note.created_at)}
           </span>
-          <DocTypePill templateName={templateName} recordingType={recordingType} />
+          <DocTypePill
+            templateName={templateName}
+            recordingType={recordingType}
+            template={writerTemplate}
+          />
           {!guest && <SpacePill noteId={noteId} />}
           {readPurpose && <span className="doc-pill">{authorName}</span>}
         </div>
@@ -2295,6 +2368,7 @@ export function NoteEditorPage() {
                 )}
                 <TranscriptView
                   jobId={jobId}
+                  noteId={noteId}
                   readOnly={!canEditNote(myLevel)}
                   onUnavailable={() => {
                     setTranscriptGone(true);
@@ -2323,6 +2397,7 @@ export function NoteEditorPage() {
               onView={(view) => {
                 setRecordingType(view?.recording_type ?? null);
                 setNoteLanguage(view?.language ?? null);
+                setWriterTemplate(view?.template ?? null);
               }}
               onSeek={
                 jobId
@@ -2390,7 +2465,7 @@ export function NoteEditorPage() {
                             <li key={row.item_key}>
                               <span>
                                 {row.text}
-                                <LineEvidence noteId={noteId} row={row} rowsByKey={genByKey} />
+                                <LineEvidence noteId={noteId} row={row} rowsByKey={genByKey} onSeek={seekTranscript} />
                               </span>
                             </li>
                           ))}
@@ -2450,6 +2525,14 @@ export function NoteEditorPage() {
           noteId={noteId}
           onClose={() => setWritingDifferently(false)}
           onRewritten={() => setGenerationKey((k) => k + 1)}
+        />
+      )}
+      {regenerating && (
+        <RegenerateSheet
+          noteId={noteId}
+          current={writerTemplate}
+          onClose={() => setRegenerating(false)}
+          onRegenerated={() => setGenerationKey((k) => k + 1)}
         />
       )}
 

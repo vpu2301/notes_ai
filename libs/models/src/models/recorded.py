@@ -23,11 +23,19 @@ class RecordedChatProvider:
     small_model = False
 
     def __init__(
-        self, *, backend: str, cassette_dir: str | Path, model_id: str = "recorded"
+        self,
+        *,
+        backend: str,
+        cassette_dir: str | Path,
+        model_id: str = "recorded",
+        context_window: int = 32768,
     ) -> None:
         self.backend = backend
         self.model_id = model_id
         self._dir = Path(cassette_dir)
+        # The window size the cassettes were cut on: a replay must window a long
+        # transcript exactly as the recording backend did, or no key matches.
+        self.context_window = context_window
 
     async def probe(self) -> None:
         if not self._dir.is_dir():

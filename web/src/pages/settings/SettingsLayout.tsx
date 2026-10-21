@@ -4,7 +4,6 @@ import { useAuth } from "../../auth/AuthContext";
 import {
   BuildingIcon,
   CreditCardIcon,
-  FileTextIcon,
   LockIcon,
   MonitorIcon,
   PenIcon,
@@ -20,7 +19,6 @@ const HEADINGS: Record<string, string> = {
   security: "Security",
   data: "Data & AI",
   writing: "Note writing",
-  "ai-notes": "AI notes",
   members: "Members",
   devices: "Room devices",
   workspace: "Branding & sharing",
@@ -32,7 +30,6 @@ const TAB_TITLES: Record<string, string> = {
   security: "Security settings",
   data: "Data & AI settings",
   writing: "Note writing settings",
-  "ai-notes": "AI notes settings",
   members: "Members",
   devices: "Room devices",
   workspace: "Workspace settings",
@@ -65,8 +62,6 @@ export function SettingsLayout() {
             <SettingsLink to="/settings/data" label="Data & AI" icon={<ShieldIcon />} />
             {/* Every member reads how notes are written; changing it is an admin's (server-checked). */}
             <SettingsLink to="/settings/writing" label="Note writing" icon={<PenIcon />} />
-            {/* Every member sees how notes are written; changing it is an admin's (server-checked). */}
-            <SettingsLink to="/settings/ai-notes" label="AI notes" icon={<FileTextIcon />} />
             {/* Every member: the roster, and Leave. Managing people stays with owners and admins. */}
             <SettingsLink to="/settings/members" label="Members" icon={<UsersIcon />} />
             {manages && (

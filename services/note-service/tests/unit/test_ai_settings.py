@@ -167,8 +167,8 @@ def harness(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
     monkeypatch.setattr(router_mod.rules, "month_to_date_cents", _spend)
     monkeypatch.setattr(router_mod, "_plan", _plan)
     monkeypatch.setattr(router_mod, "_required_processors", lambda: list(processors["required"]))
-    # N0: the writer's backend declares a 32K context and two parallel calls.
-    monkeypatch.setattr(router_mod, "_caps", lambda tenant_id: (32_768, 2))
+    # N0: the writer's backend declares two parallel calls.
+    monkeypatch.setattr(router_mod, "_caps", lambda tenant_id: 2)
 
     app = create_app()
     client = TestClient(app)
@@ -248,6 +248,25 @@ def test_acknowledging_in_the_same_call_lets_the_change_through(harness) -> None
         "generation_enabled": True,
         "acknowledged": 1,
     }
+
+
+def test_agreeing_to_the_current_tier_alone_unblocks_a_new_team_workspace(harness) -> None:  # noqa: ANN001
+    """A team workspace starts with nothing agreed to; the Data & AI page's Agree button
+    sends the processors and no routing change."""
+    _as(harness, "tenant_admin")
+    harness.processors["required"] = [
+        rules.Processor(name="Anthropic", region="us", purposes=("writing",), tiers=("standard",))
+    ]
+    assert harness.client.get("/v1/ai/settings").json()["needs_acknowledgement"] != []
+    res = harness.client.put(
+        "/v1/ai/settings", json={"acknowledge": [{"name": "Anthropic", "region": "us"}]}
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["needs_acknowledgement"] == []
+    assert (body["provider"], body["tier"]) == (rules.PLATFORM, rules.STANDARD)
+    assert harness.stored["row"].acknowledged_keys == {("anthropic", "us")}
+    assert harness.invalidated == [TENANT]
 
 
 def test_turning_generation_off_needs_no_acknowledgement(harness) -> None:  # noqa: ANN001
@@ -404,8 +423,7 @@ async def test_a_redis_outage_still_tells_the_admin() -> None:
 # ── N0: writing style and model parameters ────────────────────────
 
 FULL = {
-    "temperature": 0.4, "context_window_tokens": 65_536, "max_output_tokens": 2048,
-    "max_concurrency": 4, "facts_per_window": 16, "retries": "thorough",
+    "temperature": 0.4, "max_output_tokens": 2048, "max_concurrency": 8,
     "ask_temperature": 0.3, "ask_max_tokens": 900,
 }  # fmt: skip
 
@@ -413,14 +431,16 @@ FULL = {
 def test_a_member_sees_the_parameters_and_their_limits(harness) -> None:  # noqa: ANN001
     _as(harness, "member")
     body = harness.client.get("/v1/ai/settings").json()
-    assert body["writing_style"] == "business" and body["model_params_version"] == 0
+    assert "writing_style" not in body and body["model_params_version"] == 0
     assert body["model_params"]["temperature"] == 0.0
-    limit = body["model_params_limits"]["context_window_tokens"]
-    assert limit["cap"] == 32_768 and limit["cap_source"] == "backend"
+    # P2: only what the writer reads.
+    assert set(body["model_params"]) == {
+        "temperature", "max_output_tokens", "max_concurrency", "ask_temperature", "ask_max_tokens"
+    }  # fmt: skip
+    limit = body["model_params_limits"]["max_concurrency"]
+    assert limit["cap"] == 2 and limit["cap_source"] == "backend"
     assert body["model_params_measured"]["temperature"] == {"0.2": None, "0.4": None, "0.7": None}
-    assert (
-        harness.client.put("/v1/ai/settings", json={"writing_style": "academic"}).status_code == 403
-    )
+    assert harness.client.put("/v1/ai/settings", json={"model_params": FULL}).status_code == 403
 
 
 def test_a_partial_parameter_set_is_refused(harness) -> None:  # noqa: ANN001
@@ -433,33 +453,35 @@ def test_a_partial_parameter_set_is_refused(harness) -> None:  # noqa: ANN001
 def test_a_value_above_the_backend_cap_is_saved_capped(harness) -> None:  # noqa: ANN001
     _as(harness, "tenant_admin")
     body = harness.client.put("/v1/ai/settings", json={"model_params": FULL}).json()
-    assert body["model_params"]["context_window_tokens"] == 32_768
-    assert body["model_params_effective"]["context_window_tokens"] == 32_768
-    assert body["model_params_limits"]["context_window_tokens"]["cap_source"] == "backend"
+    assert body["model_params"]["max_concurrency"] == 2
+    assert body["model_params_effective"]["max_concurrency"] == 2
+    assert body["model_params_limits"]["max_concurrency"]["cap_source"] == "backend"
     assert body["model_params_version"] == 1
     assert harness.invalidated  # the worker's cache drops the old values
 
 
-def test_reset_and_a_style_change_each_bump_the_version(harness) -> None:  # noqa: ANN001
+def test_a_reset_bumps_the_version_and_a_style_is_no_longer_a_setting(harness) -> None:  # noqa: ANN001
     _as(harness, "tenant_admin")
     harness.client.put("/v1/ai/settings", json={"model_params": FULL})
     body = harness.client.put("/v1/ai/settings", json={"reset_model_params": True}).json()
     assert body["model_params_version"] == 2 and body["model_params"]["temperature"] == 0.0
     assert harness.stored["row"].model_params == {}
-    body = harness.client.put("/v1/ai/settings", json={"writing_style": "academic"}).json()
-    assert body["writing_style"] == "academic" and body["model_params_version"] == 3
+    # P2: the writing style went with the old path; the field is refused.
+    assert (
+        harness.client.put("/v1/ai/settings", json={"writing_style": "academic"}).status_code == 422
+    )
     # A change to something else leaves the version alone.
     body = harness.client.put("/v1/ai/settings", json={"generation_enabled": False}).json()
-    assert body["model_params_version"] == 3
+    assert body["model_params_version"] == 2
 
 
 def test_the_audit_names_what_changed(harness) -> None:  # noqa: ANN001
     _as(harness, "tenant_admin")
-    harness.client.put("/v1/ai/settings", json={"model_params": FULL, "writing_style": "formal"})
+    harness.client.put("/v1/ai/settings", json={"model_params": FULL})
     payload = harness.audit[-1]["payload"]
     assert set(payload) == {
-        "tier", "provider", "generation_enabled", "acknowledged", "writing_style",
-        "model_params_changed", "model_params_version", "temperature", "context_window_tokens",
+        "tier", "provider", "generation_enabled", "acknowledged",
+        "model_params_changed", "model_params_version", "temperature", "max_output_tokens",
     }  # fmt: skip
     assert "temperature" in payload["model_params_changed"] and payload["temperature"] == 0.4
     harness.client.put("/v1/ai/settings", json={"generation_enabled": True})
@@ -479,7 +501,7 @@ def test_the_caps_come_from_the_writers_backend(monkeypatch) -> None:  # noqa: A
     resolved = SimpleNamespace(caps=SimpleNamespace(context_window=32_768, max_concurrency=2))
     registry = SimpleNamespace(resolve=lambda workspace, operation: resolved)
     monkeypatch.setattr(router_mod, "_registry", lambda: registry)
-    assert router_mod._caps(UUID(int=1)) == (32_768, 2)
+    assert router_mod._caps(UUID(int=1)) == 2
 
 
 def test_measured_numbers_are_nulls_where_the_repo_is_not(tmp_path) -> None:  # noqa: ANN001
@@ -491,7 +513,7 @@ def test_measured_numbers_are_nulls_where_the_repo_is_not(tmp_path) -> None:  # 
     shallow.write_text("")
     assert router_mod._measured(shallow) == {"temperature": {"0.2": None, "0.4": None, "0.7": None}}
     # …and are read where the file exists.
-    from note_service.domain.meeting_doc.prompts import PROMPT_VERSION
+    from note_service.domain.prompts import PROMPT_VERSION
 
     (tmp_path / "docs" / "eval").mkdir(parents=True)
     (tmp_path / "docs" / "eval" / f"model-params-{PROMPT_VERSION}.json").write_text(

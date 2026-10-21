@@ -138,32 +138,16 @@ const COPY: Record<string, string> = {
   // Note instructions (Settings › Data & AI › Note writing).
   not_available: "This isn't available in this workspace yet.",
   text_too_long: "The instructions are too long. Shorten them and try again.",
-  too_many_previews: "Too many checks this hour. Try again in a little while.",
   scope_unknown: "That kind of meeting doesn't have its own instructions.",
   too_many_generations: "This note has been rewritten as often as it can be today.",
   no_transcript: "This note was not made from a recording, so there is nothing to write it from.",
   note_cancelled: "This note was cancelled and cannot be written again.",
   not_available_for_type: "A one-to-one and an interview debrief have no client version.",
-
-  // ── AI notes: profiles and experiments (S3/S4) ─────────────────────
-  invalid_profile: "Some settings cannot be saved. Each problem is shown beside its field.",
-  version_conflict: "Someone saved a version of this profile at the same moment. Reload and save again.",
-  incompatible_version:
-    "This version was made for an older way of writing notes. Open it and save it again as a new version.",
-  active_revision_conflict:
-    "Another admin changed which version is active since you opened this page. Reload and decide again.",
-  evaluation_required:
-    "This version has not passed an evaluation yet, so it stays a draft. Test it against your notes first.",
-  acceptance_required:
-    "This version has not passed the critical cases on the current service version, so it stays a draft. Run the critical cases for it first.",
-  missing_variable: "A placeholder this stage needs was removed. Put it back, or use the bundled instructions.",
-  missing_section: "The Write notes instructions must keep all five named sections.",
-  transcript_not_shared: "You can see that note but not its transcript, so it cannot be used for a test.",
-  source_revision_conflict: "A transcript changed since you chose it. Choose it again.",
-  experiment_budget:
-    "This test would cost more than its limit or what is left of this month's budget. Use fewer notes or repetitions.",
-  experiment_active: "Another test is still running. Wait for it to finish, or cancel it.",
-  invalid_finding: "That finding could not be recorded. Choose one of the listed labels.",
+  // Note templates (P2).
+  template_unknown: "There is no template with that name.",
+  template_too_long: "The template is too long. Shorten it and try again.",
+  template_empty: "The template is empty. Write at least one section heading.",
+  template_no_sections: "A template needs at least one section heading (a line starting with ## ).",
 
   // ── note roles & comments (W3) ────────────────────────────────────
   // The `required` level is in the problem; the sentence does not need it.

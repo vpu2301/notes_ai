@@ -1,14 +1,19 @@
 // The document engine's status for one note. The client polls only while the run is live.
 import { api, apiBlob } from "./http";
-import type { GeneratedItem, GenerationView } from "./types";
+import type { GeneratedItem, GenerationView, NoteCorrection, NoteTemplate } from "./types";
 
 export function getGeneration(noteId: string): Promise<GenerationView> {
   return api<GenerationView>("note", `/v1/notes/${noteId}/generation`);
 }
 
-export function regenerate(noteId: string): Promise<{ id: string; status: string }> {
+/** Write the note again; `template` changes which template it is written with from now on. */
+export function regenerate(
+  noteId: string,
+  template?: NoteTemplate,
+): Promise<{ id: string; status: string }> {
   return api<{ id: string; status: string }>("note", `/v1/notes/${noteId}/generation`, {
     method: "POST",
+    json: template ? { template } : {},
   });
 }
 
@@ -20,6 +25,11 @@ export function getGeneratedItems(
   return api<GeneratedItem[]>("note", `/v1/notes/${noteId}/generated-items`, {
     query: opts.generation ? { generation: opts.generation } : undefined,
   });
+}
+
+/** The respellings the current generation applied (A3): the transcript shows the note's spelling over them. */
+export function getCorrectionsSummary(noteId: string): Promise<NoteCorrection[]> {
+  return api<NoteCorrection[]>("note", `/v1/notes/${noteId}/corrections/summary`);
 }
 
 export interface AudioClip {

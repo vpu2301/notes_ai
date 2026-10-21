@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -26,11 +26,11 @@ from note_models import NoteStatus, ReadPurpose
 
 from .. import audit_kinds
 from ..deps import get_state, requires
-from ..domain import access, generation_service
+from ..domain import access, entities, generation_service
 from ..domain import generation_repository as gen_repo
 from ..domain import glossary_repository as glossary_repo
 from ..domain import notes_repository as repo
-from ..domain.meeting_doc import entities
+from ..domain.writer import NoteTemplate
 from ..notifications import emit_budget_reached
 from . import ai_settings as ai_settings_router
 from .notes_from_transcript import _fetch_transcript
@@ -194,8 +194,12 @@ class GenerationView(BaseModel):
     """N0 — the version of the workspace's model settings (style and parameters) that
     wrote it; 0: the defaults; null: a run from before N0."""
     model_settings_version: int | None = None
-    """N0 — the writing style that wrote it (`business`, …); null before N0."""
-    writing_style: str | None = None
+    """P1 — the note as the writer wrote it (Markdown, first line the title); null while
+    queued or running and for runs of the removed path."""
+    text: str | None = None
+    """P2 — the template the note was written with (`meeting`, `public_meeting`, …): the one
+    requested, or the one the model chose under `auto`; null while running or when unknown."""
+    template: str | None = None
 
     @property
     def live(self) -> bool:
@@ -207,6 +211,15 @@ class GenerationStarted(BaseModel):
 
     id: UUID
     status: str
+
+
+class RegenerateRequest(BaseModel):
+    """P2: ``template`` — write the note with this template from now on (``auto`` = the
+    model chooses). Omitted: the note's current choice."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    template: NoteTemplate | None = None
 
 
 class GeneratedItemView(BaseModel):
@@ -248,6 +261,58 @@ class GeneratedItemView(BaseModel):
     provenance: Literal["verbatim", "paraphrase", "composed"] | None = None
     """B4 — a claim row's verdict cell (the label and the speaker's clause)."""
     verdict: str | None = None
+    """P1 — the item's place in the note (0-based, the Markdown's order), what it is
+    (``bullet``, ``paragraph``, ``vote``, ``claim``, ``table_row``), a table row's cells, and
+    whether its time named no turn exactly (the nearest one is cited)."""
+    position: int = 0
+    table_row: dict[str, Any] | None = None
+    cite_nearest: bool = False
+    """P3 — every turn the line cites, in the Markdown's order (the first is the row's
+    quote); empty for a line without a cite or a row from before P3."""
+    cited_turns: list[CitedTurn] = []
+    """P3 — the optional check call's verdict (``ok`` | ``unsupported``) and its one-line
+    reason; null when the call was off."""
+    check: Literal["ok", "unsupported"] | None = None
+    check_reason: str | None = None
+
+
+class CitedTurn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    turn: int
+    start_ms: int
+    end_ms: int
+    speaker: str | None = None
+    text: str
+    """True when ``text`` is the part of a long turn around the cited moment (``at_ms``)."""
+    excerpt: bool = False
+    at_ms: int | None = None
+
+
+GeneratedItemView.model_rebuild()
+
+
+def _cited_turns(payload: Any) -> list[CitedTurn]:
+    data = _json_object(payload) or {}
+    out: list[CitedTurn] = []
+    for raw in data.get("turns") or []:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            out.append(
+                CitedTurn(
+                    turn=int(raw.get("turn", 0)),
+                    start_ms=int(raw.get("start_ms", 0)),
+                    end_ms=int(raw.get("end_ms", 0)),
+                    speaker=(str(raw["speaker"]) if raw.get("speaker") else None),
+                    text=str(raw.get("text") or ""),
+                    excerpt=bool(raw.get("excerpt") or False),
+                    at_ms=(int(raw["at_ms"]) if raw.get("at_ms") is not None else None),
+                )
+            )
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def _excluded(stats: dict) -> list[ExcludedRange]:
@@ -281,7 +346,10 @@ def _coverage(stats: dict) -> Coverage | None:
 
 def _provenance(row: gen_repo.GenerationRow) -> Provenance:
     stats = row.stats or {}
-    sent = {str(h) for c in stats.get("calls") or [] for h in c.get("system_hashes") or []}
+    # The old path listed its calls per stage; the writer (P1) records a count.
+    calls = stats.get("calls")
+    per_stage = [c for c in calls if isinstance(c, dict)] if isinstance(calls, list) else []
+    sent = {str(h) for c in per_stage for h in c.get("system_hashes") or []}
     pinned = getattr(row, "config_snapshot", None) or {}
     runtime = stats.get("runtime") or {}
     flags = runtime.get("flags") or {}
@@ -310,7 +378,7 @@ def _provenance(row: gen_repo.GenerationRow) -> Provenance:
                 failed=int(c.get("failed") or 0),
                 system_hashes=[str(h) for h in c.get("system_hashes") or []],
             )
-            for c in stats.get("calls") or []
+            for c in per_stage
         ],
         prompt_calls=[
             PromptCall(call=str(call), sha=str(sha), sent=str(sha) in sent)
@@ -360,8 +428,15 @@ def _view(row: gen_repo.GenerationRow) -> GenerationView:
         provenance=_provenance(row),
         instructions=_instructions_ref(stats),
         model_settings_version=_model_settings_version(stats),
-        writing_style=str(stats["writing_style"]) if stats.get("writing_style") else None,
+        text=getattr(row, "text", None),
+        template=_template_of(stats),
     )
+
+
+def _template_of(stats: dict[str, object]) -> str | None:
+    """The template the writer used (``stats.template``); ``auto`` means none was chosen."""
+    name = stats.get("template")
+    return str(name) if name and name != "auto" else None
 
 
 def _model_settings_version(stats: dict[str, object]) -> int | None:
@@ -419,18 +494,18 @@ async def regenerate(
     note_id: UUID,
     request: Request,
     claims: Annotated[Claims, Depends(requires("note.write", "note"))],
+    body: RegenerateRequest | None = None,
 ) -> GenerationStarted:
-    """Write the note again from the recording.
-
-    Safe to press: the writer rewrites only sections nobody has edited
-    since the last run, so the author's own text survives a regenerate
-    exactly as it survives the first pass.
-    """
+    """Write the note again from the recording, with the template the body names (P2) or
+    the note's current one. The items of the newest run replace the older run's."""
     state = get_state()
     auth_header = request.headers.get("authorization") or ""
+    template = body.template if body is not None else None
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         note = access.require_edit(await repo.fetch_note(conn, note_id=note_id), claims)
+        if template is not None and template != getattr(note, "template", None):
+            await repo.set_template(conn, note_id=note_id, template=template)
         if note.status != NoteStatus.DRAFT:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
@@ -517,7 +592,12 @@ async def regenerate(
                 },
             ) from None
 
-    await _audit(claims, audit_kinds.NOTE_GENERATION_REQUESTED, note_id, {"reason": "regenerate"})
+    await _audit(
+        claims,
+        audit_kinds.NOTE_GENERATION_REQUESTED,
+        note_id,
+        {"reason": "regenerate", **({"template": template} if template else {})},
+    )
     return GenerationStarted(id=generation_id, status=generation_status)
 
 
@@ -569,9 +649,67 @@ async def generated_items(
             mentions=_json_list(_get(r, "mentions")),
             provenance=_line_provenance(_get(r, "provenance")),
             verdict=_verdict(_get(r, "payload")) if r["kind"] == "claim" else None,
+            position=int(_get(r, "position") or 0),
+            table_row=_json_object(_get(r, "table_row")),
+            cite_nearest=bool(_get(r, "cite_nearest") or False),
+            cited_turns=_cited_turns(_get(r, "payload")),
+            check=_get(r, "check") if _get(r, "check") in ("ok", "unsupported") else None,
+            check_reason=_get(r, "check_reason"),
         )
         for r in rows
     ]
+
+
+class NoteCorrectionSummary(BaseModel):
+    """A3 T3 — one respelling the current generation applied: what the transcript says
+    (``surface``), what the note says (``canonical``), and on how many lines."""
+
+    surface: str
+    canonical: str
+    source: str
+    count: int
+
+
+def summarise_corrections(rows: list[object], rejected: set[str]) -> list[NoteCorrectionSummary]:
+    """The respellings of the current generation's rows, one per (surface, canonical),
+    counted by line; a respelling the author rejected is left out."""
+    counts: dict[tuple[str, str], NoteCorrectionSummary] = {}
+    for r in rows:
+        for c in _json_list(_get(r, "corrections")):
+            if not isinstance(c, dict):
+                continue
+            surface = str(c.get("surface", "")).strip()
+            canonical = str(c.get("canonical", "")).strip()
+            if not surface or not canonical or surface == canonical:
+                continue
+            if glossary_repo.name_review_tag(surface, canonical) in rejected:
+                continue
+            key = (surface, canonical)
+            if key in counts:
+                counts[key].count += 1
+            else:
+                counts[key] = NoteCorrectionSummary(
+                    surface=surface, canonical=canonical, source=str(c.get("source", "")), count=1
+                )
+    return sorted(counts.values(), key=lambda c: (-c.count, c.surface))
+
+
+@router.get("/{note_id}/corrections/summary", response_model=list[NoteCorrectionSummary])
+async def corrections_summary(
+    note_id: UUID,
+    claims: Annotated[Claims, Depends(requires("note.read", "note"))],
+    purpose: ReadPurpose | None = None,
+) -> list[NoteCorrectionSummary]:
+    """A3 — the respellings the note's current generation applied, for the transcript
+    tab's "heard as" marker. The surfaces are transcript words, so the read goes through
+    the same rules as the items."""
+    state = get_state()
+    async with tenant_connection(state.app_pool, claims.tid) as conn:
+        note = access.require_view(await repo.fetch_note(conn, note_id=note_id), claims)
+        access.require_read_purpose(note, claims, purpose)
+        rows = await gen_repo.items_for_note(conn, note_id=note_id, current_only=True)
+        rejected = await glossary_repo.rejected_name_tags(conn, note_id=note_id)
+    return summarise_corrections(list(rows), rejected)
 
 
 def _line_provenance(value: object) -> Literal["verbatim", "paraphrase", "composed"] | None:
@@ -616,6 +754,16 @@ def _undecided(corrections: list[object], reviewed: set[str]) -> list[object]:
             not in reviewed
         )
     ]
+
+
+def _json_object(value: object) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        import json
+
+        value = json.loads(value)
+    return dict(value) if isinstance(value, dict) else None
 
 
 def _json_list(value: object) -> list:

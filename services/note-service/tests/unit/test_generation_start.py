@@ -12,8 +12,7 @@ import pytest
 
 from note_service.domain import generation_repository as gen_repo
 from note_service.domain import generation_service as gen
-from note_service.domain import prompt_profile_repository as profile_repo
-from note_service.domain import prompt_profiles as profiles
+from note_service.domain import prompts
 
 
 class _Store:
@@ -44,12 +43,8 @@ async def test_snapshot_aad_row_id_and_job_payload_agree(monkeypatch: pytest.Mon
     async def _allowed(conn: Any, *, tenant_id: UUID, **_kw) -> None:
         return None
 
-    async def _bundled(conn: Any, *, tenant_id: UUID) -> Any:
-        return profiles.BUNDLED, None
-
     monkeypatch.setattr(gen_repo, "create", _create)
     monkeypatch.setattr(gen, "check_allowed", _allowed)
-    monkeypatch.setattr(profile_repo, "active_config", _bundled)
 
     store, queue = _Store(), _Queue()
     tenant, note = uuid4(), uuid4()
@@ -71,68 +66,6 @@ async def test_snapshot_aad_row_id_and_job_payload_agree(monkeypatch: pytest.Mon
     assert created[0]["snapshot_key"] == put["key"]
     assert queue.payloads == [{"generation_id": str(generation_id), "note_id": str(note)}]
 
-    # S3: what the job runs with is pinned on the row now, not read when it runs.
-    pinned = created[0]["config_snapshot"]
-    assert pinned["profile_version_id"] is None
-    assert pinned["prompt_version"] == created[0]["prompt_version"]
-    # Every call the run makes, for the flags it was pinned with (P1-01).
-    assert set(pinned["prompt_hashes"]) == {
-        c.call
-        for c in profiles.resolve(
-            profiles.BUNDLED,
-            language="en",
-            multilingual=pinned["multilingual"],
-            fidelity=pinned["fidelity"],
-        )
-    }
-    assert all(m == {"routed": True} for m in pinned["models"].values())
-
-
-async def test_an_active_profile_this_deployment_cannot_run_fails_visibly(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from datetime import UTC, datetime
-
-    marked: list[dict[str, Any]] = []
-
-    async def _create(conn: Any, **kw: Any) -> UUID:
-        return kw["generation_id"]
-
-    async def _mark(conn: Any, **kw: Any) -> None:
-        marked.append(kw)
-
-    async def _allowed(conn: Any, *, tenant_id: UUID, **_kw: Any) -> None:
-        return None
-
-    old = profile_repo.Version(
-        id=uuid4(),
-        profile_id=uuid4(),
-        version_number=1,
-        config=profiles.ProfileConfig(),
-        contract_version="2020-01-01.1",
-        schema_version="x",
-        algorithm_version="old",
-        content_hash="h",
-        created_by=uuid4(),
-        created_at=datetime.now(UTC),
-    )
-
-    async def _active(conn: Any, *, tenant_id: UUID) -> Any:
-        return old.config, old
-
-    monkeypatch.setattr(gen_repo, "create", _create)
-    monkeypatch.setattr(gen_repo, "mark", _mark)
-    monkeypatch.setattr(gen, "check_allowed", _allowed)
-    monkeypatch.setattr(profile_repo, "active_config", _active)
-    queue = _Queue()
-    _id, status = await gen.start(
-        object(),
-        queue=queue,
-        store=_Store(),
-        tenant_id=uuid4(),
-        note_id=uuid4(),
-        requested_by=uuid4(),
-        transcript={"language": "de", "segments": []},
-    )
-    assert status == gen_repo.FAILED and queue.payloads == []
-    assert marked[0]["error_kind"] == gen.PROFILE_INCOMPATIBLE
+    # The row names the writer prompt's version (Sprint R0: no pinned profile).
+    assert created[0]["prompt_version"] == prompts.PROMPT_VERSION
+    assert "config_snapshot" not in created[0]

@@ -70,6 +70,10 @@ class JobRunner:
         self._handlers = handlers
         self._worker_id = worker_id
         self._ledger = ledger
+        if ledger is not None:
+            # Task 4: without this every provider call's record went to the log sink and
+            # the `model_usage` table saw neither cost nor failure.
+            ledger.install()
         self._lease = lease_seconds
         self._poll = poll_interval_s
         # None = plain FIFO; a number = fair claims and a per-workspace running cap.
@@ -86,6 +90,14 @@ class JobRunner:
 
     async def run_forever(self) -> None:
         while not self._stop.is_set():
+            # Task 5 step 0 (Q3): a worker that died mid-job left it `running` with an expired
+            # lease for good — nobody called the reaper. Once per poll, before claiming.
+            reap = getattr(self._queue, "reap_stale_leases", None)
+            if reap is not None:
+                try:
+                    await reap()
+                except Exception:  # noqa: BLE001 — a reaper failure must not stop the loop
+                    logger.exception("jobs.reap_failed")
             jobs = await self._claim()
             if not jobs:
                 with contextlib.suppress(TimeoutError):

@@ -129,16 +129,15 @@ AI_SETTINGS_CHANGED: Final = "ai.settings_changed"  # tier, provider, generation
 AI_BUDGET_REACHED: Final = "ai.budget_reached"  # cents, budget_cents
 # ── Prompt profiles and experiments (S3) ────────────────────────────
 # Ids, version numbers, revisions and counts; never instruction text or note content.
-AI_PROFILE_VERSION_SAVED: Final = "ai.profile_version_saved"  # profile_id, version_number, stages
-AI_PROFILE_ACTIVATED: Final = "ai.profile_activated"  # version_id, previous_version_id, revision
-AI_EXPERIMENT_STARTED: Final = "ai.experiment_started"  # sources, candidates, repetitions
-AI_EXPERIMENT_CANCELLED: Final = "ai.experiment_cancelled"  # runs_cancelled
 # ── Note instructions (N1) ──────────────────────────────────────────
 # Scope, version and counts; never the text, a guidance line or a term.
 AI_INSTRUCTIONS_CHANGED: Final = (
     "ai.instructions_changed"  # scope, version, chars, compile_status, not_applied, dials
 )
 AI_INSTRUCTIONS_CLEARED: Final = "ai.instructions_cleared"  # scope, version
+# P2 — a workspace's own text for a built-in note template, and back to the built-in.
+AI_TEMPLATE_CHANGED: Final = "ai.template_changed"  # name, language, chars
+AI_TEMPLATE_RESET: Final = "ai.template_reset"  # name, language
 # N4 — one note's instructions ("Write this note differently"): counts only, target = note.
 NOTE_INSTRUCTIONS_CHANGED: Final = (
     "note.instructions_changed"  # chars, compile_status, not_applied, dials, base scopes

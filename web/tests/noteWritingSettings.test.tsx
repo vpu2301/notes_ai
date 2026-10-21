@@ -16,27 +16,15 @@ vi.mock("../src/auth/AuthContext", () => ({
 
 const PARAMS = {
   temperature: 0.4,
-  context_window_tokens: 32768,
-  max_output_tokens: null,
+  max_output_tokens: 4096,
   max_concurrency: 2,
-  facts_per_window: 24,
-  retries: "standard",
   ask_temperature: 0.2,
   ask_max_tokens: 700,
 };
 const LIMITS = {
   temperature: { min: 0, max: 0.7, step: 0.1, default: 0 },
-  context_window_tokens: {
-    min: 8192,
-    max: 262144,
-    default: 32768,
-    cap: 32768,
-    cap_source: "backend",
-  },
-  max_output_tokens: { min: 512, max: 4096, default: null },
+  max_output_tokens: { min: 512, max: 8192, default: 4096 },
   max_concurrency: { min: 1, max: 8, default: 4, cap: 2, cap_source: "backend" },
-  facts_per_window: { min: 8, max: 24, default: 24 },
-  retries: { options: ["off", "standard", "thorough"], default: "standard" },
   ask_temperature: { min: 0, max: 1, step: 0.1, default: 0.2 },
   ask_max_tokens: { min: 200, max: 2000, default: 700 },
 };
@@ -44,18 +32,23 @@ const SETTINGS = {
   provider: "platform", tier: "standard", generation_enabled: true,
   effective_provider: "platform", effective_tier: "standard", processors: [],
   needs_acknowledgement: [], month_to_date_cents: 0, budget_cents: 2000,
-  may_choose_premium: true, can_edit: true, writing_style: "academic",
+  may_choose_premium: true, can_edit: true,
   model_params: PARAMS, model_params_effective: PARAMS, model_params_version: 2,
   model_params_valid: true, model_params_limits: LIMITS,
   model_params_measured: { temperature: { "0.2": null, "0.4": null, "0.7": null } },
 }; // prettier-ignore
 const INSTRUCTIONS = {
-  scope: "workspace", version: 1, text: "# Length\nShort.", profile: {}, profile_hash: "h",
-  compile_status: "compiled", compile_error_kind: null,
-  understood: ["Shorter than standard — about 60 % of the usual length."], guidance: [],
-  not_applied: [], can_edit: true, max_chars: 8000, updated_at: null, updated_by: null,
-  scopes: [{ scope: "workspace", version: 1, stale: false }],
+  scope: "workspace", version: 1, text: "Length: short. Four summary sentences at most.",
+  profile: {}, profile_hash: "", compile_status: "compiled", compile_error_kind: null,
+  understood: [], guidance: [], not_applied: [], can_edit: true, max_chars: 4000,
+  updated_at: null, updated_by: null,
 }; // prettier-ignore
+const TEMPLATES = [
+  { name: "meeting", language: "en", source: "workspace", markdown: "## Decisions\n- one per line",
+    can_edit: true, updated_at: "2026-10-21T10:00:00Z", updated_by: "u1" },
+  { name: "memo", language: "en", source: "builtin", markdown: "## Summary\n- the point",
+    can_edit: true, updated_at: null, updated_by: null },
+]; // prettier-ignore
 
 function server(canEdit: boolean) {
   const gets: string[] = [];
@@ -66,7 +59,9 @@ function server(canEdit: boolean) {
       if ((init?.method ?? "GET") === "GET") gets.push(path);
       const body = path.endsWith("/v1/ai/instructions")
         ? { ...INSTRUCTIONS, can_edit: canEdit }
-        : { ...SETTINGS, can_edit: canEdit };
+        : path.endsWith("/v1/ai/templates")
+          ? TEMPLATES.map((t) => ({ ...t, can_edit: canEdit }))
+          : { ...SETTINGS, can_edit: canEdit };
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -116,23 +111,45 @@ describe("Settings › Note writing", () => {
     }
   });
 
-  it("shows a member every section read-only, after exactly two GETs", async () => {
+  it("shows a member every section read-only, after exactly three GETs", async () => {
     signedIn("member");
     const gets = server(false);
     const { container } = writing();
-    expect(await screen.findByText("Only a workspace admin can change these.")).toBeInTheDocument();
-    expect(await screen.findByText(/Shorter than standard/)).toBeInTheDocument();
-    for (const label of ["Writing style", "Note instructions", "Automatic note writing"]) {
+    expect(
+      (await screen.findAllByText("Only a workspace admin can change these.")).length,
+    ).toBeGreaterThan(0);
+    expect(await screen.findByText(/Four summary sentences at most/)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Meeting" })).toBeInTheDocument();
+    for (const label of ["Templates", "Note instructions", "Automatic note writing"]) {
       expect(container.querySelector(`[aria-label='${label}']`)).not.toBeNull();
     }
     expect(container.querySelector(".model-behaviour")).not.toBeNull();
     expect(container.querySelectorAll("input:not([disabled]), textarea, select").length).toBe(0);
+    // Tabs and template names only open views; nothing edits.
     expect(
       [...container.querySelectorAll("button")].filter(
-        (b) => !b.disabled && !b.closest(".instructions-scopes"),
+        (b) => !b.disabled && !b.closest("[role='tablist']") && !b.classList.contains("template-name"),
       ).length,
     ).toBe(0);
-    await waitFor(() => expect(gets.sort()).toEqual(["/v1/ai/instructions", "/v1/ai/settings"]));
+    await waitFor(() =>
+      expect(gets.sort()).toEqual(["/v1/ai/instructions", "/v1/ai/settings", "/v1/ai/templates"]),
+    );
+  });
+
+  it("orders the page templates, instructions, automatic writing, advanced", async () => {
+    signedIn("owner");
+    server(true);
+    const { container } = writing();
+    await screen.findByRole("button", { name: "Meeting" });
+    const labels = [...container.querySelectorAll(".settings-stack > section, .settings-stack > details")].map(
+      (el) => el.getAttribute("aria-label") ?? el.className,
+    );
+    expect(labels).toEqual([
+      "Templates",
+      "Note instructions",
+      "Automatic note writing",
+      "card pad settings-card model-behaviour",
+    ]);
   });
 
   it("takes every range, step and cap of the Advanced table from the server's limits", async () => {
@@ -143,21 +160,22 @@ describe("Settings › Note writing", () => {
     expect(temperature).toHaveAttribute("min", "0");
     expect(temperature).toHaveAttribute("max", "0.7");
     expect(temperature).toHaveAttribute("step", "0.1");
-    const window = screen.getByRole("spinbutton", { name: "Context window" });
-    expect(window).toHaveAttribute("min", "8192");
-    expect(window).toHaveAttribute("max", "262144");
+    const budget = screen.getByRole("spinbutton", { name: "Output budget per call" });
+    expect(budget).toHaveAttribute("min", "512");
+    expect(budget).toHaveAttribute("max", "8192");
     expect(container.querySelector(".param-table")?.textContent).toContain("2 (model)");
-    expect(screen.getByRole("group", { name: "Second reading" })).toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton", { name: "Context window" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Second reading" })).toBeNull();
   });
 });
 
 describe("the note's status line", () => {
-  it("names the style, the instructions and the model settings, with one link", async () => {
+  it("names the instructions and the model settings, with one link", async () => {
     const view = {
       id: "g1", status: "complete", step: null, windows_total: 2, windows_done: 2,
       windows_failed: 0, failed_ranges: [], prompt_version: "p", model_id: "m", error_kind: null,
       created_at: "2026-10-19T10:00:00Z", finished_at: "2026-10-19T10:01:00Z",
-      suggested_sections: [], sections_written: 3, writing_style: "academic",
+      suggested_sections: [], sections_written: 3, template: "interview",
       instructions: { scope: "workspace", version: 1 }, model_settings_version: 2,
     }; // prettier-ignore
     vi.stubGlobal(
@@ -179,9 +197,7 @@ describe("the note's status line", () => {
     );
     await waitFor(() => expect(container.querySelector(".gen-instructions")).not.toBeNull());
     const line = container.querySelector(".gen-instructions")!;
-    expect(line.textContent).toBe(
-      "Written in Academic style · workspace instructions v1 · model settings v2",
-    );
+    expect(line.textContent).toBe("Written with workspace instructions v1 · model settings v2");
     const links = line.querySelectorAll("a");
     expect(links).toHaveLength(1);
     expect(links[0]).toHaveAttribute("href", "/settings/writing");

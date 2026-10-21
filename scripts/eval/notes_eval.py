@@ -13,18 +13,21 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import functools
 import json
 import sys
 import time
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import REPO, Paced, load_registry, registry_env, write_report  # noqa: E402
+from _common import (  # noqa: E402
+    REPO,
+    Paced,
+    load_registry,
+    write_report,
+)
 from notes_gold import fact_text  # noqa: E402
 from notes_scoring import (  # noqa: E402, F401 — re-exported for the harness tests
     COMPOSED,
@@ -33,19 +36,17 @@ from notes_scoring import (  # noqa: E402, F401 — re-exported for the harness 
     _body,
     aggregate,
     best_match,
-    d1_gates,
-    d2_gates,
     f2_gates,
-    f3_gates,
     overlap,
     score_meeting,
     sq2_gates,
     sq3_gates,
     support,
-    support_rules,
     words,
 )
 from taxonomy import METRIC_CODES  # noqa: E402
+
+from note_service.domain import text as text_rules  # noqa: E402
 
 DEFAULT_CORPUS = REPO / "tests" / "fixtures" / "eval" / "notes"
 ENGINE_SRC = REPO / "services" / "note-service" / "src"
@@ -58,7 +59,6 @@ EXIT_FAILED = 1  # a hallucinated quote, or a meeting the model could not finish
 EXIT_BLIND = 2  # the engine saw no transcript — the bug that hid every number
 EXIT_NO_CORPUS = 3
 # Entity model tier: off as in production unless `--entity-model-tier`.
-ENTITY_MODEL_TIER = False
 
 
 @dataclass
@@ -183,10 +183,9 @@ def template_code(family: Any, language: str) -> str:
 
 
 def role_map(code: str) -> dict[str, str]:
-    """``{section_key: role}`` from the seed template, through the same
-    ``TemplateDefinition`` + ``roles.role_map`` the worker's ``_role_map``
-    uses — minus the database."""
-    from note_service.domain.meeting_doc import roles
+    """``{section_key: role}`` from the seed template, through ``TemplateDefinition`` +
+    ``roles.role_map`` — minus the database."""
+    from note_service.domain import roles
     from template_models import TemplateDefinition
 
     path = TEMPLATES / f"{code}.json"
@@ -200,240 +199,9 @@ class EngineBlindError(RuntimeError):
     """A non-empty transcript produced zero windows."""
 
 
-def _fact_dict(fact: Any) -> dict[str, Any]:
-    return {
-        "item_key": fact.item_key,
-        "kind": fact.kind,
-        "text": fact.text,
-        "quote": fact.quote,
-        "turn": fact.turn,
-        "line": getattr(fact, "line", None),
-        "certainty": getattr(fact, "certainty", None),
-        "owner": fact.owner_label,
-        "due_text": fact.due_text,
-        "attributed_to": getattr(fact, "attributed_to", None),
-        # Whose sentence it is, and who said it.
-        "subject": getattr(fact, "subject", None),
-        "speaker_label": getattr(fact, "speaker_label", None),
-        "corrections": [
-            [c.surface, c.canonical, c.source] for c in getattr(fact, "corrections", ())
-        ],
-        "start_ms": fact.start_ms,
-        "end_ms": fact.end_ms,
-        "window_index": fact.window_index,
-        "source_language": getattr(fact, "source_language", None),
-        "flags": list(getattr(fact, "flags", ())),
-        # The verified payloads.
-        "figure": fact.figure.payload() if getattr(fact, "figure", None) else None,
-        "person": (
-            {
-                "name": fact.person.name,
-                "role": fact.person.role,
-                "organisation": fact.person.organisation,
-            }
-            if getattr(fact, "person", None)
-            else None
-        ),
-    }
-
-
-# ── the two arms ────────────────────────────────────────────────────
-
-
-async def run_pipeline(
-    meeting: dict[str, Any],
-    provider: Any,
-    *,
-    multilingual: bool = False,
-    fidelity: bool = False,
-    instructions: dict[str, str] | None = None,
-    length: str = "standard",
-    output_language: str | None = None,
-    profile: Any = None,
-    params: Any = None,
-    writing_style: str = "business",
-) -> dict[str, Any]:
-    """The engine, exactly as the worker runs it: the result view the
-    worker snapshots, the template's roles, the meeting's date and the
-    ASR's name candidates. ``multilingual``: as with MDX_NOTE_MULTILINGUAL_EVIDENCE;
-    ``fidelity``: as with MDX_NOTE_FIDELITY, the final check before writing included.
-    ``instructions`` (a profile's stage texts), ``length`` and ``output_language`` (forced,
-    else the meeting's) as a pinned profile gives them to the worker. ``profile``: a
-    workspace's ``WritingProfile`` (N2), applied where the worker applies it."""
-    from types import SimpleNamespace
-
-    from note_service.domain.glossary import Term
-    from note_service.domain.meeting_doc import doclint, pipeline, types, windows
-    from note_service.jobs.generate_note import _recording_type
-
-    language = meeting.get("language", "en")
-    meeting_type = meeting.get("meeting_type") or "auto"
-    gold = meeting.get("gold") or {}
-    glossary = tuple(
-        Term(t["term"], t.get("kind", "person"), tuple(t.get("heard_as") or ()))
-        for t in gold.get("glossary") or []
-    )
-    # The note's template, as creation would have picked it for this type.
-    template_family = types.family_for_type(meeting_type)
-    result = as_asr_result(meeting)
-    if multilingual:
-        # The worker's resolution (jobs.generate_note): settled once for the whole run.
-        language, _source = pipeline.resolve_output_language(
-            result, explicit=output_language or meeting.get("output_language")
-        )
-    started = time.monotonic()
-    # Every model call of this meeting, from the provider's usage records.
-    tokens = _TokenTally.install()
-    # The worker's own type decision (author's type, template, or the classifier).
-    turns = windows.turns_from_result(result)
-    # Classify what the pipeline will read (adverts cut).
-    turns = windows.prepare_turns(turns).turns
-    # The window size follows the backend's context, as in the worker.
-    # N0: the windows follow the workspace's context window (capped), as in the worker.
-    context = getattr(params, "context_window_tokens", None) or getattr(
-        provider, "context_window", None
-    )
-    built = windows.build_windows(turns, max_chars=windows.window_chars(context))
-    recording_type, source = await _recording_type(
-        provider,
-        meeting=SimpleNamespace(meeting_type=meeting_type, calendar_context={}),
-        template_family=template_family,
-        built=built,
-        turns=turns,
-        language=language,
-    )
-    document = await pipeline.run(
-        result,
-        provider=provider,
-        role_by_key=role_map(template_code(template_family, language)),
-        language=language,
-        meeting_date=date.fromisoformat(meeting.get("recorded_on") or DEFAULT_RECORDED_ON),
-        # The people the worker knows (_known_names) and the glossary.
-        name_candidates=frozenset(
-            {*(result.get("name_candidates") or ()), *(gold.get("speakers") or {}).values()}
-            | {t.term for t in glossary if t.kind == "person"}
-        ),
-        glossary=glossary,
-        entity_model_tier=ENTITY_MODEL_TIER,
-        family=types.family_for_recording_type(recording_type),
-        built=built,
-        recording_type=recording_type,
-        recording_type_source=source,
-        output_language=language,
-        multilingual=multilingual,
-        fidelity=fidelity,
-        final=fidelity,
-        instructions=instructions,
-        length=length,
-        profile=profile,
-        params=params,
-        writing_style=writing_style,
-        max_concurrency=getattr(params, "max_concurrency", 4),
-    )
-    # The worker's linter on every output: the eval scores what the writer receives.
-    known = frozenset({*(gold.get("speakers") or {}).values()})
-    document = await doclint.enforce(
-        document,
-        regenerate=document.regenerator,
-        known=known,
-        profile=profile,
-        writing_style=writing_style,
-    )
-    # The worker's final check (F1-02), after the last rewrite.
-    document = await pipeline.finalize(document)
-    if profile is not None:
-        from note_service.domain import note_instructions
-
-        note_instructions.apply_terminology(document, profile, known=known)
-    # The worker's title step (jobs.generate_note._title_context).
-    from note_service.domain import note_title
-    from note_service.jobs.generate_note import _title_context
-
-    themes, title_facts = _title_context(document)
-    title = await note_title.suggest(
-        provider, result, language=language, themes=themes, facts=title_facts
-    )
-    tokens.uninstall()
-    if document.windows_total == 0 and any(t["text"].strip() for t in meeting["transcript"]):
-        raise EngineBlindError(meeting["id"])
-    titles = {s.section_key: s.title for s in document.sections}
-    return {
-        "seconds": time.monotonic() - started,
-        "input_tokens": tokens.input_tokens,
-        "output_tokens": tokens.output_tokens,
-        "model_calls": tokens.calls,
-        "lines": [
-            {
-                "section_key": key,
-                # Topic and sub-point flag, for the r02 checklist.
-                "section_title": titles.get(key),
-                "parent": bool(getattr(line, "parent", None)),
-                "kind": line.kind,
-                "text": line.text,
-                "fact_ids": list(line.fact_ids),
-                "dates": [m.iso() for m in line.dates],
-                # B4: verbatim | paraphrase | composed, by the render rule.
-                "provenance": getattr(line, "provenance", None),
-            }
-            for key, line in document.lines
-        ],
-        # What the engine resolved each spoken date to.
-        "dates": list(
-            {
-                (m.text, m.iso()): {"text": m.text, "resolved": m.iso()}
-                for _key, line in document.lines
-                for m in line.dates
-            }.values()
-        ),
-        "facts": [_fact_dict(f) for f in document.facts],
-        "actions": [
-            f
-            for f in document.facts
-            if f.kind in ("action", "commitment_ours", "commitment_theirs")
-        ],
-        "decisions": [f for f in document.facts if f.kind == "decision"],
-        "quotes": [(f.quote, f.turn) for f in document.facts],
-        "windows": document.windows_total,
-        "windows_failed": document.windows_failed,
-        "stats": dict(document.stats),
-        "brief": dict(document.brief),
-        "noise_ranges": [list(r) for r in document.noise_ranges],
-        # What became of every extracted fact: line, language, outcome (no text).
-        "trace": [
-            {
-                "window": t.window,
-                "line": t.line,
-                "kind": t.kind,
-                "language": t.language,
-                "outcome": t.outcome,
-                "start_ms": t.start_ms,
-            }
-            for t in document.trace
-        ],
-        "backend": document.backend,
-        "model_id": document.model_id,
-        "evidence": "facts",
-        # The sections as written, for notes_assert (content: never in a report).
-        "sections": [
-            {
-                "section_key": s.section_key,
-                "title": s.title,
-                "role": s.role,
-                "text": s.text,
-                # N2: what instructions_gate.py checks the code dials on (local only).
-                "lines": [{"kind": ln.kind, "text": ln.text} for ln in s.lines],
-            }
-            for s in document.sections
-        ],
-        "language": language,
-        "title": title,
-        # The note as a reader sees it — only ever written to local disk
-        # (--save-notes, for blind rating), never into a report.
-        "note_text": (f"# {title}\n\n" if title else "")
-        + "\n\n".join(
-            (f"## {s.title}\n{s.text}" if s.title else s.text) for s in document.sections
-        ),
-    }
+# Sprint R0 removed the pipeline arm (the old writing path). Sprint P3 adds the arm that
+# scores the notes the writer (P1) stores; until then ``single_pass`` is the only arm.
+ARMS = ("single_pass",)
 
 
 SINGLE_PASS_SYSTEM = (
@@ -586,7 +354,7 @@ def score(meeting: dict[str, Any], produced: dict[str, Any], totals: Totals) -> 
     # Every quote is verbatim and from the turn claimed, compared the way the
     # engine compares (`verify.normalise_quote`); raw text comparison flagged
     # ASR punctuation differences as hallucinations.
-    from note_service.domain.meeting_doc.verify import normalise_quote, strip_turn_header
+    from _textrules import normalise_quote, strip_turn_header
 
     norm_text = normalise_quote(text)
     for quote, turn in produced["quotes"]:
@@ -677,7 +445,8 @@ JUDGE_SYSTEM = (
     "a statement and the verbatim words it was taken from. Answer supported=true only "
     "if everything the line says is carried by those facts: no new claim, no number "
     "that is not there, no different person, nothing stated more certainly than it "
-    "was said. Otherwise name the problem. Judge only; do not rewrite."
+    "was said. A reporting clause that names who said something is not a new claim. "
+    "Otherwise name the problem. Judge only; do not rewrite."
 )
 
 
@@ -745,7 +514,7 @@ async def judge(
                 "language": language,
                 "kind": line.get("kind"),
                 "text": line["text"],
-                "ratio": support_rules.support_ratio(body, " ".join(evidence), language),
+                "ratio": text_rules.support_ratio(body, " ".join(evidence), language),
                 # The rules the threshold does not decide: a line failing
                 # them is unsupported at any threshold.
                 "rules_ok": support(line["text"], evidence, language, threshold=0.0),
@@ -756,6 +525,17 @@ async def judge(
 
 
 _STAT_KEYS = (
+    # Task 4: the code that wrote it, throttling, the type decision, failed calls by reason.
+    "build",
+    "throttle",
+    "classify",
+    "summary_failure",
+    "call_failures",
+    "lines_composed",
+    "lines_model_kept",
+    "holder_sources",
+    "address_cues",
+    "name_conflicts",
     # N2: what a writing profile did (numbers and booleans only).
     "instructions_applied",
     "length_scale",
@@ -822,6 +602,16 @@ _STAT_KEYS = (
     "topics_failure",
     "summary_fallback",
     "outline",
+    # A2: pronoun sentences accepted on the run's holder.
+    "attribution_anaphora",
+    # Review step 3: one speaker or a memo — attribution implicit, and the lines it let through.
+    "attribution_implicit",
+    "attribution_implicit_lines",
+    # A1: the holder re-ask and the turn rule.
+    "holders_reasked",
+    "holders_repaired",
+    "holders_from_turn",
+    "holders_unknown",
 )
 
 
@@ -839,7 +629,7 @@ def _recall(rows: list[dict[str, Any]]) -> float | None:
 def cell_rollup(all_runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Per language × family over every run (B2 T1): how often the model path wrote
     the summary and the blocks, and the gate's reasons. Numbers only."""
-    from note_service.domain.meeting_doc import types as _types
+    from note_service.domain import families
 
     cells: dict[str, list[dict[str, Any]]] = {}
     for run in all_runs:
@@ -847,7 +637,7 @@ def cell_rollup(all_runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             if row.get("failed"):
                 continue
             stats = row.get("stats") or {}
-            family = _types.family_for_recording_type(stats.get("recording_type")).meeting_type
+            family = families.family_for_recording_type(stats.get("recording_type")).meeting_type
             cells.setdefault(f"{row.get('language', '?')}/{family}", []).append(row)
     out: dict[str, dict[str, Any]] = {}
     for cell, rows in sorted(cells.items()):
@@ -883,6 +673,12 @@ def cell_rollup(all_runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             ),
             "lines_unsupported": dict(sorted(reasons.items())),
             "block_failures": dict(sorted(failures.items())),
+            # A2: the two drop reasons the run rule targets, and the anaphora it allowed.
+            "attribution_drops": reasons.get("attribution", 0),
+            "hedge_drops": reasons.get("hedge", 0),
+            "attribution_anaphora": sum(
+                (r.get("stats") or {}).get("attribution_anaphora") or 0 for r in rows
+            ),
             "key_fact_recall": _recall(rows),
         }
     return out
@@ -926,6 +722,42 @@ def save_structure(folder: Path, meeting_id: str, sections: list[dict[str, Any]]
     )
 
 
+def save_citations(folder: Path, meeting_id: str, produced: dict[str, Any]) -> None:
+    """Review step 4: what each line cites and each fact's certainty/holder/flags
+    (``<id>.citations.json``), to read a failed global assertion locally. Keys, enum
+    words and holder names only — never a fact's text or quote. Same ``local/`` rule."""
+    folder = folder.resolve()
+    if not folder.is_relative_to(LOCAL.resolve()):
+        raise SystemExit(f"--save-notes must be under {LOCAL}")
+    payload = {
+        "lines": [
+            {
+                "section_key": ln.get("section_key"),
+                "kind": ln.get("kind"),
+                "fact_ids": ln.get("fact_ids") or [],
+                "text": ln.get("text"),
+            }
+            for ln in produced.get("lines") or []
+        ],
+        "facts": [
+            {
+                "item_key": f.get("item_key"),
+                "certainty": f.get("certainty"),
+                "attributed_to": f.get("attributed_to"),
+                "flags": f.get("flags") or [],
+            }
+            for f in produced.get("facts") or []
+        ],
+        "stats": {
+            k: (produced.get("stats") or {}).get(k)
+            for k in ("attribution_implicit", "attribution_implicit_lines")
+        },
+    }
+    (folder / f"{meeting_id}.citations.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+    )
+
+
 async def main(
     arm: str,
     backend_name: str,
@@ -937,28 +769,16 @@ async def main(
     judge_lines: Path | None = None,
     label: str | None = None,
     sq1_baseline: Path | None = None,
-    instructions: Path | None = None,
-    model_params_file: Path | None = None,
-    style: str = "business",
+    allow_stale: bool = False,
 ) -> int:
     sys.path.insert(0, str(ENGINE_SRC))
     from models import ProviderError, build_chat_provider
 
-    profile = None
-    applied = None
-    if instructions is not None:
-        from note_service.domain import note_instructions
-
-        # Validated like a stored profile; the report carries the file name and hash only.
-        profile = note_instructions.WritingProfile.model_validate_json(
-            instructions.read_text("utf-8")
+    if arm not in ARMS:
+        print(
+            f"arm {arm!r} is not available (Sprint P3 adds the stored-notes arm)", file=sys.stderr
         )
-        label = label or instructions.stem
-        applied = {
-            "file": instructions.name,
-            "profile_hash": note_instructions.canonical_hash(profile),
-        }
-
+        return EXIT_NO_CORPUS
     if not corpus.is_dir():
         print(f"corpus not found: {corpus}", file=sys.stderr)
         return EXIT_NO_CORPUS
@@ -986,30 +806,7 @@ async def main(
         except Exception as exc:  # noqa: BLE001 — a judge that cannot start is a null column
             print(f"judge unavailable ({type(exc).__name__}); column will be null")
 
-    # N0: a workspace's model parameters and writing style, capped as the worker caps them.
-    from note_service.domain import model_params as mp
-
-    tuned = model_params_file is not None or style != "business"
-    params = mp.DEFAULT
-    if tuned:
-        params = mp.effective(
-            mp.ModelParams.model_validate_json(model_params_file.read_text("utf-8"))
-            if model_params_file is not None
-            else mp.DEFAULT,
-            context_window=resolved.caps.context_window,
-            max_concurrency=resolved.caps.max_concurrency,
-        )
-        label = label or (model_params_file.stem if model_params_file is not None else style)
-    runner = run_pipeline if arm == "pipeline" else run_single_pass
-    if profile is not None or tuned:
-        if arm != "pipeline":
-            print(
-                "--instructions, --model-params and --style need the pipeline arm", file=sys.stderr
-            )
-            return EXIT_NO_CORPUS
-        runner = functools.partial(
-            run_pipeline, profile=profile, params=params if tuned else None, writing_style=style
-        )
+    runner = run_single_pass
     all_runs: list[dict[str, Any]] = []
     failed = False
     for run_index in range(runs):
@@ -1022,11 +819,6 @@ async def main(
         for meeting in meetings:
             try:
                 produced = await runner(meeting, provider)
-            except EngineBlindError:
-                print("engine saw no transcript", file=sys.stderr)
-                print(f"  {meeting['id']}: 0 windows for a non-empty transcript", file=sys.stderr)
-                await provider.aclose()
-                return EXIT_BLIND
             except ProviderError as exc:
                 failed = True
                 rows.append({"meeting": meeting["id"], "failed": True, "error_kind": str(exc.kind)})
@@ -1034,6 +826,10 @@ async def main(
                 continue
             row = score(meeting, produced, totals)
             audit = score_meeting(meeting, produced)
+            # Review step 4: the five global writer assertions, per meeting, in the report.
+            from notes_assert import global_checks as _global_checks
+
+            audit["global_checks"] = dict(_global_checks(produced))
             row.update(audit)
             row["windows"] = produced["windows"]
             row["lines"] = len(produced["lines"])
@@ -1066,8 +862,6 @@ async def main(
             audit_rows.append(audit)
             if save_notes is not None and run_index == 0:
                 save_note(save_notes, meeting["id"], produced.get("note_text", ""))
-                if arm == "pipeline":
-                    save_structure(save_notes, meeting["id"], produced.get("sections") or [])
             types.append(meeting.get("recording_type") or meeting.get("meeting_type"))
             print(
                 f"  {meeting['id']:<26} {row['seconds']:6.1f}s  windows={row['windows']} "
@@ -1120,30 +914,26 @@ async def main(
     await provider.aclose()
     if judge_provider is not None:
         await judge_provider.aclose()
-    from note_service.domain.meeting_doc import pipeline as _pipeline
-
+    first_build = next(
+        (
+            m["stats"]["build"]
+            for r in all_runs
+            for m in r["meetings"]
+            if m.get("stats", {}).get("build")
+        ),
+        None,
+    )
+    print(f"build: {first_build}")
     report = {
+        "build": first_build,
         "arm": arm,
         "backend": resolved.name,
-        "force_fallbacks": bool(_pipeline.FORCE_FALLBACKS),
         "model_id": resolved.model_id,
         "processor": resolved.processor.model_dump() if resolved.processor else None,
         "judge_model_id": judge_model,
         "corpus": str(corpus.relative_to(REPO)) if corpus.is_relative_to(REPO) else corpus.name,
-        # The profile and context the engine ran under.
-        "small_model_profile": bool(resolved.caps.small_model),
         "context_window": resolved.caps.context_window,
         "label": label,
-        # N2: the writing profile this arm ran under — its file and hash, never its dials.
-        "instructions": applied,
-        # N0: the parameter set and style this arm ran with — a hash and a file name.
-        "model_params": {
-            "hash": mp.canonical_hash(params, style),
-            "file": model_params_file.name if model_params_file is not None else None,
-            "style": style,
-        }
-        if tuned
-        else None,
         "meetings": len(meetings),
         "runs": all_runs,
         # B2 T1: language × family cells over every run.
@@ -1151,36 +941,13 @@ async def main(
         # docs/eval/error-taxonomy.md — which defect each metric measures.
         "metric_codes": {k: list(v) for k, v in METRIC_CODES.items()},
     }
-    if arm == "pipeline":
-        from note_service.domain.meeting_doc.prompts import PROMPT_VERSION
-
-        report["prompt_version"] = PROMPT_VERSION
-        # No copied, chatter or first-person line; recall within a point of the reference report.
-        baseline_recall = None
-        if f2_baseline is not None and f2_baseline.is_file():
-            baseline = json.loads(f2_baseline.read_text("utf-8"))
-            baseline_recall = baseline["runs"][-1]["summary"].get("key_fact_recall")
-        gates = f2_gates(all_runs[-1]["summary"], baseline_recall=baseline_recall)
-        gates.update(f3_gates(all_runs[-1]["summary"]))
-        gates.update(d1_gates(all_runs[-1]["summary"]))
-        gates.update(d2_gates(all_runs[-1]["summary"]))
-        # Unsupported is compared with the baseline report of the same arm.
-        baseline_unsupported = None
-        if sq1_baseline is not None and sq1_baseline.is_file():
-            sq1 = json.loads(sq1_baseline.read_text("utf-8"))
-            baseline_unsupported = sq1["runs"][-1]["summary"].get("unsupported_rate")
-        gates.update(sq3_gates(all_runs[-1]["summary"]))
-        gates.update(
-            sq2_gates(
-                all_runs[-1]["summary"],
-                baseline_unsupported=baseline_unsupported,
-                staging=registry_env() == "staging",
-            )
-        )
-        report["f2_gates"] = gates
-        for name, ok in gates.items():
-            print(f"  F2 gate {name}: {'PASS' if ok else 'FAIL'}")
-    path = write_report(f"notes-{arm}", resolved.name, report, suffix=f"-{label}" if label else "")
+    path = write_report(
+        f"notes-{arm}",
+        resolved.name,
+        report,
+        suffix=f"-{label}" if label else "",
+        allow_stale=allow_stale,
+    )
     print(f"wrote {path}")
     # A hallucinated quote is a failed run, not a lower score.
     hallucinated = any(m.get("hallucinated_quote") for r in all_runs for m in r["meetings"])
@@ -1190,15 +957,10 @@ async def main(
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--backend", required=True)
-    ap.add_argument("--arm", choices=["pipeline", "single_pass"], default="pipeline")
+    ap.add_argument("--arm", choices=list(ARMS), default="single_pass")
     ap.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
     ap.add_argument("--runs", type=int, default=1, help="repeat for variance (the bake-off uses 3)")
     ap.add_argument("--judge", default=None, help="backend for the model-judge column (eval only)")
-    ap.add_argument(
-        "--entity-model-tier",
-        action="store_true",
-        help="let the model respell unknown names (measures model_tier_precision)",
-    )
     ap.add_argument(
         "--save-notes",
         type=Path,
@@ -1225,41 +987,16 @@ if __name__ == "__main__":
         help="SQ1 report of the same arm: SQ2's unsupported gate may not exceed its rate",
     )
     ap.add_argument(
-        "--instructions",
-        type=Path,
-        default=None,
-        help="a WritingProfile JSON (N2): the run writes under it, as a workspace would",
-    )
-    ap.add_argument(
-        "--model-params",
-        type=Path,
-        default=None,
-        help="a ModelParams JSON (N0): the workspace's model parameters for this arm",
-    )
-    ap.add_argument(
-        "--style",
-        choices=["business", "formal", "informal", "academic"],
-        default="business",
-        help="the workspace's writing style (N0)",
-    )
-    ap.add_argument(
         "--label",
         default=None,
         help="suffix for the report file name (the local bake-off writes one report per candidate)",
     )
     ap.add_argument(
-        "--force-fallbacks",
+        "--allow-stale",
         action="store_true",
-        help="B1: every summary rung and block call fails — the fallbacks measured on their own",
+        help="Task 4: write the report although the engine that ran is not this checkout",
     )
     args = ap.parse_args()
-    ENTITY_MODEL_TIER = args.entity_model_tier
-    if args.force_fallbacks:
-        sys.path.insert(0, str(ENGINE_SRC))
-        from note_service.domain.meeting_doc import pipeline as _pipeline
-
-        _pipeline.FORCE_FALLBACKS = True
-        args.label = f"{args.label}-fallbacks" if args.label else "fallbacks"
     sys.exit(
         asyncio.run(
             main(
@@ -1273,9 +1010,7 @@ if __name__ == "__main__":
                 args.judge_lines,
                 args.label,
                 args.sq1_baseline,
-                args.instructions,
-                args.model_params,
-                args.style,
+                allow_stale=args.allow_stale,
             )
         )
     )

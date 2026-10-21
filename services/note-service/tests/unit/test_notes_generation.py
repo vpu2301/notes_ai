@@ -326,6 +326,39 @@ def test_a_line_row_carries_what_it_cites_and_its_labels(
     assert seen == [True, False]  # default: every generation, as before
 
 
+def test_the_corrections_summary_counts_each_respelling_once_per_line(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A3 T3: the transcript's "heard as" marker reads one aggregated list."""
+    from note_service.domain.glossary_repository import name_review_tag
+
+    second = _row(item_key="0000000000000002", text="Jonas Pfeffer again")
+    third = _row(
+        item_key="0000000000000003",
+        corrections=[{"surface": "Quilhaven", "canonical": "Quillhaven", "source": "glossary"}],
+    )
+    seen = _serve_items(rig, monkeypatch, [_row(), second, third])
+
+    async def _rejected(conn, *, note_id):  # noqa: ANN001
+        return set(getattr(rig, "rejected_tags", set()))
+
+    monkeypatch.setattr(rig.module.glossary_repo, "rejected_name_tags", _rejected)
+    got = rig.client.get(f"/v1/notes/{NOTE_ID}/corrections/summary").json()
+    assert seen == [True]
+    assert got == [
+        {
+            "surface": "Jonas Pfefer",
+            "canonical": "Jonas Pfeffer",
+            "source": "candidate",
+            "count": 2,
+        },
+        {"surface": "Quilhaven", "canonical": "Quillhaven", "source": "glossary", "count": 1},
+    ]
+    rig.rejected_tags = {name_review_tag("Jonas Pfefer", "Jonas Pfeffer")}
+    got = rig.client.get(f"/v1/notes/{NOTE_ID}/corrections/summary").json()
+    assert [c["surface"] for c in got] == ["Quilhaven"]
+
+
 def test_a_respelling_the_author_decided_is_not_offered_again(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -362,20 +395,35 @@ def test_an_unknown_date_or_another_workspaces_note_is_not_found(
     assert rig.client.get(f"/v1/notes/{NOTE_ID}/dates/a1b2c3d4e5f60718.ics").status_code == 404
 
 
-def test_the_generation_names_its_style_instructions_and_model_settings(
+def test_the_generation_names_its_template_instructions_and_model_settings(
     rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     stats = {
-        "writing_style": "academic",
+        "template": "public_meeting",
         "instructions": {"scope": "workspace", "version": 1, "profile_hash": "h" * 64},
         "model_params": {"version": 2, "hash": "m" * 64},
     }
     _serve_generation(rig, monkeypatch, _generation_row(stats))
     body = rig.client.get(f"/v1/notes/{NOTE_ID}/generation").json()
-    assert body["writing_style"] == "academic"
+    assert body["template"] == "public_meeting"
     assert body["instructions"] == {"scope": "workspace", "version": 1, "fallback": None}
     assert body["model_settings_version"] == 2
-    # A run from before N0 names none of them.
+    # A run under `auto` with no template named, or from before P2, names none.
+    _serve_generation(rig, monkeypatch, _generation_row({"template": "auto"}))
+    assert rig.client.get(f"/v1/notes/{NOTE_ID}/generation").json()["template"] is None
     _serve_generation(rig, monkeypatch, _generation_row({}))
     old = rig.client.get(f"/v1/notes/{NOTE_ID}/generation").json()
-    assert old["writing_style"] is None and old["instructions"] is None
+    assert old["template"] is None and old["instructions"] is None
+
+
+def test_a_writer_generation_exposes_its_text_and_a_call_count(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1: ``stats.calls`` is a number now (the old path listed calls per stage); the view
+    carries the Markdown the writer stored."""
+    row = _generation_row({"calls": 4, "windows": 3, "words": 812, "template": "auto"})
+    row.text = "# Title\n\n## Overview\n- a point [00:10]"
+    _serve_generation(rig, monkeypatch, row)
+    body = rig.client.get(f"/v1/notes/{NOTE_ID}/generation").json()
+    assert body["text"] == "# Title\n\n## Overview\n- a point [00:10]"
+    assert body["provenance"]["stages"] == [] and body["provenance"]["prompt_calls"] == []

@@ -97,6 +97,8 @@ class RenderInput:
     section_names: dict[str, str] = field(default_factory=dict)
     # B4 — line key → verbatim | paraphrase | composed: the marker after a written line.
     line_marks: dict[str, str] = field(default_factory=dict)
+    # P3 — line key → start_ms of the turn it cites: printed as ``[mm:ss]`` after the line.
+    line_times: dict[str, int] = field(default_factory=dict)
 
 
 def _clamp(s: str | None, limit: int = MAX_FIELD_LENGTH) -> str:
@@ -156,6 +158,7 @@ def build_render_input(
     template_code: str | None = None,
     internal_keys: frozenset[str] = frozenset(),
     line_marks: dict[str, str] | None = None,
+    line_times: dict[str, int] | None = None,
 ) -> RenderInput:
     """``variant="full"`` is the author's PDF (every section); ``variant="client"``
     renders the CLIENT DOCUMENT (allow-list by role, no `user_notes`, transcript or
@@ -166,7 +169,7 @@ def build_render_input(
 
     if variant == "client":
         from . import client_view
-        from .meeting_doc import types as meeting_types
+        from . import families as meeting_types
 
         document = client_view.build(
             content,
@@ -187,6 +190,7 @@ def build_render_input(
             sections=[{"section_key": s.section_key, "text": s.text} for s in document.sections],
             section_names={s.section_key: s.name for s in document.sections},
             line_marks=dict(line_marks or {}),
+            line_times=dict(line_times or {}),
         )
 
     # Empty for drafts; the template falls back to the last-updated stamp.
@@ -212,7 +216,15 @@ def build_render_input(
         updated_at=note.updated_at.isoformat() if note.updated_at else "",
         section_names=names,
         line_marks=dict(line_marks or {}),
+        line_times=dict(line_times or {}),
     )
+
+
+def mmss(ms: int) -> str:
+    total = max(0, int(ms)) // 1000
+    hours, rest = divmod(total, 3600)
+    minutes, seconds = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes:02d}:{seconds:02d}"
 
 
 # B4 — the marker's words, in the note's language (the font has no glyph for every mark).
@@ -223,8 +235,12 @@ PROVENANCE_MARKS: dict[str, dict[str, str]] = {
 }
 
 
-def _line_marker(marks: dict[str, str], language: str) -> Callable[[str], str] | None:
-    if not marks:
+def _line_marker(
+    marks: dict[str, str], language: str, times: dict[str, int] | None = None
+) -> Callable[[str], str] | None:
+    """After a written line: its provenance words (B4) and the ``[mm:ss]`` it cites (P3)."""
+    times = times or {}
+    if not marks and not times:
         return None
     from . import lines as line_rules
 
@@ -234,7 +250,11 @@ def _line_marker(marks: dict[str, str], language: str) -> Callable[[str], str] |
         content = line_rules.strip_marker(raw)[1]
         if not content:
             return ""
-        return words.get(marks.get(line_rules.key_of(content), ""), "")
+        key = line_rules.key_of(content)
+        parts = [words.get(marks.get(key, ""), "")]
+        if key in times:
+            parts.append(f"[{mmss(times[key])}]")
+        return " ".join(p for p in parts if p)
 
     return mark
 
@@ -251,6 +271,7 @@ def render_note_pdf(
     template_code: str | None = None,
     internal_keys: frozenset[str] = frozenset(),
     line_marks: dict[str, str] | None = None,
+    line_times: dict[str, int] | None = None,
 ) -> bytes:
     """Render the PDF bytes for a note version.
 
@@ -270,6 +291,7 @@ def render_note_pdf(
         template_code=template_code,
         internal_keys=internal_keys,
         line_marks=line_marks,
+        line_times=line_times,
     )
     return _render(payload)
 
@@ -293,7 +315,10 @@ def _prepare_sections(payload: RenderInput) -> list[dict[str, str]]:
             {
                 "name": _clamp(name),
                 "html": render_rich_text(
-                    text, line_mark=_line_marker(payload.line_marks, payload.language)
+                    text,
+                    line_mark=_line_marker(
+                        payload.line_marks, payload.language, payload.line_times
+                    ),
                 ),
             }
         )

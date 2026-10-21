@@ -11,33 +11,30 @@ import asyncio
 import contextlib
 import logging
 import signal
-from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
-from db import tenant_connection
 from jobs import CostTable, HandlerSpec, JobContext, JobQueue, JobRunner, UsageLedger
 from models import Registry, build_chat_provider
 from observability import bootstrap
 
 from .collaboration_metrics import rehome_total
 from .config import settings
-from .domain import experiments
 from .domain.note_move import REHOME_JOB_KIND
-from .jobs import recompile_instructions
-from .jobs.evaluate_note import EvaluationDeps, handle_evaluate
 from .jobs.generate_note import GenerationDeps, handle_generate, mark_dead
 from .jobs.rehome_media import handle_rehome, mark_failed
 
 logger = logging.getLogger(__name__)
 
 JOB_KIND = "note.generate"
-# The lease must outlive a merely slow window, or the job is re-delivered while it runs.
+# The lease must outlive a merely slow call, or the job is re-delivered while it runs.
 LEASE_SECONDS = 120
 # Cold start on a backend that scales from zero; the runner decides between waiting and failing.
 COLD_START_SECONDS = 180
 # Mostly waiting on the model; the provider's `max_concurrency` is the real cap.
 BATCH = 2
+# The one chat operation a generation makes.
+WRITE_OPERATION = "write"
 
 
 class _Providers:
@@ -48,7 +45,6 @@ class _Providers:
         # The process's one registry, built and probed by `build_state()`.
         self._registry: Registry | None = registry
         self._cache: dict[str, Any] = {}
-        self._shadow_cache: dict[str, Any] = {}
         # Called synchronously by the registry, so it answers from a cache `warm()` fills per job.
         self._settings = settings_source
 
@@ -60,72 +56,29 @@ class _Providers:
             self._registry = load_registry(self._settings)
         return self._registry
 
-    def _resolve(self, workspace_id: str, operation: str = "summarize") -> Any:
-        return self._load().resolve(workspace_id, operation)
-
-    async def shadow(self, workspace_id: str) -> Any:
-        """The candidate backend for this workspace, or None: a workspace only shadows
-        onto a processor its admin has acknowledged (real meetings on other hardware)."""
-        name = settings.note_generation_shadow_backend
-        if not name:
-            return None
-        try:
-            self._resolve(workspace_id)  # ensures the registry is loaded
-            assert self._registry is not None  # noqa: S101 — just loaded above
-            resolved = self._registry.backend(name, expect_kind="chat")
-        except Exception:  # noqa: BLE001
-            logger.warning("note_worker.shadow_backend_unknown", extra={"backend": name})
-            return None
-
-        processor = resolved.processor
-        if processor is not None and self._settings is not None:
-            agreed = self._settings.acknowledged(UUID(workspace_id))
-            if (
-                processor.name.strip().casefold(),
-                processor.region.strip().casefold(),
-            ) not in agreed:
-                return None
-
-        provider = self._shadow_cache.get(resolved.name)
-        if provider is None:
-            provider = build_chat_provider(resolved)
-            # The metric labels the run by backend.
-            with contextlib.suppress(AttributeError):
-                provider.backend_name = resolved.name
-            self._shadow_cache[resolved.name] = provider
-            logger.info("note_worker.shadow_provider_ready", extra=resolved.log_fields())
-        return provider
+    def _resolve(self, workspace_id: str) -> Any:
+        return self._load().resolve(workspace_id, WRITE_OPERATION)
 
     async def warm(self, tenant_id: UUID) -> None:
         """Read this workspace's settings before anything resolves (probe hook, before the handler)."""
         if self._settings is not None:
             await self._settings.refresh(tenant_id)
 
-    async def get(self, workspace_id: str, operation: str = "summarize") -> Any:
-        """The provider for one operation; one instance per backend name."""
-        resolved = self._resolve(workspace_id, operation)
+    async def get(self, workspace_id: str) -> Any:
+        """The workspace's writer; one instance per backend name."""
+        resolved = self._resolve(workspace_id)
         provider = self._cache.get(resolved.name)
         if provider is None:
             provider = build_chat_provider(resolved)
+            # The metric labels the run by backend.
+            with contextlib.suppress(AttributeError):
+                provider.backend_name = resolved.name
             self._cache[resolved.name] = provider
-            logger.info(
-                "note_worker.provider_ready",
-                extra={"operation": operation, **resolved.log_fields()},
-            )
-        return provider
-
-    async def named(self, name: str) -> Any:
-        """A registered chat backend by name (an experiment's pinned binding); the
-        registry enforces env, enabled and credentials exactly as for routing."""
-        resolved = self._load().backend(name, expect_kind="chat")
-        provider = self._cache.get(resolved.name)
-        if provider is None:
-            provider = build_chat_provider(resolved)
-            self._cache[resolved.name] = provider
+            logger.info("note_worker.provider_ready", extra=resolved.log_fields())
         return provider
 
     def fallbacks(self) -> list[dict[str, Any]]:
-        """Env overrides this process resolved to their fallback, and why (F1-01 provenance)."""
+        """Env overrides this process resolved to their fallback, and why (provenance)."""
         return [o.log_fields() for o in self._load().active_overrides() if o.is_fallback]
 
     def backend_of(self, workspace_id: str) -> tuple[str, int]:
@@ -135,13 +88,12 @@ class _Providers:
         await (await self.get(workspace_id)).probe()
 
     async def aclose(self) -> None:
-        for provider in (*self._cache.values(), *self._shadow_cache.values()):
+        for provider in self._cache.values():
             try:
                 await provider.aclose()
             except Exception:  # noqa: BLE001 — shutdown must not raise
                 logger.debug("note_worker.provider_close_failed", exc_info=True)
         self._cache.clear()
-        self._shadow_cache.clear()
 
 
 async def run() -> None:
@@ -168,26 +120,14 @@ async def run() -> None:
         app_pool=app_pool,
         transcripts_store=transcripts,
         provider_for=providers.get,
-        # classify/title/entities resolve on their own routing row.
-        operation_provider_for=providers.get,
-        shadow_provider_for=providers.shadow,
-        entity_model_tier=settings.note_entity_model_tier,
-        multilingual_evidence=settings.note_multilingual_evidence,
-        fidelity=settings.note_fidelity,
-        provider_named=providers.named,
         build_sha=settings.build_sha,
         fallbacks=providers.fallbacks,
         note_instructions=settings.note_instructions_enabled,
+        check_enabled=settings.note_check_enabled,
         # N0: the row the probe hook refreshed before this run (style, model parameters).
         settings_row=state.workspace_model_settings.row
         if state.workspace_model_settings is not None
         else None,
-        coverage_retry_budget_s_per_hour=settings.note_coverage_retry_budget_s_per_hour,
-        shadow_percent=(
-            settings.note_generation_shadow_percent
-            if settings.note_generation_shadow_backend
-            else 0
-        ),
     )
 
     async def _run(ctx: JobContext) -> dict[str, Any] | None:
@@ -237,51 +177,12 @@ async def run() -> None:
             error_kind=error_kind,
         )
 
-    # S3: experiments run the same pipeline into their own tables, never a note.
-    evaluation = EvaluationDeps(
-        app_pool=app_pool,
-        transcripts_store=transcripts,
-        provider_for=providers.get,
-        provider_named=providers.named,
-        costs=CostTable.load(settings.models_config),
-        fallbacks=providers.fallbacks,
-    )
-
-    async def _evaluate(ctx: JobContext) -> dict[str, Any] | None:
-        return await handle_evaluate(
-            evaluation, tenant_id=UUID(str(ctx.job.tenant_id)), payload=dict(ctx.job.payload)
-        )
-
-    async def _evaluate_dead(ctx: JobContext, error_kind: str) -> None:
-        async with tenant_connection(app_pool, UUID(str(ctx.job.tenant_id))) as conn:
-            await experiments.set_state(
-                conn,
-                experiment_id=UUID(str(ctx.job.payload["experiment_id"])),
-                state="failed",
-                error_kind=error_kind,
-                only_from=experiments.ACTIVE,
-            )
-
-    # N4: the meeting-type note instructions, recompiled after the workspace text changed.
-    async def _compiler_for(tenant_id: UUID) -> Any:
-        return await state.note_instructions_compiler.for_workspace(str(tenant_id))
-
-    recompile_deps = SimpleNamespace(app_pool=app_pool, compiler_for=_compiler_for)
-
-    async def _recompile(ctx: JobContext) -> dict[str, Any] | None:
-        return await recompile_instructions.handle_recompile(
-            recompile_deps, tenant_id=UUID(str(ctx.job.tenant_id)), payload=dict(ctx.job.payload)
-        )
-
     queue = JobQueue(jobs_pool)
     runner = JobRunner(
         queue,
         {
             JOB_KIND: HandlerSpec(run=_run, backend=_backend, probe=_probe, on_dead=_on_dead),
             REHOME_JOB_KIND: HandlerSpec(run=_rehome, on_dead=_rehome_dead),
-            experiments.JOB_KIND: HandlerSpec(run=_evaluate, on_dead=_evaluate_dead),
-            # A dead recompile leaves the rows stale: the worker writes with the workspace text.
-            recompile_instructions.JOB_KIND: HandlerSpec(run=_recompile),
         },
         worker_id=settings.registry_environ().get("HOSTNAME") or "note-worker",
         ledger=UsageLedger(CostTable.load(settings.models_config)),

@@ -64,6 +64,18 @@
   "must_not_contain": [
    "Quillhaven",
    "Ferrytale"
+  ],
+  "certainties": [
+   {
+    "match": "rent increase of about eight percent",
+    "certainty": "estimate",
+    "holder": "the landlord"
+   },
+   {
+    "match": "deliver the new shelving units",
+    "certainty": "statement",
+    "holder": "the supplier"
+   }
   ]
  }
 }

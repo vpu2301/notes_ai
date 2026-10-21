@@ -763,7 +763,7 @@ def test_an_article_only_variant_is_never_learned_but_the_term_may_be_saved(
 
 
 def test_a_genuine_misspelling_is_learned() -> None:
-    from note_service.domain.meeting_doc import entities
+    from note_service.domain import entities
 
     assert entities.is_correction("Fabian Reinbolt", "Fabian Reinbold")
     assert not entities.is_correction("Die Behauptung", "Behauptung")

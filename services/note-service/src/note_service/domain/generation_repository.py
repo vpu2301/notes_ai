@@ -14,8 +14,6 @@ from uuid import UUID
 
 import asyncpg
 
-from .meeting_doc.verify import VerifiedFact
-
 QUEUED: Final = "queued"
 RUNNING: Final = "running"
 PARTIAL: Final = "partial"
@@ -49,13 +47,15 @@ class GenerationRow:
     finished_at: datetime | None
     """What this generation runs with, pinned at enqueue (S3); None for older rows."""
     config_snapshot: dict[str, Any] | None = None
+    """P1 — the note as the writer wrote it (Markdown); NULL for the removed path's runs."""
+    text: str | None = None
 
 
 _COLUMNS: Final = (
     "id, note_id, job_id, requested_by, reason, status, step, windows_total, "
     "windows_done, windows_failed, failed_ranges, prompt_version, backend, "
     "model_id, transcript_rev, snapshot_key, stats, error_kind, created_at, finished_at, "
-    "config_snapshot"
+    "config_snapshot, text"
 )
 
 
@@ -88,6 +88,7 @@ def _row(record: asyncpg.Record) -> GenerationRow:
         created_at=record["created_at"],
         finished_at=record["finished_at"],
         config_snapshot=_loads(record["config_snapshot"], None),
+        text=record["text"],
     )
 
 
@@ -178,9 +179,11 @@ async def mark(
     model_id: str | None = None,
     stats: dict[str, Any] | None = None,
     error_kind: str | None = None,
+    text: str | None = None,
     finished: bool = False,
 ) -> None:
-    """Update whatever was passed; leave the rest alone."""
+    """Update whatever was passed; leave the rest alone. ``text`` is the note the run
+    wrote (Markdown, Sprint P1; column from migration 0088)."""
     sets: list[str] = []
     args: list[Any] = []
 
@@ -208,6 +211,8 @@ async def mark(
         add("stats", json.dumps(stats), "::jsonb")
     if error_kind is not None:
         add("error_kind", error_kind)
+    if text is not None:
+        add("text", text)
     if finished:
         sets.append("finished_at = now()")
     if not sets:
@@ -230,58 +235,6 @@ async def supersede_previous(conn: asyncpg.Connection, *, note_id: UUID, keep: U
     )
 
 
-async def put_items(
-    conn: asyncpg.Connection,
-    *,
-    tenant_id: UUID,
-    note_id: UUID,
-    generation_id: UUID,
-    facts: list[tuple[VerifiedFact, str, str]],
-    audience_of: Any = None,
-) -> int:
-    """``[(fact, section_key, placement)]`` → rows; idempotent on ``(note_id, generation_id, item_key)``."""
-    if not facts:
-        return 0
-    written = 0
-    for fact, section_key, placement in facts:
-        result = await conn.execute(
-            """
-            INSERT INTO note_generated_items (
-                tenant_id, note_id, generation_id, item_key, kind, section_key,
-                text, owner_label, due_text, due_date, explicit, confidence,
-                flags, quote, start_ms, end_ms, speaker_label, speaker_name,
-                placement, audience
-            )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::text[],$14,$15,$16,$17,$18,$19,$20)
-            ON CONFLICT (note_id, generation_id, item_key) DO NOTHING
-            """,
-            tenant_id,
-            note_id,
-            generation_id,
-            fact.item_key,
-            fact.kind,
-            section_key,
-            fact.text,
-            fact.owner_label,
-            fact.due_text,
-            fact.due_date,
-            fact.explicit,
-            fact.confidence,
-            fact.flags,
-            fact.quote,
-            fact.start_ms,
-            fact.end_ms,
-            fact.speaker_label,
-            fact.speaker_name,
-            placement,
-            # Internal-by-kind never leaves the workspace, whatever the note's sharing says.
-            audience_of(fact) if audience_of else "all",
-        )
-        if result.endswith(" 1"):
-            written += 1
-    return written
-
-
 async def put_lines(
     conn: asyncpg.Connection,
     *,
@@ -291,7 +244,8 @@ async def put_lines(
     rows: list[dict[str, Any]],
 ) -> int:
     """One row per written LINE: text, kind, citations, evidence of the first cited
-    fact. Idempotent like ``put_items``; ``corrections`` and ``mentions`` are JSON lists."""
+    fact. Idempotent on ``(note_id, generation_id, item_key)``; ``corrections`` and
+    ``mentions`` are JSON lists."""
     written = 0
     for row in rows:
         result = await conn.execute(
@@ -301,10 +255,11 @@ async def put_lines(
                 text, owner_label, due_text, due_date, explicit, confidence,
                 flags, quote, start_ms, end_ms, speaker_label, speaker_name,
                 placement, audience, cites, certainty, attributed_to, corrections, mentions,
-                parent_key, payload, provenance
+                parent_key, payload, provenance, position, table_row, cite_nearest
             )
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::text[],$14,$15,$16,$17,$18,
-                    $19,$20,$21::text[],$22,$23,$24::jsonb,$25::jsonb,$26,$27::jsonb,$28)
+                    $19,$20,$21::text[],$22,$23,$24::jsonb,$25::jsonb,$26,$27::jsonb,$28,
+                    $29,$30::jsonb,$31)
             ON CONFLICT (note_id, generation_id, item_key) DO NOTHING
             """,
             tenant_id,
@@ -335,10 +290,34 @@ async def put_lines(
             row.get("parent_key"),
             json.dumps(row["payload"]) if row.get("payload") else None,
             row.get("provenance"),
+            int(row.get("position") or 0),
+            json.dumps(row["table_row"]) if row.get("table_row") else None,
+            bool(row.get("cite_nearest", False)),
         )
         if result.endswith(" 1"):
             written += 1
     return written
+
+
+async def replace_lines(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    note_id: UUID,
+    generation_id: UUID,
+    rows: list[dict[str, Any]],
+) -> int:
+    """This generation's rows, replaced in one transaction (P1: the items are the parse of
+    the stored text, never a merge with an earlier attempt's)."""
+    async with conn.transaction():
+        await conn.execute(
+            "DELETE FROM note_generated_items WHERE note_id = $1 AND generation_id = $2",
+            note_id,
+            generation_id,
+        )
+        return await put_lines(
+            conn, tenant_id=tenant_id, note_id=note_id, generation_id=generation_id, rows=rows
+        )
 
 
 async def items_for_note(
@@ -357,10 +336,10 @@ async def items_for_note(
                explicit, confidence, flags, quote, start_ms, end_ms,
                speaker_label, speaker_name, placement, audience,
                cites, certainty, attributed_to, corrections, mentions, parent_key, payload,
-               provenance
+               provenance, position, table_row, cite_nearest, "check", check_reason
         FROM note_generated_items
         WHERE note_id = $1 AND placement IN ('written', 'suggested', 'evidence') {current}
-        ORDER BY start_ms
+        ORDER BY position, start_ms
         """,
         note_id,
     )
@@ -437,6 +416,51 @@ async def stale_snapshots(
         limit,
     )
     return [(r["id"], r["snapshot_key"]) for r in rows]
+
+
+async def set_checks(
+    conn: asyncpg.Connection, *, generation_id: UUID, unsupported: dict[str, str]
+) -> int:
+    """P3 — every cited row of the generation becomes ``ok``, the named ones
+    ``unsupported`` with the model's reason. Text untouched. Returns the rows marked."""
+    marked = await conn.fetchval(
+        """
+        WITH done AS (
+            UPDATE note_generated_items SET "check" = 'ok', check_reason = NULL
+            WHERE generation_id = $1 AND cardinality(cites) > 0
+            RETURNING 1
+        ) SELECT count(*) FROM done
+        """,
+        generation_id,
+    )
+    for key, reason in unsupported.items():
+        await conn.execute(
+            """
+            UPDATE note_generated_items SET "check" = 'unsupported', check_reason = $3
+            WHERE generation_id = $1 AND item_key = $2
+            """,
+            generation_id,
+            key,
+            reason[:200] or None,
+        )
+    return int(marked or 0)
+
+
+async def line_times(conn: asyncpg.Connection, *, note_id: UUID) -> dict[str, int]:
+    """P3 — ``{item_key: start_ms}`` of the current generation's cited lines, for the
+    ``[mm:ss]`` the PDF and the shared page print after a bullet. Keys and numbers only."""
+    rows = await conn.fetch(
+        """
+        SELECT item_key, start_ms FROM note_generated_items
+        WHERE note_id = $1 AND placement = 'written' AND cardinality(cites) > 0
+          AND generation_id = (
+            SELECT id FROM note_generations WHERE note_id = $1
+            ORDER BY created_at DESC LIMIT 1
+          )
+        """,
+        note_id,
+    )
+    return {str(r["item_key"]): int(r["start_ms"]) for r in rows}
 
 
 async def line_marks(conn: asyncpg.Connection, *, note_id: UUID) -> dict[str, str]:

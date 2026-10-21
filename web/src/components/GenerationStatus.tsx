@@ -19,8 +19,6 @@ const REASONS: Record<string, string> = {
   no_snapshot: "The recording could not be read when the note was written.",
   snapshot_unreadable: "The recording could not be read when the note was written.",
   model_unavailable: "The model was unavailable. Try writing the note again.",
-  profile_incompatible:
-    "The workspace's AI notes settings are out of date, so this note was not written. An admin can fix it in Settings › AI notes.",
 };
 
 /**
@@ -143,17 +141,13 @@ export function GenerationStatus({
   }
 
   const details = <RunDetails provenance={view.provenance} />;
-  // What wrote it (N0, N2, N4): the style when not the default, the note instructions and
-  // the model settings — one sentence, one link to Settings › Note writing.
+  // What wrote it: the note instructions and the model settings — one sentence, one link
+  // to Settings › Note writing. The template is the header's pill.
   const version = view.instructions?.version;
   const settingsVersion = view.model_settings_version ?? 0;
   const which = instructionsWording(view.instructions?.scope);
-  const style =
-    view.writing_style && view.writing_style !== "business"
-      ? view.writing_style[0]!.toUpperCase() + view.writing_style.slice(1)
-      : null;
-  // The link sits on the most specific part: instructions, else settings, else the style.
-  const linkOn = version && which !== null ? "instructions" : settingsVersion > 0 ? "settings" : "style";
+  // The link sits on the most specific part: instructions, else settings.
+  const linkOn = version && which !== null ? "instructions" : "settings";
   const link = (part: string, label: string) =>
     linkOn === part ? <Link to="/settings/writing">{label}</Link> : label;
   const parts: ReactNode[] = [];
@@ -176,27 +170,15 @@ export function GenerationStatus({
     parts.push(<Fragment key="m">model settings {link("settings", `v${settingsVersion}`)}</Fragment>);
   }
   const written = (capital: boolean): ReactNode =>
-    style || parts.length ? (
+    parts.length ? (
       <>
-        {capital ? "Written" : "written"}{" "}
-        {style ? (
-          <>
-            in {link("style", style)} style
-            {parts.map((p, n) => (
-              <Fragment key={n}> · {p}</Fragment>
-            ))}
-          </>
-        ) : (
-          <>
-            with{" "}
-            {parts.map((p, n) => (
-              <Fragment key={n}>
-                {n > 0 && " · "}
-                {p}
-              </Fragment>
-            ))}
-          </>
-        )}
+        {capital ? "Written" : "written"} with{" "}
+        {parts.map((p, n) => (
+          <Fragment key={n}>
+            {n > 0 && " · "}
+            {p}
+          </Fragment>
+        ))}
       </>
     ) : null;
   const instructed = written(false);

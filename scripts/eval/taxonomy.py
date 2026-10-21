@@ -75,6 +75,8 @@ CHECK_CODES: Final[dict[str, tuple[str, ...]]] = {
     "overview": ("D-ORIENT",),
     "headings_must_not_match": ("D-HEAD",),
     "claims_row": ("F-ATTR", "F-DIST"),
+    # A2: the writer contract, checked on every fixture.
+    "global": ("F-ATTR", "D-ORIENT"),
     "framing_must_not_contain": ("F-NUM", "D-ORIENT"),
     # "lint": {"D-STRUCT": 0} — one check per code, named lint[D-STRUCT];
     # its code is the one in brackets.
@@ -101,6 +103,13 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
     "attribution_rate": ("F-ATTR",),
     "lines_cited": ("D-REF",),
     "claims_recall": ("F-ATTR", "F-COV"),
+    # A1: certainty and holder at extraction.
+    "certainty_accuracy": ("F-DIST",),
+    "certainty_labels_found": ("F-COV",),
+    "holder_accuracy": ("F-ATTR",),
+    "holder_presence": ("F-ATTR",),
+    "holders_from_turn": ("F-ATTR",),
+    "holders_unknown": ("F-ATTR",),
     # B4: how much of a note is the speaker's words, one fact, or composed — what a reader
     # can tell "said" from "composed" by.
     "provenance_share": ("D-REF",),
@@ -120,7 +129,7 @@ METRIC_CODES: Final[dict[str, tuple[str, ...]]] = {
     "unspecific_bullet_rate": ("D-SPEC",),
     "words_per_minute": ("D-VOL",),
     "headings_per_10_min": ("D-STRUCT",),
-    # Document-standard lint (meeting_doc/doclint.py)
+    # Document-standard lint (the old path's linter; kept for stored reports)
     "lint_findings": (
         "D-ORIENT",
         "D-STRUCT",

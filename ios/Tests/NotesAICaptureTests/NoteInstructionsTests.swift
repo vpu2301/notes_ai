@@ -22,11 +22,26 @@ final class NoteInstructionsTests: XCTestCase {
     func testTheStoredInstructionsDecode() throws {
         let i = try JSONDecoder().decode(AIInstructions.self, from: Data(stored.utf8))
         XCTAssertEqual(i.version, 3)
-        XCTAssertEqual(i.understood.count, 2)
-        XCTAssertEqual(i.guidance, ["Write for a reader who has thirty seconds."])
-        XCTAssertEqual(i.notApplied.first?.message, "Notes are written in the language spoken in the meeting.")
+        XCTAssertTrue(i.text.hasPrefix("# Length"))
         XCTAssertFalse(i.canEdit)
-        XCTAssertEqual(i.compileStatus, "compiled")
+        XCTAssertEqual(i.maxChars, 8000)
+    }
+
+    /// P2a: `source` says whether the text is the default rules or the workspace's own;
+    /// a server without it (older) leaves it nil, which is not "default".
+    func testTheSourceDecodes() throws {
+        let i = try JSONDecoder().decode(AIInstructions.self, from: Data("""
+        {"scope": "workspace", "version": 0, "text": "Write what was said.", "profile": {},
+         "profile_hash": "e3", "compile_status": "compiled", "compile_error_kind": null,
+         "understood": [], "guidance": [], "not_applied": [], "can_edit": true,
+         "max_chars": 12000, "updated_at": null, "updated_by": null,
+         "source": "default", "default_text": "Write what was said."}
+        """.utf8))
+        XCTAssertEqual(i.source, "default")
+        XCTAssertTrue(i.isDefault)
+        let old = try JSONDecoder().decode(AIInstructions.self, from: Data(stored.utf8))
+        XCTAssertNil(old.source)
+        XCTAssertFalse(old.isDefault)
     }
 
     func testNoInstructionsDecode() throws {
@@ -80,22 +95,6 @@ final class NoteInstructionsTests: XCTestCase {
         XCTAssertEqual(i.baseVersions, ["workspace": 3, "client": 1])
         XCTAssertEqual(i.extends, InstructionsRef(scope: "client", version: 1))
         XCTAssertEqual(i.maxChars, 8000)
-        XCTAssertNil(i.alsoSetFor)
-    }
-
-    func testTheWorkspaceNamesTheMeetingTypesWithTheirOwnText() throws {
-        let i = try JSONDecoder().decode(AIInstructions.self, from: Data("""
-        {"scope": "workspace", "version": 3, "text": "Short.", "profile": {}, "profile_hash": "ab",
-         "compile_status": "compiled", "compile_error_kind": null, "understood": [], "guidance": [],
-         "not_applied": [], "can_edit": false, "max_chars": 8000, "updated_at": null, "updated_by": null,
-         "base_versions": {}, "extends": null, "stale": false,
-         "scopes": [{"scope": "workspace", "version": 3, "stale": false},
-                    {"scope": "client", "version": 1, "stale": false},
-                    {"scope": "sales", "version": 2, "stale": true}]}
-        """.utf8))
-        XCTAssertEqual(i.scopes?.last, AIInstructions.ScopeState(scope: "sales", version: 2, stale: true))
-        XCTAssertNil(i.extends)
-        XCTAssertEqual(i.alsoSetFor, "Client calls, Sales calls")
     }
 
     func testTheStatusLineNamesTheScope() throws {
@@ -121,24 +120,22 @@ final class NoteInstructionsTests: XCTestCase {
     }
 }
 
-/// N0 — the writing style and the model settings, read-only on this platform.
+/// The model settings, read-only on this platform (P2: only what the writer reads).
 final class ModelSettingsDecodingTests: XCTestCase {
-    func testTheSettingsCarryStyleVersionAndEffectiveParameters() throws {
+    func testTheSettingsCarryTheVersionAndEffectiveParameters() throws {
         let json = """
         {"provider": "platform", "tier": "standard", "generation_enabled": true,
          "effective_provider": "platform", "effective_tier": "standard", "processors": [],
          "needs_acknowledgement": [], "month_to_date_cents": 0, "budget_cents": 2000,
-         "may_choose_premium": true, "can_edit": false, "writing_style": "academic",
+         "may_choose_premium": true, "can_edit": false,
          "model_params_version": 2,
-         "model_params_effective": {"temperature": 0.4, "context_window_tokens": 32768,
-           "max_output_tokens": null, "max_concurrency": 2, "facts_per_window": 24,
-           "retries": "standard", "ask_temperature": 0.2, "ask_max_tokens": 700}}
+         "model_params_effective": {"temperature": 0.4, "max_output_tokens": null,
+           "max_concurrency": 2, "ask_temperature": 0.2, "ask_max_tokens": 700}}
         """
         let s = try JSONDecoder().decode(AISettings.self, from: Data(json.utf8))
-        XCTAssertEqual(s.writingStyle, "academic")
         XCTAssertEqual(s.modelParamsVersion, 2)
         XCTAssertEqual(s.modelParamsEffective?.temperature, 0.4)
-        XCTAssertEqual(s.modelParamsEffective?.contextWindowTokens, 32768)
+        XCTAssertNil(s.modelParamsEffective?.maxOutputTokens)
         XCTAssertEqual(s.modelParamsEffective?.maxConcurrency, 2)
     }
 
@@ -150,7 +147,7 @@ final class ModelSettingsDecodingTests: XCTestCase {
          "may_choose_premium": true, "can_edit": false}
         """
         let s = try JSONDecoder().decode(AISettings.self, from: Data(json.utf8))
-        XCTAssertNil(s.writingStyle)
+        XCTAssertNil(s.modelParamsVersion)
         XCTAssertNil(s.modelParamsEffective)
     }
 

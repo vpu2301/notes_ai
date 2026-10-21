@@ -826,6 +826,13 @@ actor APIClient {
         return try decode([GeneratedItem].self, from: data)
     }
 
+    /// A3 — the respellings the current generation applied (the transcript's "heard as" marker).
+    func correctionsSummary(noteId: String) async throws -> [NoteCorrection] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/corrections/summary",
+                                  method: "GET", authorized: true)
+        return try decode([NoteCorrection].self, from: data)
+    }
+
     /// Accept or reject a name the engine respelled.
     @discardableResult
     func correctName(noteId: String, itemKey: String, request: NameCorrectionRequest) async throws -> CorrectionResponse {
@@ -841,6 +848,7 @@ actor APIClient {
     /// Must never block or stop a recording. `bearer`: a borrowed token, for a note typed in another workspace.
     func startMeeting(clientCaptureId: String, title: String, startedAt: Date,
                       language: String?, meetingType: MeetingType,
+                      template: NoteTemplate = .auto,
                       calendar: MeetingCalendarContext?,
                       bearer: String? = nil) async throws -> StartMeetingResponse {
         let request = StartMeetingRequest(
@@ -849,6 +857,7 @@ actor APIClient {
             startedAt: ISO8601DateFormatter().string(from: startedAt),
             language: language,
             meetingType: meetingType.rawValue,
+            template: template == .auto ? nil : template.rawValue,
             calendar: calendar)
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/meeting", method: "POST",
                                   jsonBody: try JSONEncoder().encode(request), authorized: true,
@@ -933,6 +942,13 @@ actor APIClient {
     // MARK: - Model tiers and processors (Sprint 37)
 
     /// Who processes this workspace's meetings. Every member may read it.
+    /// P2 — the writer's templates in one language, built-in or the workspace's own.
+    func aiTemplates(language: String) async throws -> [WorkspaceTemplate] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/ai/templates", method: "GET",
+                                  query: [("language", language)], authorized: true)
+        return try decode([WorkspaceTemplate].self, from: data)
+    }
+
     func aiSettings() async throws -> AISettings {
         let data = try await send(base: \.noteBaseURL, path: "/v1/ai/settings", method: "GET",
                                   authorized: true)
@@ -973,14 +989,6 @@ actor APIClient {
         return try decode(AIInstructions.self, from: data)
     }
 
-    /// What saving `text` would do; nothing is written.
-    func previewNoteInstructions(noteId: String, text: String) async throws -> AIInstructions {
-        let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/instructions/preview",
-                                  method: "POST", jsonBody: try JSONEncoder().encode(["text": text]),
-                                  authorized: true)
-        return try decode(AIInstructions.self, from: data)
-    }
-
     func deleteNoteInstructions(noteId: String) async throws {
         _ = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/instructions",
                            method: "DELETE", authorized: true)
@@ -999,9 +1007,11 @@ actor APIClient {
 
     /// *Generate Summary*. 409 with a code (off, over budget, already running); 429 after ten runs a day.
     @discardableResult
-    func regenerate(noteId: String) async throws -> GenerationStarted {
+    func regenerate(noteId: String, template: NoteTemplate? = nil) async throws -> GenerationStarted {
+        let body: [String: String] = template.map { ["template": $0.rawValue] } ?? [:]
         let data = try await send(base: \.noteBaseURL, path: "/v1/notes/\(noteId)/generation",
-                                  method: "POST", authorized: true)
+                                  method: "POST", jsonBody: try JSONEncoder().encode(body),
+                                  authorized: true)
         return try decode(GenerationStarted.self, from: data)
     }
 

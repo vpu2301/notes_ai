@@ -229,6 +229,7 @@ async def create_note(
             co_author_ids=body.co_author_ids,
             template_id=body.content.template_id,
             template_schema_version=body.content.template_schema_version,
+            template_source="user",
             source_session_id=body.source_session_id,
             content=body.content,
             visibility=body.visibility

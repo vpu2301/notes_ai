@@ -857,7 +857,8 @@
               "no_speech",
               "loop",
               "low_confidence_nonspeech",
-              "artefact"
+              "artefact",
+              "artefact_outro"
             ],
             "title": "Reason",
             "type": "string"

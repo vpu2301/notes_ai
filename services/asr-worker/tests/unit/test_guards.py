@@ -285,3 +285,53 @@ def test_g2_near_repeat_grams_match_at_the_fuzzy_ratio_and_not_above_it() -> Non
 def test_g2_exact_loops_are_cut_as_before() -> None:
     seg = _seg(0, "vielen dank " * 6)
     assert guards.loop_cut([w.text for w in seg.words], 4, fuzzy_ratio=1.0) == 4
+
+
+# ── Stock outros (Sprint A3 T2) ──────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("language", "text"),
+    [
+        ("en", "Thank you for watching!"),
+        ("de", "Danke fürs Zuschauen."),
+        ("uk", "Дякую за перегляд!"),
+    ],
+)
+def test_a_stock_outro_after_a_gap_is_cut(language: str, text: str) -> None:
+    speech = _seg(0, "wir sprechen heute über den haushalt der stadt und den liefertermin")
+    outro = _seg(speech.end_ms + 4000, text)
+    out = _out([speech, outro], [_d(speech, no_speech_prob=0.01), _d(outro, no_speech_prob=0.05)])
+    out = out.model_copy(update={"language": language})
+    result = guards.apply(out, [SpeechSegment(0, outro.end_ms)])
+    assert [s.start_ms for s in result.output.segments] == [speech.start_ms]
+    (drop,) = result.output.diagnostics.dropped_segments
+    assert drop.reason == "artefact_outro"
+
+
+def test_a_stock_outro_the_decoder_doubts_is_cut_without_a_gap() -> None:
+    speech = _seg(0, "we talk about the budget and the delivery date today")
+    outro = _seg(speech.end_ms + 100, "Thanks for watching")
+    out = _out([speech, outro], [_d(speech, no_speech_prob=0.01), _d(outro, no_speech_prob=0.7)])
+    result = guards.apply(
+        out.model_copy(update={"language": "en"}), [SpeechSegment(0, outro.end_ms)]
+    )
+    assert len(result.output.segments) == 1
+
+
+def test_thanks_for_watching_spoken_mid_speech_stays() -> None:
+    speech = _seg(0, "we talk about the budget and the delivery date today")
+    said = _seg(speech.end_ms + 200, "Thanks for watching, and now the second item on the budget")
+    out = _out([speech, said], [_d(speech, no_speech_prob=0.01), _d(said, no_speech_prob=0.02)])
+    result = guards.apply(
+        out.model_copy(update={"language": "en"}), [SpeechSegment(0, said.end_ms)]
+    )
+    assert len(result.output.segments) == 2 and result.output.diagnostics.dropped_segments == []
+
+
+def test_the_outro_table_names_each_language() -> None:
+    assert guards.is_stock_outro("Untertitelung des ZDF", "de")
+    assert guards.is_stock_outro("Підпишіться на канал", "uk")
+    assert not guards.is_stock_outro(
+        "Subscribe to our newsletter for the budget details next week", "en"
+    )

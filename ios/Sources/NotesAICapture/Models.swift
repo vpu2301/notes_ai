@@ -862,13 +862,22 @@ struct GenerationView: Decodable, Sendable {
     var instructions: InstructionsRef? = nil
     /// N0 — the workspace's model settings version that wrote it (0: the defaults).
     var modelSettingsVersion: Int? = nil
-    /// N3 — the writing style the run used (`business` is today's notes).
-    var writingStyle: String? = nil
+    /// P2 — the template the writer used (`meeting`, `interview`, …); nil while running,
+    /// under `auto` before the model named one, or on older runs.
+    var template: String? = nil
+    /// P1 — the note as the writer wrote it (Markdown); nil while running or on older runs.
+    var text: String? = nil
 
-    /// The recording type line, with the style and the instructions version the run followed:
-    /// "Interview · Academic style · workspace instructions v3". Nil when there is none of them.
+    /// The template's label when the run names one.
+    var templateLabel: String? {
+        template.flatMap { NoteTemplate(rawValue: $0) }.flatMap { $0 == .auto ? nil : $0.label }
+    }
+
+    /// The note header's line: the template, the recording type, the instructions and the
+    /// model settings the run followed: "Interview template · workspace instructions v3".
+    /// Nil when there is none of them.
     var statusLabel: String? {
-        var suffixes = writingStyle.flatMap { $0 == "business" ? nil : ["\($0.capitalized) style"] } ?? []
+        var suffixes = templateLabel.map { ["\($0) template"] } ?? []
         if let instructions { suffixes.append(instructions.statusText) }
         if let v = modelSettingsVersion, v > 0 { suffixes.append("model settings v\(v)") }
         let suffix = suffixes.isEmpty ? nil : suffixes.joined(separator: " · ")
@@ -919,9 +928,8 @@ struct GenerationView: Decodable, Sendable {
         case recordingType = "recording_type"
         case recordingTypeSource = "recording_type_source"
         case excludedRanges = "excluded_ranges"
-        case language, instructions
+        case language, instructions, text, template
         case modelSettingsVersion = "model_settings_version"
-        case writingStyle = "writing_style"
     }
 }
 
@@ -2306,13 +2314,57 @@ struct StartMeetingRequest: Encodable, Sendable {
     let startedAt: String
     let language: String?
     let meetingType: String
+    /// P2 — the writer's template; nil = `auto`.
+    let template: String?
     let calendar: MeetingCalendarContext?
 
     enum CodingKeys: String, CodingKey {
-        case title, language, calendar
+        case title, language, calendar, template
         case clientCaptureId = "client_capture_id"
         case startedAt = "started_at"
         case meetingType = "meeting_type"
+    }
+}
+
+/// The writer's templates (P2). `auto` lets the model choose and name one.
+enum NoteTemplate: String, Codable, CaseIterable, Sendable {
+    case auto, meeting
+    case clientCall = "client_call"
+    case interview, broadcast
+    case publicMeeting = "public_meeting"
+    case memo
+
+    var label: String {
+        switch self {
+        case .auto: return "Automatic"
+        case .meeting: return "Meeting"
+        case .clientCall: return "Client call"
+        case .interview: return "Interview"
+        case .broadcast: return "Broadcast"
+        case .publicMeeting: return "Public meeting"
+        case .memo: return "Memo"
+        }
+    }
+}
+
+/// `GET /v1/ai/templates?language=` — one template in one language: the built-in text,
+/// or this workspace's own over it. Read-only here; editing is on the web.
+struct WorkspaceTemplate: Decodable, Equatable, Sendable {
+    let name: String
+    let language: String
+    /// `builtin` or `workspace`.
+    let source: String
+    let markdown: String
+    let canEdit: Bool
+    var updatedAt: String? = nil
+
+    var label: String { NoteTemplate(rawValue: name)?.label ?? name }
+    var isCustomised: Bool { source == "workspace" }
+
+    enum CodingKeys: String, CodingKey {
+        case name, language, source, markdown
+        case canEdit = "can_edit"
+        case updatedAt = "updated_at"
     }
 }
 
@@ -2549,29 +2601,22 @@ struct AISettings: Decodable, Equatable, Sendable {
     let budgetCents: Int
     let mayChoosePremium: Bool
     let canEdit: Bool
-    /// N0 — how notes are worded, and the model parameters as they run (capped). Older
-    /// servers send neither.
-    var writingStyle: String? = nil
+    /// The model parameters as they run (capped). Older servers send none.
     var modelParamsVersion: Int? = nil
     var modelParamsEffective: ModelParams? = nil
 
-    /// The parameters the engine reads; nil = the model's own value.
+    /// The parameters the writer reads (P2: only these); nil = the model's own value.
     struct ModelParams: Decodable, Equatable, Sendable {
         let temperature: Double
-        let contextWindowTokens: Int?
         let maxOutputTokens: Int?
         let maxConcurrency: Int
-        let factsPerWindow: Int
-        let retries: String
         let askTemperature: Double
         let askMaxTokens: Int
 
         enum CodingKeys: String, CodingKey {
-            case temperature, retries
-            case contextWindowTokens = "context_window_tokens"
+            case temperature
             case maxOutputTokens = "max_output_tokens"
             case maxConcurrency = "max_concurrency"
-            case factsPerWindow = "facts_per_window"
             case askTemperature = "ask_temperature"
             case askMaxTokens = "ask_max_tokens"
         }
@@ -2587,7 +2632,6 @@ struct AISettings: Decodable, Equatable, Sendable {
         case budgetCents = "budget_cents"
         case mayChoosePremium = "may_choose_premium"
         case canEdit = "can_edit"
-        case writingStyle = "writing_style"
         case modelParamsVersion = "model_params_version"
         case modelParamsEffective = "model_params_effective"
     }
@@ -2595,73 +2639,42 @@ struct AISettings: Decodable, Equatable, Sendable {
 
 // MARK: - Note instructions (GET /v1/ai/instructions)
 
-/// How the workspace wants its notes written: the admin's text and what the writer
-/// understood, rendered by the server. Read-only here; editing is on the web.
+/// How the workspace wants its notes written: the admin's text, which the writer reads
+/// verbatim (P2). Read-only here; editing is on the web.
 struct AIInstructions: Decodable, Equatable, Sendable {
-    /// 0: no instructions; notes are written as usual.
+    /// 0: nothing saved; `text` is then the default rules.
     let version: Int
+    /// The text the writer follows: the saved text, else the default rules (P2a).
     let text: String
-    let understood: [String]
-    let guidance: [String]
-    let notApplied: [NotApplied]
+    /// "workspace" when a saved text replaces the default rules, else "default"; older servers omit it.
+    let source: String?
     let canEdit: Bool
-    /// "compiled" or "failed" (saved, but the model could not read it yet).
-    let compileStatus: String
     let updatedAt: String?
-    /// N4 — the longest text the server takes.
+    /// The longest text the server takes.
     let maxChars: Int?
-    /// The scopes that have a text (workspace GET only).
-    let scopes: [ScopeState]?
-    /// The versions a note's instructions were added to, e.g. ["workspace": 3, "client": 1].
+    /// The versions a note's instructions were added to, e.g. ["workspace": 3].
     let baseVersions: [String: Int]?
     /// The scope these instructions are added to; nil for the workspace.
     let extends: InstructionsRef?
-    /// What the text compiled to; only the style is read here.
-    let profile: Profile?
 
-    struct Profile: Decodable, Equatable, Sendable {
-        let style: String?
-    }
+    /// The skeleton an empty text shows (P2): the headings a reader fills in.
+    static let skeleton = """
+    Reader: who reads these notes and what they need from them.
+    Length: how long a note should be.
+    Sections: which sections every note must have, and in what order.
+    Emphasis: what to bring out (decisions, numbers, risks, next steps).
+    Wording: tone, person, terms to use or avoid.
+    Examples: a line or two written the way you want.
+    """
 
-    /// The writing style the text asks for (it overrides the workspace's); nil when none.
-    var profileStyle: String? { profile?.style }
-
-    struct ScopeState: Decodable, Equatable, Sendable {
-        let scope: String
-        let version: Int
-        let stale: Bool
-    }
-
-    /// The meeting types with their own text, as "Client calls, Sales calls"; nil when none.
-    var alsoSetFor: String? {
-        let names = (scopes ?? []).filter { $0.scope != "workspace" }
-            .map { Self.meetingTypeNames[$0.scope] ?? $0.scope }
-        return names.isEmpty ? nil : names.joined(separator: ", ")
-    }
-
-    static let meetingTypeNames = [
-        "client": "Client calls", "team": "Team meetings", "sales": "Sales calls",
-        "one_on_one": "1:1s", "interview": "Interviews", "broadcast": "Broadcasts", "memo": "Memos",
-    ]
-
-    /// A request the writer will not follow; `message` is the server's sentence, shown as sent.
-    struct NotApplied: Decodable, Equatable, Sendable {
-        let text: String
-        let reason: String
-        let message: String
-    }
-
-    static let failedText =
-        "Your text was saved but could not be read right now (the model was unavailable). Notes are written as usual until you press Check again."
+    /// "Default rules" until the workspace edits them.
+    var isDefault: Bool { source == "default" }
 
     enum CodingKeys: String, CodingKey {
-        case version, text, understood, guidance
-        case notApplied = "not_applied"
+        case version, text, extends, source
         case canEdit = "can_edit"
-        case compileStatus = "compile_status"
         case updatedAt = "updated_at"
         case maxChars = "max_chars"
-        case scopes, extends, profile
         case baseVersions = "base_versions"
     }
 }
@@ -2878,6 +2891,55 @@ struct GeneratedItem: Decodable, Sendable, Identifiable, Equatable {
     var provenance: String? = nil
     /// B4 — a claim row's verdict cell (the label and the speaker's clause).
     var verdict: String? = nil
+    /// P1 — the item's place in the note (the Markdown's order), a table row's cells, and
+    /// whether its time named no turn exactly. Nil from older servers.
+    var position: Int? = nil
+    var tableRow: TableRow? = nil
+    var citeNearest: Bool? = nil
+    /// P3 — every turn the line cites, the first being the row's quote; nil or empty
+    /// for a line without a cite or from an older server.
+    var citedTurns: [CitedTurn]? = nil
+    /// P3 — the optional check call's verdict (`ok` | `unsupported`) and its one-line reason.
+    var check: String? = nil
+    var checkReason: String? = nil
+
+    struct TableRow: Decodable, Sendable, Equatable {
+        let header: [String]
+        let cells: [String]
+    }
+
+    struct CitedTurn: Decodable, Sendable, Equatable, Identifiable {
+        let turn: Int
+        let startMs: Int
+        let endMs: Int
+        var speaker: String? = nil
+        let text: String
+        /// True when `text` is the part of a long turn around the cited moment (`atMs`).
+        var excerpt: Bool? = nil
+        var atMs: Int? = nil
+
+        var id: String { "\(turn)-\(startMs)" }
+        /// The moment to show and seek to: the cited one inside a long turn, else the turn's start.
+        var momentMs: Int { atMs ?? startMs }
+
+        enum CodingKeys: String, CodingKey {
+            case turn, speaker, text, excerpt
+            case startMs = "start_ms"
+            case endMs = "end_ms"
+            case atMs = "at_ms"
+        }
+    }
+
+    /// The turns behind the line: the server's (P3), else the row's own quote as one turn.
+    var turnsCited: [CitedTurn] {
+        if let citedTurns, !citedTurns.isEmpty { return citedTurns }
+        guard !(cites ?? []).isEmpty else { return [] }
+        return [CitedTurn(turn: -1, startMs: startMs, endMs: endMs, speaker: speakerName, text: quote)]
+    }
+
+    /// False for a line that names no transcript time: it is marked, never hidden, and opens nothing.
+    var hasReference: Bool { !turnsCited.isEmpty }
+    var isUnsupported: Bool { check == "unsupported" }
 
     var id: String { itemKey }
 
@@ -2888,7 +2950,12 @@ struct GeneratedItem: Decodable, Sendable, Identifiable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case kind, text, quote, placement, cites, certainty, corrections
-        case provenance, verdict
+        case provenance, verdict, position
+        case tableRow = "table_row"
+        case citeNearest = "cite_nearest"
+        case citedTurns = "cited_turns"
+        case check
+        case checkReason = "check_reason"
         case itemKey = "item_key"
         case sectionKey = "section_key"
         case ownerLabel = "owner_label"
@@ -2920,6 +2987,11 @@ struct GeneratedItem: Decodable, Sendable, Identifiable, Equatable {
         attributedTo = try c.decodeIfPresent(String.self, forKey: .attributedTo)
         parentKey = try c.decodeIfPresent(String.self, forKey: .parentKey)
         corrections = try c.decodeIfPresent([Correction].self, forKey: .corrections)
+        provenance = try c.decodeIfPresent(String.self, forKey: .provenance)
+        verdict = try c.decodeIfPresent(String.self, forKey: .verdict)
+        position = try c.decodeIfPresent(Int.self, forKey: .position)
+        tableRow = try c.decodeIfPresent(TableRow.self, forKey: .tableRow)
+        citeNearest = try c.decodeIfPresent(Bool.self, forKey: .citeNearest)
     }
 
     /// What a line's certainty is called on its chip; a plain fact has none.
@@ -3219,6 +3291,22 @@ struct EntityCorrection: Decodable, Sendable, Equatable, Identifiable {
     static func paragraphHelp(_ paragraph: String, _ corrections: [EntityCorrection], language: String?) -> String {
         corrections.filter { $0.isApplied && paragraph.contains($0.toText) }
             .map { "\($0.toText) — \($0.unifiedFrom(language: language))" }
+            .joined(separator: "\n")
+    }
+}
+
+/// A3 — a respelling the note's current generation applied: the transcript shows `canonical`
+/// over `surface` with a "heard as" marker. The ASR result itself is untouched.
+struct NoteCorrection: Decodable, Sendable, Equatable {
+    let surface: String
+    let canonical: String
+    let source: String
+    let count: Int
+
+    /// "Quillhaven — gehört als: Quilhaven", one line per respelling the paragraph carries.
+    static func paragraphHelp(_ paragraph: String, _ corrections: [NoteCorrection], language: String?) -> String {
+        corrections.filter { paragraph.contains($0.surface) }
+            .map { "\($0.canonical) — \(NoteLabels.heardAs(language: language)): \($0.surface)" }
             .joined(separator: "\n")
     }
 }

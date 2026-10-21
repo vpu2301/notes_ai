@@ -27,9 +27,9 @@ from db import tenant_connection
 
 from .. import audit_kinds
 from ..deps import get_state, requires
+from ..domain import entities
 from ..domain import glossary as rules
 from ..domain import glossary_repository as glossary_repo
-from ..domain.meeting_doc import entities
 
 logger = logging.getLogger(__name__)
 

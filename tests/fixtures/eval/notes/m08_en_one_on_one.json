@@ -86,6 +86,23 @@
   "must_not_contain": [
    "Quillhaven",
    "Ferrytale"
+  ],
+  "certainties": [
+   {
+    "match": "more written design notes",
+    "certainty": "statement",
+    "holder": "reviewers"
+   },
+   {
+    "match": "you are ready for senior",
+    "certainty": "opinion",
+    "holder": "Sam"
+   },
+   {
+    "match": "delegate more of the on-call",
+    "certainty": "statement",
+    "holder": "reviewers"
+   }
   ]
  }
 }

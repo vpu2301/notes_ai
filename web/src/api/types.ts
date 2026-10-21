@@ -668,6 +668,8 @@ export interface SharedSection {
   role: SharedSectionRole;
   /** B4 — line key → verbatim | paraphrase | composed, for the marker beside each line. */
   line_marks?: Record<string, string>;
+  /** P3 — line key → start_ms of the turn the line cites, printed as [mm:ss] after it. */
+  line_times?: Record<string, number>;
 }
 
 export interface SharedNoteView {
@@ -977,6 +979,8 @@ export interface StartMeetingRequest {
   language?: AsrLanguage;
   meeting_type?: MeetingType;
   template_id?: string;
+  /** P2 — the writer's template for this note; omitted = `auto`. */
+  template?: NoteTemplate;
   calendar?: MeetingCalendarContext;
 }
 
@@ -1195,6 +1199,14 @@ export interface EntityCorrection {
   status: "proposed" | "accepted" | "rejected";
   /** A person accepted, edited or rejected it (older servers omit it). */
   decided?: boolean;
+}
+
+/** A3 — a respelling the note's current generation applied, for the transcript's "heard as" marker. */
+export interface NoteCorrection {
+  surface: string;
+  canonical: string;
+  source: string;
+  count: number;
 }
 
 export interface CorrectionsView {
@@ -1472,8 +1484,7 @@ export interface AiSettings {
   /** Who writes notes right now (null where nothing is routed). */
   writer?: AiWriter | null;
   small_writer?: AiWriter | null;
-  /** N0 — how notes are worded, and the model parameters set by hand. */
-  writing_style?: WritingStyle;
+  /** The model parameters set by hand (P2: only what the writer reads). */
   model_params?: ModelParams;
   /** What runs: the saved values with the model's own caps applied. */
   model_params_effective?: ModelParams;
@@ -1485,17 +1496,57 @@ export interface AiSettings {
   model_params_measured?: { temperature?: Record<string, number | null> };
 }
 
-export type WritingStyle = "business" | "formal" | "informal" | "academic";
-
 export interface ModelParams {
   temperature: number;
-  context_window_tokens: number | null;
   max_output_tokens: number | null;
   max_concurrency: number;
-  facts_per_window: number;
-  retries: "off" | "standard" | "thorough";
   ask_temperature: number;
   ask_max_tokens: number;
+}
+
+// ── Note templates (P2): the writer's shape for a note ─────────────
+
+/** The seven templates the writer ships; `auto` lets the model choose. */
+export type NoteTemplate =
+  | "meeting"
+  | "client_call"
+  | "interview"
+  | "broadcast"
+  | "public_meeting"
+  | "memo"
+  | "auto";
+
+export const NOTE_TEMPLATES: readonly NoteTemplate[] = [
+  "auto",
+  "meeting",
+  "client_call",
+  "interview",
+  "broadcast",
+  "public_meeting",
+  "memo",
+];
+
+export const NOTE_TEMPLATE_LABELS: Record<NoteTemplate, string> = {
+  auto: "Automatic",
+  meeting: "Meeting",
+  client_call: "Client call",
+  interview: "Interview",
+  broadcast: "Broadcast",
+  public_meeting: "Public meeting",
+  memo: "Memo",
+};
+
+export type TemplateLanguage = "en" | "de" | "uk";
+
+/** One template in one language: the built-in text, or this workspace's own over it. */
+export interface WorkspaceTemplate {
+  name: NoteTemplate;
+  language: TemplateLanguage;
+  source: "builtin" | "workspace";
+  markdown: string;
+  can_edit: boolean;
+  updated_at?: string | null;
+  updated_by?: string | null;
 }
 
 export interface ModelParamLimit {
@@ -1532,9 +1583,14 @@ export type InstructionsScope =
 export interface AiInstructions {
   /** An `InstructionsScope`, or "note" for one note's own. */
   scope: string;
-  /** 0: no instructions; notes are written as usual. */
+  /** 0: nothing saved; `text` is then the default rules. */
   version: number;
+  /** The text the writer follows: the saved text, else the default rules (P2a). */
   text: string;
+  /** "workspace" when a saved text replaces the default rules, else "default". */
+  source: "workspace" | "default";
+  /** The rules that ship, for the label and "Reset to default". */
+  default_text: string;
   /** The compiled dials; the card renders `understood`, never this. */
   profile: Record<string, unknown>;
   profile_hash: string;
@@ -1565,7 +1621,6 @@ export interface AiSettingsUpdate {
   generation_enabled?: boolean;
   monthly_budget_cents?: number;
   acknowledge?: { name: string; region: string }[];
-  writing_style?: WritingStyle;
   /** Always the whole set: a partial object is refused. */
   model_params?: ModelParams;
   reset_model_params?: boolean;
@@ -1613,8 +1668,10 @@ export interface GenerationView {
   instructions?: { scope: string; version: number; fallback?: string | null } | null;
   /** The version of the workspace's model settings that wrote it (0: the defaults). */
   model_settings_version?: number | null;
-  /** The writing style that wrote it (`business`, …); null before N0. */
-  writing_style?: string | null;
+  /** P2 — the template the writer used; null while running, under `auto` before the model named one, or on older runs. */
+  template?: NoteTemplate | null;
+  /** P1 — the note as the writer wrote it (Markdown); null while running or on older runs. */
+  text?: string | null;
 }
 
 export interface GenerationStageModel {
@@ -1667,6 +1724,17 @@ export interface GenerationCoverage {
   excluded_ms: number;
 }
 
+export interface CitedTurn {
+  turn: number;
+  start_ms: number;
+  end_ms: number;
+  speaker?: string | null;
+  text: string;
+  /** True when `text` is the part of a long turn around the cited moment (`at_ms`). */
+  excerpt?: boolean;
+  at_ms?: number | null;
+}
+
 export interface GeneratedItem {
   item_key: string;
   kind: string;
@@ -1696,6 +1764,7 @@ export interface GeneratedItem {
     | "reported"
     | "unproven"
     | "refuted"
+    | "statement"
     | null;
   /** Whose position it is. */
   attributed_to?: string | null;
@@ -1712,6 +1781,17 @@ export interface GeneratedItem {
   corrections?: { surface: string; canonical: string; source: string; entity?: "person" | "term" }[];
   /** Dates the line names, resolved against the recording day. */
   mentions?: { text: string; date: string; time: string | null; direction: string }[];
+  /** P1 — the item's place in the note (the Markdown's order). */
+  position?: number;
+  /** P1 — a table row's cells (`{header, cells}`); absent for a bullet or a paragraph. */
+  table_row?: { header: string[]; cells: string[] } | null;
+  /** P1 — the time named no turn exactly; the nearest one is cited. */
+  cite_nearest?: boolean;
+  /** P3 — every turn the line cites, the first being the row's quote; empty without a cite. */
+  cited_turns?: CitedTurn[];
+  /** P3 — the optional check call's verdict and its one-line reason; null when the call was off. */
+  check?: "ok" | "unsupported" | null;
+  check_reason?: string | null;
 }
 
 // ─── Billing ─────────────────────────────────────────────────────────────
@@ -1761,287 +1841,4 @@ export interface ChangePlanResult {
   action: "applied" | "redirect";
   redirect_url: string | null;
   billing: Billing;
-}
-
-// ── AI notes: prompt/model profiles and experiments (S3/S4) ──────────
-
-export type ProfileStage = "extraction" | "composition" | "verification";
-export type NoteLength = "short" | "standard" | "detailed";
-
-export interface StageParams {
-  temperature?: number | null;
-  max_output_tokens?: number | null;
-  timeout_s?: number | null;
-}
-
-/** One complete configuration. A null stage text keeps the bundled one; a null model keeps routing. */
-export interface ProfileConfig {
-  stages: Partial<Record<ProfileStage, string | null>>;
-  models: Partial<Record<ProfileStage, string | null>>;
-  params: Partial<Record<ProfileStage, StageParams>>;
-  output_language: "auto" | "en" | "de" | "uk";
-  length: NoteLength;
-}
-
-export interface ProfileVersionSummary {
-  id: string;
-  version_number: number;
-  content_hash: string;
-  created_by: string;
-  created_at: string;
-  compatible: boolean;
-  incompatible_reason?: string | null;
-}
-
-export interface PromptProfile {
-  id: string;
-  name: string;
-  description: string;
-  created_at: string;
-  versions: ProfileVersionSummary[];
-}
-
-export interface ActiveProfile {
-  /** null = the profile bundled with this deployment. */
-  profile_version_id: string | null;
-  revision: number;
-  activated_by?: string | null;
-  activated_at?: string | null;
-}
-
-export interface PromptProfilesView {
-  active: ActiveProfile;
-  profiles: PromptProfile[];
-  can_edit: boolean;
-  contract_version: string;
-  algorithm_version: string;
-  stages: ProfileStage[];
-  max_stage_chars: number;
-  variables: string[];
-}
-
-export interface ProfileVersionView extends ProfileVersionSummary {
-  profile_id: string;
-  config: ProfileConfig;
-  contract_version: string;
-  schema_version: string;
-  algorithm_version: string;
-  effective: Record<ProfileStage, string>;
-  language: string;
-}
-
-export interface ProfileProblem {
-  field: string;
-  code: string;
-  detail: string;
-}
-
-export interface ProfilePreview {
-  problems: ProfileProblem[];
-  effective: Partial<Record<ProfileStage, string>>;
-  language: string;
-  /** Each stage's bundled task text: where an edit starts (never the platform contract). */
-  bundled: Record<ProfileStage, string>;
-  /** Every call a run makes, resolved exactly for `flags`; empty while there are problems. */
-  calls?: ResolvedCall[];
-  flags?: PreviewFlags;
-  /** Placeholders each stage must keep (its bundled text uses them). */
-  required_variables?: Partial<Record<ProfileStage, string[]>>;
-}
-
-export type PreviewMode = "production" | "test";
-
-/** One call of a run and its exact system text (the request hash must equal `sha`). */
-export interface ResolvedCall {
-  call: string;
-  stage: string;
-  /** profile: the version's text · bundled · not_applied: edited but not sent here · code: read-only. */
-  source: "profile" | "bundled" | "not_applied" | "code";
-  sha: string;
-  system: string;
-}
-
-export interface PreviewFlags {
-  mode: PreviewMode;
-  multilingual_evidence?: boolean;
-  fidelity?: boolean;
-  final_check?: boolean;
-  small_model?: boolean;
-  bullets?: number;
-  profile_instructions_apply?: boolean;
-}
-
-export interface ModelCapability {
-  backend: string;
-  model_id: string;
-  processor: string | null;
-  region: string | null;
-  acknowledged: boolean;
-  small_model: boolean;
-  context_window: number;
-  stages: ProfileStage[];
-  supported: Partial<Record<"temperature" | "max_output_tokens" | "timeout_s", { min: number; max: number }>>;
-  unsupported: Record<string, string>;
-}
-
-/** What a note generated now runs on in this deployment. */
-export interface AiRuntime {
-  build_sha: string | null;
-  multilingual_evidence: boolean;
-  /** Meaning checks and the final check before writing; needs multilingual evidence. */
-  fidelity: boolean;
-  prompt_version: string;
-  algorithm_version: string;
-  /** False: profile instructions are not used for new notes here (tests still use them). */
-  profile_instructions_apply: boolean;
-}
-
-export interface ModelCapabilities {
-  models: ModelCapability[];
-  stage_operations: Record<ProfileStage, string>;
-  writer?: AiWriter | null;
-}
-
-export interface ActivationRecord {
-  profile_version_id: string | null;
-  previous_version_id: string | null;
-  revision: number;
-  actor: string;
-  evaluation_ref: string | null;
-  created_at: string;
-}
-
-export interface ExperimentRequest {
-  /** Empty with `suite`. */
-  sources: { note_id: string; transcript_rev: number }[];
-  /** "critical": the shipped critical cases instead of notes (activation asks for a pass). */
-  suite?: "critical";
-  /** null = the bundled profile. */
-  candidate_version_ids: (string | null)[];
-  repetitions: number;
-  length: NoteLength;
-  output_language: "auto" | "en" | "de" | "uk";
-  budget_cap_cents: number;
-  idempotency_key: string;
-}
-
-export interface ExperimentEstimate {
-  runs: number;
-  /** About how many model requests the runs make together. */
-  requests?: number;
-  /** null: a backend has no price — show "unknown", never a guess. */
-  estimate_cents: number | null;
-  token_cap: number;
-  cost_known: boolean;
-  sources: { note_id: string; transcript_rev: number; languages: string[] }[];
-}
-
-export type ExperimentState = "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
-
-export interface ModelCall {
-  stage: ProfileStage;
-  backend: string;
-  model_id: string;
-  calls: number;
-  failed: number;
-  input_tokens: number;
-  output_tokens: number;
-  latency_ms: number;
-}
-
-export interface ExperimentRun {
-  id: string;
-  candidate_index: number;
-  source_index: number;
-  repetition: number;
-  state: "pending" | "running" | "done" | "failed" | "cancelled";
-  metrics: {
-    calls?: ModelCall[];
-    tokens?: number;
-    partial?: boolean;
-    meaning_check?: Record<string, number>;
-    meaning_unverified?: number;
-    incomplete?: string[];
-    summary_fallback?: string | null;
-    topics_fallback?: string | null;
-    windows_failed?: number;
-    [key: string]: unknown;
-  };
-  error_kind: string | null;
-  cost_cents: number | null;
-  latency_ms: number | null;
-  artifact_available: boolean;
-  config: Record<string, unknown>;
-}
-
-export interface ExperimentView {
-  id: string;
-  state: ExperimentState;
-  sources: { note_id: string; transcript_rev: number; readable: boolean }[];
-  candidates: (string | null)[];
-  repetitions: number;
-  length: NoteLength;
-  output_language: string;
-  budget_cap_cents: number;
-  reserved_cents: number;
-  spent_cents: number;
-  cost_known: boolean;
-  token_cap: number;
-  tokens_used: number;
-  error_kind: string | null;
-  runs: ExperimentRun[];
-  stale: boolean;
-}
-
-export interface ExperimentSummary {
-  id: string;
-  state: ExperimentState;
-  candidates: (string | null)[];
-  sources: number;
-  repetitions: number;
-  cost_known: boolean;
-  spent_cents: number;
-  created_at: string;
-}
-
-export interface ArtifactFact {
-  item_key: string;
-  kind: string;
-  text: string;
-  /** Always the words as spoken, in `source_language` — never a translation. */
-  quote: string;
-  source_language: string | null;
-  start_ms: number;
-  end_ms: number;
-  speaker_label: string | null;
-  attributed_to: string | null;
-  flags: string[];
-}
-
-export interface RunArtifact {
-  language: string;
-  sections: {
-    section_key: string;
-    title: string | null;
-    lines: { kind: string; text: string; fact_ids: string[] }[];
-  }[];
-  facts: ArtifactFact[];
-}
-
-export type FindingLabel =
-  | "wrong_actor"
-  | "missing_condition"
-  | "unsupported_claim"
-  | "omission"
-  | "duplicate"
-  | "unclear_attribution";
-
-export interface ReviewRequest {
-  run_a_id: string;
-  run_b_id: string;
-  blind: boolean;
-  revealed: boolean;
-  preference: "a" | "b" | "tie" | "neither";
-  findings: { run: "a" | "b"; label: FindingLabel; line?: string }[];
-  comment: string;
 }

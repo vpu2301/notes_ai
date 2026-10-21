@@ -63,6 +63,10 @@ class NoteRow:
     media_state: str = "ready"
     copied_from_note_id: UUID | None = None
     copied_from_tenant_id: UUID | None = None
+    # Task 4: user | auto | fallback | None — only `user` means a person chose the template.
+    template_source: str | None = None
+    # P2: the note template the writer shapes it with; None = auto (the model chooses).
+    template: str | None = None
 
 
 @dataclass(slots=True)
@@ -98,7 +102,7 @@ async def fetch_note(
                n.cancelled_at, n.source_session_id, n.source_asr_job_id,
                n.visibility, n.shared_with_ids, n.deleted_at, n.transcript_shared,
                n.visibility_source, n.media_state,
-               n.copied_from_note_id, n.copied_from_tenant_id,
+               n.copied_from_note_id, n.copied_from_tenant_id, n.template_source, n.template,
                ARRAY(
                    SELECT c.user_sub::text || ':' || c.role::text
                      FROM note_collaborators c
@@ -143,6 +147,8 @@ async def fetch_note(
         media_state=str(row["media_state"]),
         copied_from_note_id=row["copied_from_note_id"],
         copied_from_tenant_id=row["copied_from_tenant_id"],
+        template_source=row["template_source"],
+        template=row["template"],
     )
 
 
@@ -863,6 +869,10 @@ async def create_note_with_v1(
     copied_from_note_id: UUID | None = None,
     copied_from_tenant_id: UUID | None = None,
     version_metadata: dict[str, Any] | None = None,
+    # Task 4: "user" when the request named the template; "auto" / "fallback" from the matcher.
+    template_source: str | None = None,
+    # P2: the note template (`meeting`, `interview`, …); None = auto.
+    template: str | None = None,
 ) -> tuple[UUID, UUID]:
     """Two-step insert (ADR-0020):
 
@@ -883,10 +893,11 @@ async def create_note_with_v1(
             tenant_id, code, status, primary_author_id, co_author_ids,
             template_id, template_schema_version,
             title, source_session_id, source_asr_job_id, title_source, visibility,
-            visibility_source, copied_from_note_id, copied_from_tenant_id
+            visibility_source, copied_from_note_id, copied_from_tenant_id, template_source,
+            template
         )
         VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10,
-                coalesce($11, 'private')::note_visibility, $12, $13, $14)
+                coalesce($11, 'private')::note_visibility, $12, $13, $14, $15, $16)
         RETURNING id
         """,
         tenant_id,
@@ -903,6 +914,8 @@ async def create_note_with_v1(
         visibility_source,
         copied_from_note_id,
         copied_from_tenant_id,
+        template_source,
+        template,
     )
 
     version_id: UUID = await conn.fetchval(
@@ -1080,3 +1093,8 @@ async def replace_v1_content(
         rendered,
         json.dumps({"body_hash": body_hash_for(content)}),
     )
+
+
+async def set_template(conn: asyncpg.Connection, *, note_id: UUID, template: str | None) -> None:
+    """P2: the template the note is written with from the next run on (None = auto)."""
+    await conn.execute("UPDATE notes SET template = $2 WHERE id = $1", note_id, template)

@@ -123,17 +123,6 @@ def test_the_baseline_is_checked_against_the_transcript() -> None:
     assert row["unsupported"] == [0, 1]
 
 
-# ── example echo ────────────────────────────────────────────────────
-
-
-def test_an_example_sentence_in_a_line_is_counted() -> None:
-    from note_service.domain.meeting_doc import prompts
-
-    echo = prompts.EXAMPLES["en"]["summary_right"]
-    row = _score(_meeting(), [_line(echo), _line("fine")], [_fact("a", "fine")])
-    assert row["example_echo"] == 1
-
-
 # ── recall, coverage, excluded speech ───────────────────────────────
 
 

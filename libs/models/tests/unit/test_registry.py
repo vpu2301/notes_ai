@@ -18,16 +18,16 @@ def _registry(env: str, environ: dict[str, str] | None = None, **kw: object) -> 
 # ── resolve matrix: provider × tier × env × enabled ─────────────────────
 MATRIX: list[tuple[str, str, str, str, dict[str, str], str]] = [
     # env, provider, tier, operation, environ, expected backend
-    ("dev", "platform", "standard", "understand", {}, "dev_mac"),
-    ("dev", "platform", "premium", "understand", {}, "dev_mac"),
-    ("dev", "platform", "standard", "summarize", {}, "dev_mac"),
+    ("dev", "platform", "standard", "ask", {}, "dev_mac"),
+    ("dev", "platform", "premium", "ask", {}, "dev_mac"),
+    ("dev", "platform", "standard", "write", {}, "dev_mac"),
     ("dev", "platform", "standard", "asr", {}, "dev_mac_asr"),
-    ("test", "platform", "standard", "understand", {}, "recorded"),
+    ("test", "platform", "standard", "ask", {}, "recorded"),
     ("test", "platform", "premium", "asr", {}, "inproc_cpu_asr"),
-    ("staging", "platform", "standard", "understand", STAGING_ENV, "hf_eu"),
-    ("staging", "platform", "premium", "understand", STAGING_ENV, "hf_eu"),
+    ("staging", "platform", "standard", "ask", STAGING_ENV, "hf_eu"),
+    ("staging", "platform", "premium", "ask", STAGING_ENV, "hf_eu"),
     ("staging", "platform", "standard", "asr", STAGING_ENV, "hf_eu_asr"),
-    ("prod", "platform", "standard", "summarize", STAGING_ENV, "hf_eu"),
+    ("prod", "platform", "standard", "write", STAGING_ENV, "hf_eu"),
     ("prod", "platform", "premium", "asr", STAGING_ENV, "hf_eu_asr"),
 ]
 
@@ -50,7 +50,7 @@ def test_resolve_matrix(
 def test_premium_flips_to_hosted_eu_by_config_only() -> None:
     cfg = base_config()
     cfg["backends"]["hosted_eu"]["enabled"] = True
-    cfg["routing"]["understand"]["premium"] = "hosted_eu"
+    cfg["routing"]["ask"]["premium"] = "hosted_eu"
     environ = {
         **STAGING_ENV,
         "HOSTED_MODEL_URL": "https://gpu.internal/v1",
@@ -63,17 +63,17 @@ def test_premium_flips_to_hosted_eu_by_config_only() -> None:
         environ=environ,
         settings_source=lambda _ws: WorkspaceModelSettings(tier="premium"),
     )
-    resolved = reg.resolve(WS, "understand")
+    resolved = reg.resolve(WS, "ask")
     assert resolved.name == "hosted_eu"
     assert resolved.caps.structured_output == "guided_json"
     assert resolved.processor is not None and resolved.processor.name == "Notes AI (own EU host)"
     # standard stays on hf_eu
-    assert Registry.load(cfg, env="prod", environ=environ).resolve(WS, "understand").name == "hf_eu"
+    assert Registry.load(cfg, env="prod", environ=environ).resolve(WS, "ask").name == "hf_eu"
 
 
 def test_hosted_eu_disabled_is_refused_even_if_routed() -> None:
     cfg = base_config()
-    cfg["routing"]["understand"]["premium"] = "hosted_eu"
+    cfg["routing"]["ask"]["premium"] = "hosted_eu"
     with pytest.raises(ConfigError) as exc:
         Registry.load(cfg, env="staging", environ=STAGING_ENV)
     assert exc.value.code == "backend_disabled"
@@ -99,7 +99,7 @@ def test_dev_mac_direct_lookup_on_prod_is_refused() -> None:
 def test_dev_mac_cannot_be_routed_on_prod_even_by_widening_enabled_in_envs() -> None:
     cfg = base_config()
     cfg["backends"]["dev_mac"]["enabled_in_envs"] = ["dev", "prod"]
-    cfg["routing"]["understand"]["standard"] = "dev_mac"
+    cfg["routing"]["ask"]["standard"] = "dev_mac"
     with pytest.raises(ConfigError) as exc:
         Registry.load(cfg, env="prod", environ=STAGING_ENV)
     assert exc.value.code == "backend_not_allowed_in_env"
@@ -115,7 +115,7 @@ def test_missing_env_for_reachable_backend_fails_at_load() -> None:
 
 def test_missing_env_for_unreachable_backend_is_fine_in_dev() -> None:
     reg = _registry("dev", {})
-    assert reg.resolve(WS, "understand").name == "dev_mac"
+    assert reg.resolve(WS, "ask").name == "dev_mac"
 
 
 def test_unknown_env_is_refused() -> None:
@@ -134,14 +134,14 @@ def test_unknown_operation_at_resolve() -> None:
 def test_anthropic_provider_setting_is_not_configured_yet() -> None:
     reg = _registry("dev", settings_source=lambda _ws: WorkspaceModelSettings(provider="anthropic"))
     with pytest.raises(ConfigError) as exc:
-        reg.resolve(WS, "understand")
+        reg.resolve(WS, "ask")
     assert exc.value.code in ("provider_not_configured", "backend_disabled")
 
 
 def test_custom_provider_setting_lands_in_s7() -> None:
     reg = _registry("dev", settings_source=lambda _ws: WorkspaceModelSettings(provider="custom"))
     with pytest.raises(ConfigError) as exc:
-        reg.resolve(WS, "understand")
+        reg.resolve(WS, "ask")
     assert exc.value.code == "provider_not_configured"
 
 
@@ -201,27 +201,19 @@ def _l2_config(**env_dev: object) -> dict:
         **MISTRAL,
         "models": {"chat": "${MISTRAL_SMALL_PIN:-mistral-small-2603}"},
     }
-    for op in ("classify", "title", "entities"):
-        cfg["routing"][op] = {"standard": "hf_eu", "premium": "hf_eu"}
     cfg["env_overrides"]["dev"] = {
         "chat": {"primary": "mistral_eu", "fallback": "dev_mac"},
-        "classify": {"primary": "mistral_eu_small", "fallback": "dev_mac"},
-        "title": {"primary": "mistral_eu_small", "fallback": "dev_mac"},
-        "entities": {"primary": "mistral_eu_small", "fallback": "dev_mac"},
         "asr": "dev_mac_asr",
         **env_dev,
     }
     return cfg
 
 
-def test_key_present_routes_writing_to_the_large_and_short_calls_to_the_small_model() -> None:
+def test_key_present_routes_writing_to_the_large_model() -> None:
     reg = Registry.load(_l2_config(), env="dev", environ=MISTRAL_ENV)  # type: ignore[arg-type]
-    assert reg.resolve(WS, "summarize").name == "mistral_eu"
-    assert reg.resolve(WS, "understand").name == "mistral_eu"
-    assert reg.resolve(WS, "summarize").model_id == "mistral-large-2512"
-    for op in ("classify", "title", "entities"):
-        assert reg.resolve(WS, op).name == "mistral_eu_small"
-        assert reg.resolve(WS, op).model_id == "mistral-small-2603"
+    assert reg.resolve(WS, "write").name == "mistral_eu"
+    assert reg.resolve(WS, "ask").name == "mistral_eu"
+    assert reg.resolve(WS, "write").model_id == "mistral-large-2512"
     active = reg.active_override("chat")
     assert active is not None and active.name == "mistral_eu" and active.reason is None
     # Both companies the dev workspace has to acknowledge — computed, not typed.
@@ -233,8 +225,8 @@ def test_key_absent_falls_back_to_the_local_model_with_missing_env(
 ) -> None:
     with caplog.at_level(logging.WARNING, logger="models.registry"):
         reg = Registry.load(_l2_config(), env="dev", environ={})  # type: ignore[arg-type]
-    assert reg.resolve(WS, "summarize").name == "dev_mac"
-    assert reg.resolve(WS, "title").name == "dev_mac"
+    assert reg.resolve(WS, "write").name == "dev_mac"
+    assert reg.resolve(WS, "ask").name == "dev_mac"
     active = reg.active_override("chat")
     assert active is not None and active.is_fallback and active.reason == "missing_env"
     assert active.primary == "mistral_eu" and active.fallback == "dev_mac"
@@ -249,15 +241,10 @@ def test_mdx_dev_chat_backend_forces_the_named_backend() -> None:
         _l2_config(),
         env="dev",
         environ=MISTRAL_ENV,
-        forced={
-            "chat": "dev_mac",
-            "classify": "dev_mac",
-            "title": "dev_mac",
-            "entities": "dev_mac",
-        },
+        forced={"chat": "dev_mac"},
     )  # type: ignore[arg-type]
-    assert reg.resolve(WS, "summarize").name == "dev_mac"
-    assert reg.resolve(WS, "classify").name == "dev_mac"
+    assert reg.resolve(WS, "write").name == "dev_mac"
+    assert reg.resolve(WS, "ask").name == "dev_mac"
     active = reg.active_override("chat")
     assert active is not None and active.reason == "forced" and active.name == "dev_mac"
     # Forcing the primary itself is not a fallback.
@@ -269,10 +256,10 @@ def test_mdx_dev_chat_backend_forces_the_named_backend() -> None:
 
 def test_a_failed_probe_falls_back_in_dev_and_refuses_on_staging() -> None:
     reg = Registry.load(_l2_config(), env="dev", environ=MISTRAL_ENV)  # type: ignore[arg-type]
-    assert reg.resolve(WS, "summarize").name == "mistral_eu"
+    assert reg.resolve(WS, "write").name == "mistral_eu"
     switched = reg.fall_back("chat")
     assert switched.name == "dev_mac" and switched.reason == "probe_failed"
-    assert reg.resolve(WS, "summarize").name == "dev_mac"
+    assert reg.resolve(WS, "write").name == "dev_mac"
     assert reg.fall_back("chat").name == "dev_mac"  # idempotent
     # asr has no fallback configured.
     with pytest.raises(ConfigError) as exc:
@@ -297,7 +284,7 @@ def test_on_staging_a_missing_primary_key_refuses_to_boot_as_before() -> None:
 
 def test_the_bare_name_form_still_parses_and_routes() -> None:
     reg = _registry("dev", {})
-    assert reg.resolve(WS, "summarize").name == "dev_mac"
+    assert reg.resolve(WS, "write").name == "dev_mac"
     active = reg.active_override("chat")
     assert active is not None and active.name == "dev_mac" and active.reason is None
     assert reg.override_for("asr") == "dev_mac_asr"
@@ -309,14 +296,14 @@ def test_the_repo_config_routes_dev_to_mistral_with_the_key_and_to_the_mac_witho
     repo = Path(__file__).resolve().parents[4]
     path = repo / "config" / "models.yaml"
     with_key = Registry.load(path, env="dev", environ=MISTRAL_ENV, validate=False)
-    assert with_key.resolve(WS, "summarize").name == "mistral_eu"
-    assert with_key.resolve(WS, "classify").name == "mistral_eu_small"
+    assert with_key.resolve(WS, "write").name == "mistral_eu"
+    assert with_key.resolve(WS, "ask").name == "mistral_eu"
     without = Registry.load(path, env="dev", environ={}, validate=False)
-    assert without.resolve(WS, "summarize").name == "dev_mac"
-    assert without.resolve(WS, "title").name == "dev_mac"
+    assert without.resolve(WS, "write").name == "dev_mac"
+    assert without.resolve(WS, "ask").name == "dev_mac"
     assert without.active_override("chat").reason == "missing_env"  # type: ignore[union-attr]
     # test env unchanged: cassettes.
     assert (
-        Registry.load(path, env="test", environ={}, validate=False).resolve(WS, "classify").name
+        Registry.load(path, env="test", environ={}, validate=False).resolve(WS, "write").name
         == "recorded"
     )

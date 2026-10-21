@@ -153,7 +153,15 @@ def test_pdf_200_with_watermark_on_request(
         return _version_row()
 
     def _render(
-        *, note, version, issuer_name, is_draft, language, section_names=None, line_marks=None
+        *,
+        note,
+        version,
+        issuer_name,
+        is_draft,
+        language,
+        section_names=None,
+        line_marks=None,
+        line_times=None,
     ):  # noqa: ANN001
         captured["is_draft"] = is_draft
         captured["language"] = language
@@ -193,7 +201,15 @@ def test_pdf_clean_is_the_default(client: TestClient, monkeypatch: pytest.Monkey
         return _version_row()
 
     def _render(
-        *, note, version, issuer_name, is_draft, language, section_names=None, line_marks=None
+        *,
+        note,
+        version,
+        issuer_name,
+        is_draft,
+        language,
+        section_names=None,
+        line_marks=None,
+        line_times=None,
     ):  # noqa: ANN001
         captured["is_draft"] = is_draft
         return b"%PDF-1.7 clean"
@@ -298,7 +314,15 @@ def test_pdf_200_for_finalized(client: TestClient, monkeypatch: pytest.MonkeyPat
         return _version_row()
 
     def _render(
-        *, note, version, issuer_name, is_draft, language, section_names=None, line_marks=None
+        *,
+        note,
+        version,
+        issuer_name,
+        is_draft,
+        language,
+        section_names=None,
+        line_marks=None,
+        line_times=None,
     ):  # noqa: ANN001
         return b"%PDF-1.7 fake-bytes"
 
@@ -316,3 +340,22 @@ def test_pdf_200_for_finalized(client: TestClient, monkeypatch: pytest.MonkeyPat
     assert len(calls) == 1
     assert calls[0]["kind"] == "note.pdf_rendered"
     assert calls[0]["payload"]["size_bytes"] == len(b"%PDF-1.7 fake-bytes")
+
+
+def test_a_cited_line_gets_its_time_after_the_provenance_words() -> None:
+    """P3 — the marker after a written line: the provenance words (B4) and the [mm:ss]
+    the line rests on; a line the writer did not cite gets nothing."""
+    from note_service.domain import lines as line_rules
+    from note_service.domain.pdf import _line_marker
+
+    cited = line_rules.key_of("Welchering says the 2022 deal is dead")
+    mark = _line_marker({cited: "paraphrase"}, "en", {cited: 754_000})
+    assert mark is not None
+    assert mark("- Welchering says the 2022 deal is dead") == "(paraphrase) [12:34]"
+    assert mark("- A line a person typed") == ""
+    only_time = _line_marker({}, "de", {cited: 3_723_000})
+    assert (
+        only_time is not None
+        and only_time("- Welchering says the 2022 deal is dead") == "[1:02:03]"
+    )
+    assert _line_marker({}, "en", {}) is None

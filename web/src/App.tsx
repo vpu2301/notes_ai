@@ -14,7 +14,6 @@ import { ResetPasswordPage } from "./pages/auth/ResetPasswordPage";
 import { SignupPage } from "./pages/auth/SignupPage";
 import { WelcomePage } from "./pages/auth/WelcomePage";
 import { ReauthDialog } from "./components/ReauthDialog";
-import { AINotesSettingsPage } from "./pages/settings/AINotesSettingsPage";
 import { AccountSettingsPage } from "./pages/settings/AccountSettingsPage";
 import { BillingSettingsPage } from "./pages/settings/BillingSettingsPage";
 import { DataSettingsPage } from "./pages/settings/DataSettingsPage";
@@ -202,7 +201,6 @@ export function App() {
                 <Route path="data" element={<DataSettingsPage />} />
                 <Route path="writing" element={<NoteWritingSettingsPage />} />
                 {/* How notes are written: profiles, tests, activation. Members read; admins change. */}
-                <Route path="ai-notes" element={<AINotesSettingsPage />} />
                 {/* Plan, usage, plan changes (admins). */}
                 <Route path="billing" element={<BillingSettingsPage />} />
               </Route>

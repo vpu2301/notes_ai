@@ -68,6 +68,8 @@ export function DataSettingsPage() {
 
   const overBudget = settings.month_to_date_cents >= settings.budget_cents;
   const downgraded = settings.effective_tier !== settings.tier;
+  // A team workspace starts with nothing agreed to, so nothing is written until an admin agrees.
+  const unagreed = settings.needs_acknowledgement;
   // Who is writing right now: the processor, or "the local model".
   const writerName = (w: AiWriter | null | undefined): string =>
     !w ? "" : w.processor && w.region !== "local" ? `${w.processor} (${w.region})` : "the local model";
@@ -134,16 +136,38 @@ export function DataSettingsPage() {
             </table>
           )}
 
-          {downgraded && (
+          {unagreed.length > 0 && (
             <p className="banner banner-warn" role="status">
-              Note writing is running on the <strong>{settings.effective_tier}</strong> tier, not{" "}
-              <strong>{settings.tier}</strong>:{" "}
-              {settings.needs_acknowledgement.map((p) => `${p.name} (${p.region})`).join(", ")}{" "}
-              {settings.needs_acknowledgement.length === 1 ? "has" : "have"} not been agreed to for
-              this workspace.{" "}
-              {settings.can_edit
-                ? "Choose the tier again under Note writing › Advanced to review and agree."
-                : "A workspace admin can review this."}
+              <span className="grow">
+                {downgraded ? (
+                  <>
+                    Note writing is running on the <strong>{settings.effective_tier}</strong>{" "}
+                    tier, not <strong>{settings.tier}</strong>:{" "}
+                  </>
+                ) : (
+                  "Notes are not written for this workspace yet: "
+                )}
+                {unagreed.map((p) => `${p.name} (${p.region.toUpperCase()})`).join(", ")}{" "}
+                {unagreed.length === 1 ? "has" : "have"} not been agreed to for this workspace.{" "}
+                {settings.can_edit
+                  ? "Agreeing lets them process your meetings."
+                  : "A workspace admin can agree to this."}
+              </span>
+              {settings.can_edit && (
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={busy}
+                  onClick={() =>
+                    void save(
+                      { acknowledge: unagreed.map((p) => ({ name: p.name, region: p.region })) },
+                      "Agreed. Notes will be written for this workspace.",
+                    )
+                  }
+                >
+                  Agree
+                </button>
+              )}
             </p>
           )}
         </section>

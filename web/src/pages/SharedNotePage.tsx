@@ -17,6 +17,7 @@ import { CodeInput } from "../components/CodeInput";
 import { AlertIcon, DownloadIcon } from "../components/icons";
 import { RichText, type LineExtra } from "../components/RichText";
 import { lineKey } from "../lib/itemKey";
+import { mmss } from "../lib/generation";
 import { provenanceLabel } from "../i18n/note";
 import { FlagControl, SharedItems } from "../components/SharedItems";
 import { safeFilename, saveBlob } from "../lib/exportNote";
@@ -137,12 +138,22 @@ export function SharedNotePage() {
 
   const byRole = (role: SharedSection["role"]) => note?.sections.filter((s) => s.role === role) ?? [];
   // B4: the provenance marker beside each line the sender's engine wrote, in the note's language.
+  // B4: the provenance words; P3: the [mm:ss] the line rests on. The recipient never sees the evidence itself.
   const marksFor = (s: SharedSection): LineExtra | undefined => {
-    const marks = s.line_marks;
-    if (!marks || Object.keys(marks).length === 0) return undefined;
+    const marks = s.line_marks ?? {};
+    const times = s.line_times ?? {};
+    if (Object.keys(marks).length === 0 && Object.keys(times).length === 0) return undefined;
     return (raw) => {
-      const label = provenanceLabel(note?.lang, marks[lineKey(raw)]);
-      return label ? <span className="provenance-chip muted">{label}</span> : null;
+      const key = lineKey(raw);
+      const label = provenanceLabel(note?.lang, marks[key]);
+      const at = times[key];
+      if (!label && at === undefined) return null;
+      return (
+        <>
+          {label && <span className="provenance-chip muted">{label}</span>}
+          {at !== undefined && <span className="line-time muted">[{mmss(at)}]</span>}
+        </>
+      );
     };
   };
   const decisions = byRole("decisions");

@@ -189,12 +189,9 @@ async def month_to_date_cents(conn: asyncpg.Connection, *, tenant_id: UUID) -> i
 # What each operation's processor does with the data, in words a customer can check against a DPA.
 PURPOSES: Final[dict[str, str]] = {
     "transcribe": "turning your recordings into text",
-    "summarize": "writing your meeting notes",
-    "understand": "answering questions about a note",
+    "write": "writing your meeting notes",
+    "ask": "answering questions about a note",
     "embed": "search",
-    "classify": "recognising what kind of recording it is",
-    "title": "naming your notes",
-    "entities": "correcting names in your notes",
 }
 
 

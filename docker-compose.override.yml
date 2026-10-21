@@ -348,6 +348,8 @@ services:
       MDX_BILLING_PROVIDER: "${MDX_BILLING_PROVIDER:-manual}"
       # Note instructions (N1): on in dev; production stays off until N5.
       MDX_NOTE_INSTRUCTIONS_ENABLED: "${MDX_NOTE_INSTRUCTIONS_ENABLED:-true}"
+      # P3: the optional check call after writing; off unless asked for.
+      MDX_NOTE_CHECK: "${MDX_NOTE_CHECK:-false}"
       # Without this the default redis://localhost resolves to the container
       # itself and every notification publish silently no-ops.
       REDIS_URL: redis://redis:6379/0

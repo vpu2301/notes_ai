@@ -66,6 +66,17 @@
   "must_not_contain": [
    "Quillhaven",
    "Ferrytale"
+  ],
+  "certainties": [
+   {
+    "match": "надійних вимірювань",
+    "certainty": "opinion",
+    "holder": "Лекторка"
+   },
+   {
+    "match": "Дослідження в європейських містах",
+    "certainty": "fact"
+   }
   ]
  }
 }

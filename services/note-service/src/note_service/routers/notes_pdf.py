@@ -83,6 +83,11 @@ async def get_note_pdf(
             marks = await gen_repo.line_marks(conn, note_id=note_id)
         except Exception:  # noqa: BLE001
             marks = {}
+        # P3: the time each cited line rests on.
+        try:
+            times = await gen_repo.line_times(conn, note_id=note_id)
+        except Exception:  # noqa: BLE001
+            times = {}
 
     is_draft = variant == "draft"
     language = lang or "en"
@@ -96,6 +101,7 @@ async def get_note_pdf(
         language=language,
         section_names=section_names,
         line_marks=marks,
+        line_times=times,
     )
 
     await state.audit_writer.write_event(

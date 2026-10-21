@@ -35,29 +35,34 @@ RETURNING sub, (xmax = 0) AS inserted
 )
 INSERT INTO seeded_new_users SELECT sub FROM upserted WHERE inserted;
 
--- ── Tenant branding (idempotent, dev-cosmetic) ──────────────────────────────
+-- ── Tenant branding (dev-cosmetic; fills a fresh row once) ──────────────────
+-- The seed runs on every `docker compose up`. Branding edited on the Workspace
+-- page (legal name, contact, address) must survive it, so the cosmetic fields
+-- are written only while the legal name is still blank; slug and is_active always.
 UPDATE tenants SET
     legal_name      = 'Acme Inc',
-    slug            = 'tenant-a',
     contact_email   = 'contact@tenant-a.example',
     phone_number    = '+380 44 000 0001',
     website         = 'https://tenant-a.example',
     address_line1   = '1 Khreshchatyk St',
     city            = 'Kyiv',
-    country         = 'Ukraine',
-    is_active       = true
+    country         = 'Ukraine'
+WHERE id = '00000000-0000-0000-0000-00000000000a' AND legal_name = '';
+
+UPDATE tenants SET slug = 'tenant-a', is_active = true
 WHERE id = '00000000-0000-0000-0000-00000000000a';
 
 UPDATE tenants SET
     legal_name      = 'Globex Corporation LLC',
-    slug            = 'tenant-b',
     contact_email   = 'contact@tenant-b.example',
     phone_number    = '+380 44 000 0002',
     website         = 'https://tenant-b.example',
     address_line1   = '2 Deribasivska St',
     city            = 'Odesa',
-    country         = 'Ukraine',
-    is_active       = true
+    country         = 'Ukraine'
+WHERE id = '00000000-0000-0000-0000-00000000000b' AND legal_name = '';
+
+UPDATE tenants SET slug = 'tenant-b', is_active = true
 WHERE id = '00000000-0000-0000-0000-00000000000b';
 
 -- ── Tenant memberships (platform role → management role) ───────────────────

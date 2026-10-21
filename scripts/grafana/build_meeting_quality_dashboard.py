@@ -181,41 +181,24 @@ SELECT 'note', coalesce(g.error_kind, '—'), count(*)
  ORDER BY 3 DESC"""
 
 # ── Note instructions (Sprint N5) ──────────────────────────────────
-INSTRUCTIONS_SQL = """-- Workspaces whose note instructions changed in the range, and whether the compile worked.
+INSTRUCTIONS_SQL = """-- Workspaces whose note instructions changed in the range.
 SELECT t.name               AS "Workspace",
        w.scope              AS "Scope",
        w.version            AS "Version",
-       w.compile_status     AS "Compile",
-       coalesce(w.compile_error_kind, '—') AS "Error kind",
-       w.backend            AS "Compiled by",
        w.updated_at         AS "Updated"
   FROM workspace_note_instructions w
   JOIN tenants t ON t.id = w.tenant_id
  WHERE $__timeFilter(w.updated_at)
  ORDER BY w.updated_at DESC"""
 
-INSTRUCTED_TS_SQL = f"""-- Per day: the share of notes written under instructions, and what the profile did.
+INSTRUCTED_TS_SQL = f"""-- Per day: the share of notes written under instructions.
 WITH {_GEN}
 SELECT date_trunc('day', n.created_at)                                     AS time,
-       avg(CASE WHEN g.stats ? 'instructions' THEN 1.0 ELSE 0.0 END)       AS "Written under instructions",
-       avg((g.stats->'instructions_applied'->>'scale')::numeric)           AS "Mean length scale",
-       sum(coalesce((g.stats->'instructions_applied'->>'terms_replaced')::int, 0)) AS "Terms replaced"
+       avg(CASE WHEN g.stats->>'instructed' = 'true' THEN 1.0 ELSE 0.0 END) AS "Written under instructions"
   FROM gen g JOIN notes n ON n.id = g.note_id
  WHERE $__timeFilter(n.created_at) AND g.status IN ('complete', 'partial')
  GROUP BY 1
  ORDER BY 1"""
-
-# Prometheus (the default datasource): the compiler's own instruments.
-INSTRUCTIONS_PROM = [
-    ("Instruction compiles by outcome (1 h)",
-     'sum by (outcome) (increase(mdx_note_instructions_compiles_total[1h]))', "none"),
-    ("Instruction compile p95",
-     "histogram_quantile(0.95, sum by (le) (rate(mdx_note_instructions_compile_seconds_bucket[1h])))", "s"),
-    ("Not applied by reason (top 7)",
-     "topk(7, sum by (reason) (increase(mdx_note_instructions_not_applied_total[1d])))", "none"),
-    ("Previews refused by the hourly cap",
-     "sum(increase(mdx_note_instructions_previews_limited_total[1h]))", "none"),
-]  # fmt: skip
 
 ALL_SQL = [
     MEETINGS_SQL,
@@ -390,20 +373,6 @@ def build() -> dict[str, Any]:
             },
         }
     )
-    for i, (title, expr, unit) in enumerate(INSTRUCTIONS_PROM):
-        panel = {
-            "type": "timeseries",
-            "title": title,
-            "gridPos": {"x": (i % 2) * 12, "y": 49 + (i // 2) * 7, "w": 12, "h": 7},
-            "targets": [{"refId": "A", "expr": expr, "legendFormat": "__auto"}],
-            "fieldConfig": {"defaults": {**ts_defaults, "unit": unit}, "overrides": []},
-            "options": {
-                "legend": {"displayMode": "list", "placement": "bottom"},
-                "tooltip": {"mode": "multi"},
-            },
-        }
-        add(panel)
-        panel["datasource"] = {"type": "prometheus"}
     return {
         "title": "Meeting quality (admin)",
         "uid": "meeting-quality",

@@ -1,5 +1,8 @@
 """Scorers for every notes-audit metric: pure functions, a gold meeting and an arm's
 ``produced`` dict in, numbers out. Pinned by ``tests/unit/test_notes_scoring.py``.
+Sprint R0 removed the writing path; the lexical rules the scorer shares with the item
+writer live in ``note_service.domain.text``, the rest in ``_textrules``. Sprint P3
+rewires the harness to read stored notes.
 
     produced = {"lines": [...], "facts": [...], "stats": {...}, "brief": {...},
                 "noise_ranges": [...], "title": str | None, "evidence": "facts" | "transcript"}
@@ -22,8 +25,12 @@ _ENGINE_SRC = Path(__file__).resolve().parents[2] / "services" / "note-service" 
 if str(_ENGINE_SRC) not in sys.path:
     sys.path.insert(0, str(_ENGINE_SRC))
 
-from note_service.domain.meeting_doc import prompts, verify  # noqa: E402
-from note_service.domain.meeting_doc import support as support_rules  # noqa: E402
+from note_service.domain import text as text_rules  # noqa: E402
+
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _normalize  # noqa: E402
+import _textrules  # noqa: E402
 
 # ── Matching gold text to lines ──
 
@@ -97,20 +104,30 @@ def words(text: str) -> set[str]:
     return {w for w in _WORD.findall(text.lower()) if w not in STOP and len(w) > 1}
 
 
-def overlap(gold: str, produced: str) -> float:
-    g = words(gold)
-    return len(g & words(produced)) / len(g) if g else 0.0
+def overlap(
+    gold: str, produced: str, language: str = "en", holders: frozenset[str] = frozenset()
+) -> float:
+    """Gold words found in the produced line, both through ``_normalize.fold`` (a
+    reporting clause or holder suffix is not a claim), each with the compound rule."""
+    g = words(_normalize.fold(gold, language, holders=holders))
+    have = words(_normalize.fold(produced, language, holders=holders))
+    if not g:
+        return 0.0
+    hit = sum(1 for w in g if w in have or any(_normalize._token_matches(w, h) for h in have))
+    return hit / len(g)
 
 
-def best_match(gold: str, lines: list[str]) -> tuple[int, float]:
-    scored = [(i, overlap(gold, line)) for i, line in enumerate(lines)]
+def best_match(
+    gold: str, lines: list[str], language: str = "en", holders: frozenset[str] = frozenset()
+) -> tuple[int, float]:
+    scored = [(i, overlap(gold, line, language, holders)) for i, line in enumerate(lines)]
     return max(scored, key=lambda p: p[1], default=(-1, 0.0))
 
 
 # ── Support: does what a line says rest on what it cites? ───────────
 
 # The engine's own per-language threshold.
-SUPPORT_THRESHOLD = support_rules.LINE_SUPPORT_DEFAULT
+SUPPORT_THRESHOLD = text_rules.LINE_SUPPORT_DEFAULT
 REDUNDANT_JACCARD = 0.6
 # Lines the metrics look at (headings and the transcript note are structure).
 _NOT_CONTENT = frozenset({"heading", "note"})
@@ -167,34 +184,34 @@ TYPE_ALIASES: dict[str, str] = {
 
 
 def tokens(text: str, language: str = "en") -> frozenset[str]:
-    """The engine's content tokens (``support.content_tokens``): stop words
-    out, long words cut to a stem, so wording is free."""
-    return frozenset(support_rules.content_tokens(text, language))
+    """The shared content tokens (``text.content_tokens``): stop words out, long words
+    cut to a stem, so wording is free."""
+    return frozenset(text_rules.content_tokens(text, language))
 
 
 def _numbers(text: str) -> set[str]:
-    return {n.replace(",", "").replace(".", "") for n in verify._NUMBER.findall(text)} - {""}
+    return {n.replace(",", "").replace(".", "") for n in _textrules.NUMBER.findall(text)} - {""}
 
 
 def _body(text: str) -> str:
     """A line without its list marker or heading hashes."""
-    return support_rules._body(text)
+    return text_rules.body(text)
 
 
 def support(
     line: str, cited: list[str], language: str = "en", *, threshold: float | None = None
 ) -> bool:
     """A line is supported when half its content, every number and every name is in what it
-    cites; ratio and name rule are the engine's own (``meeting_doc.support``).
+    cites; ratio and name rule are the shared ones (``note_service.domain.text``).
     """
     evidence = " ".join(cited)
     body = _body(line)
-    floor = support_rules.line_support_threshold(language) if threshold is None else threshold
-    if support_rules.support_ratio(body, evidence, language) < floor:
+    floor = text_rules.line_support_threshold(language) if threshold is None else threshold
+    if text_rules.support_ratio(body, evidence, language) < floor:
         return False
     if not _numbers(line) <= _numbers(evidence):
         return False
-    return not support_rules.new_names(body, evidence)
+    return not text_rules.new_names(body, evidence)
 
 
 def invents(line: str, evidence: list[str]) -> bool:
@@ -202,7 +219,7 @@ def invents(line: str, evidence: list[str]) -> bool:
     joined = " ".join(evidence)
     if not _numbers(line) <= _numbers(joined):
         return True
-    return bool(support_rules.new_names(_body(line), joined))
+    return bool(text_rules.new_names(_body(line), joined))
 
 
 def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
@@ -321,6 +338,17 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     lines = [ln for ln in produced.get("lines", []) if ln.get("text", "").strip()]
     content = [ln for ln in lines if ln.get("kind") not in _NOT_CONTENT]
     facts = {f["item_key"]: f for f in produced.get("facts", [])}
+    # Review step 2: the holders every matcher folds out (gold names, speakers, holders found).
+    holders = frozenset(
+        h
+        for h in (
+            *gold.get("name_candidates", []),
+            *(gold.get("speakers") or {}).values(),
+            *(f.get("attributed_to") or "" for f in facts.values()),
+            *(c.get("holder") or "" for c in gold.get("certainties") or []),
+        )
+        if h and h.strip()
+    )
     transcript = [t["text"] for t in meeting.get("transcript", [])]
     by_transcript = produced.get("evidence") == "transcript"
     all_evidence = transcript if by_transcript else [_evidence(f) for f in facts.values()]
@@ -342,9 +370,6 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     # Invented claims: a number or a name no evidence of the run has.
     row["invented_claims"] = sum(1 for ln in content if invents(_claim(ln), all_evidence))
 
-    # Example echo: a line that repeats a prompt example.
-    row["example_echo"] = sum(1 for ln in lines if prompts.echoes_example(ln["text"]))
-
     # Key-fact recall, overall and per third of the recording.
     texts = [ln["text"] for ln in content]
     recall = Ratio()
@@ -352,7 +377,7 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     missed: list[int] = []
     for i, fact in enumerate(gold.get("key_facts", [])):
         text = fact["text"] if isinstance(fact, dict) else fact
-        _, best = best_match(text, texts)
+        _, best = best_match(text, texts, language, holders)
         hit = best >= MATCH_THRESHOLD
         recall.add(hit)
         # v3 names the third (from the transcript's timestamps); v2 infers it.
@@ -422,10 +447,10 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
         row["model_tier_precision"] = [right, len(model)]
 
     # Hedges: a hedged gold statement is still hedged where it is written.
-    markers = support_rules.MODALITY_MARKERS.get(language, support_rules.MODALITY_MARKERS["en"])
+    markers = _textrules.MODALITY_MARKERS.get(language, _textrules.MODALITY_MARKERS["en"])
     hedges = Ratio()
     for hedged in gold.get("hedged", []):
-        index, best = best_match(hedged["fact"], texts)
+        index, best = best_match(hedged["fact"], texts, language, holders)
         if best < MATCH_THRESHOLD:
             continue
         line = content[index]
@@ -461,6 +486,9 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     # Every written line can open its evidence; the key-dates block carries
     # the dates the recording set.
     row["lines_cited"] = [sum(1 for ln in content if ln.get("fact_ids")), len(content)]
+    # A1: certainty and holder at extraction, against the gold labels (matched by a phrase
+    # of the quote or the text); holder presence over every claim-type fact the run kept.
+    row.update(certainty_columns(gold.get("certainties") or [], list(facts.values()), language))
     # B4: what the written lines are — the speaker's words, one fact, or several.
     row["provenance"] = {
         k: sum(1 for ln in content if (ln.get("provenance") or "none") == k)
@@ -471,19 +499,28 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     wanted_claims = gold.get("claims") or []
     if wanted_claims:
         hits = 0
+        found_each: list[bool] = []
         for want in wanted_claims:
             texts = want.get("claim") or []
             who = want.get("who")
             verdicts = want.get("verdict") or []
             for ln in claim_rows:
                 if (
-                    any(_contains(ln["text"], t) for t in texts)
-                    and (not who or _contains(ln["text"], who))
-                    and (not verdicts or any(_contains(ln["text"], v) for v in verdicts))
+                    any(_normalize.contains(ln["text"], t, language) for t in texts)
+                    and (not who or _normalize.contains(ln["text"], who, language))
+                    and (
+                        not verdicts
+                        or any(_normalize.contains(ln["text"], v, language) for v in verdicts)
+                    )
                 ):
                     hits += 1
+                    found_each.append(True)
                     break
+            else:
+                found_each.append(False)
         row["claims_recall"] = [hits, len(wanted_claims)]
+        # Review step 2: per gold claim, for the agreement check with notes_assert.
+        row["claims_found"] = found_each
     wanted = [d for d in gold.get("dates", []) if d.get("tense") != "past"]
     if wanted and any("kind" in ln for ln in lines):
         in_block = {v for ln in lines if ln.get("kind") == "date" for v in ln.get("dates") or []}
@@ -498,23 +535,12 @@ def score_meeting(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str
     row["first_person_lines"] = sum(
         1
         for ln in content
-        if ln.get("kind") not in _TASK_LINE_KINDS and support_rules.first_person(_body(ln["text"]))
+        if ln.get("kind") not in _TASK_LINE_KINDS and _textrules.first_person(_body(ln["text"]))
     )
-
-    # Figures, presenter, contact.
-    row.update(score_f3(gold, produced, lines))
 
     # Error taxonomy detectors (docs/eval/error-taxonomy.md).
     names = {*known_names, *(e["canonical"] for e in gold.get("entities", []))}
     row.update(score_taxonomy(meeting, produced, content, names))
-    # Composition to the standard.
-    row.update(score_d2(meeting, produced))
-    linted = lint_produced(meeting, produced)
-    if linted is not None:
-        row["lint"] = linted
-        # The document standard §8: Q3 and Q7, the questions code can answer.
-        auto = rubric_auto(meeting, produced)
-        row["rubric_auto"] = {k: auto[k] for k in ("Q3", "Q7")} if auto else {}
 
     # Checklists, by index.
     row["must_contain_failed"] = [
@@ -706,7 +732,12 @@ def _participants(gold: dict[str, Any], produced: dict[str, Any]) -> dict[str, l
     }
 
 
-def _opinion_attribution(gold: dict[str, Any], texts: list[str]) -> list[int] | None:
+def _opinion_attribution(
+    gold: dict[str, Any],
+    texts: list[str],
+    language: str = "en",
+    holders: frozenset[str] = frozenset(),
+) -> list[int] | None:
     """SM-06: of the gold opinions the note carries, those whose line names
     their holder."""
     facts = {f["id"]: f for f in gold.get("key_facts") or [] if isinstance(f, dict) and "id" in f}
@@ -718,7 +749,7 @@ def _opinion_attribution(gold: dict[str, Any], texts: list[str]) -> list[int] | 
         fact = facts.get(op.get("fact"))
         if fact is None:
             continue
-        index, best = best_match(fact["text"], texts)
+        index, best = best_match(fact["text"], texts, language, holders)
         if best < MATCH_THRESHOLD:
             continue
         total += 1
@@ -792,7 +823,7 @@ def score_sq1(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str, An
     asr = [t["text"] for t in meeting.get("transcript", [])]
     row: dict[str, Any] = {}
     row.update(_participants(gold, produced))
-    attribution = _opinion_attribution(gold, texts)
+    attribution = _opinion_attribution(gold, texts, meeting.get("language", "en"))
     if attribution is not None:
         row["opinion_attribution"] = attribution
     row["filler_lines"] = filler_lines(content, cited_evidence=produced.get("evidence") == "facts")
@@ -816,94 +847,21 @@ def transcript_sentences(meeting: dict[str, Any]) -> list[str]:
 
 
 def copies_transcript(line: str, sentences: list[str]) -> bool:
-    """The line is a transcript sentence, or nearly all of one — the
-    engine's own ``is_copied`` rule against every sentence said."""
+    """The line is a transcript sentence, or nearly all of one (the ``is_copied``
+    rule against every sentence said)."""
     body = _body(line)
-    return any(verify.is_copied(body, sentence) for sentence in sentences)
+    return any(_textrules.is_copied(body, sentence) for sentence in sentences)
 
 
 def informs(line: str, kind: str | None, language: str = "en") -> bool:
-    """The engine's ``no_information`` rule (``support.carries_information``)."""
+    """The ``no_information`` rule (``carries_information``)."""
     body = _body(line)
-    return support_rules.carries_information(
+    return _textrules.carries_information(
         body,
         language,
         short_ok=kind in _TASK_LINE_KINDS,
-        has_date=verify._has_date_word(body),
+        has_date=_textrules.has_date_word(body),
     )
-
-
-# ── Figures, presenter, contact ─────────────────────────────────
-
-
-def _value(text: str, language: str = "en") -> Any:
-    from note_service.domain.meeting_doc import numbers
-
-    return numbers.parse_value(text or "", language)
-
-
-def _name_match(gold: str, produced: str) -> bool:
-    """Same quantity: most of the gold name's content words."""
-    return overlap(gold, produced) >= 0.5
-
-
-def score_f3(gold: dict[str, Any], produced: dict[str, Any], lines: list[dict[str, Any]]) -> dict:
-    """``figure_recall``, ``figure_value_accuracy``, ``qualifier_preservation``,
-    ``presenter_accuracy``, ``contact_present`` as ``[hit, total]``; absent when the gold has nothing.
-    """
-    out: dict[str, Any] = {}
-    made = [f["figure"] for f in produced.get("facts", []) if f.get("figure")]
-    wanted = gold.get("figures") or []
-    if wanted:
-        recall = Ratio()
-        values = Ratio()
-        qualifiers = Ratio()
-        for want in wanted:
-            value = _value(want["value"])
-            named = [m for m in made if _name_match(want["name"], m["name"])]
-            right = [m for m in named if _value(m["value"]) == value]
-            recall.add(bool(right))
-            for m in named:
-                values.add(_value(m["value"]) == value)
-            if want.get("qualifier") and right:
-                qualifiers.add(any(m.get("qualifier") == want["qualifier"] for m in right))
-        out["figure_recall"] = recall.pair()
-        out["figure_value_accuracy"] = values.pair()
-        out["qualifier_preservation"] = qualifiers.pair()
-    presenter = gold.get("presenter")
-    if presenter:
-        # The presenter is named in paragraph 1 (framing).
-        text = "\n".join(ln["text"] for ln in lines if ln.get("kind") in ("presenter", "framing"))
-        fields = [presenter["name"], presenter.get("role"), presenter.get("organisation")]
-        out["presenter_accuracy"] = [
-            sum(1 for f in fields if f and _contains(text, f)),
-            sum(1 for f in fields if f),
-        ]
-    contact = gold.get("contact") or []
-    if contact:
-        text = "\n".join(ln["text"] for ln in lines if ln.get("kind") == "next_step")
-        out["contact_present"] = (
-            [sum(1 for c in contact if best_match(c, [text])[1] >= MATCH_THRESHOLD), len(contact)]
-            if text
-            else [0, len(contact)]
-        )
-    return out
-
-
-def f3_gates(summary: dict[str, Any]) -> dict[str, bool]:
-    """F3 acceptance where the corpus has the gold for it: every value
-    right, recall ≥ 0.85, every qualifier kept, presenter ≥ 0.9."""
-    gates: dict[str, bool] = {}
-    for name, key, bar in (
-        ("figure_value_accuracy == 1.0", "figure_value_accuracy", 1.0),
-        ("figure_recall >= 0.85", "figure_recall", 0.85),
-        ("qualifier_preservation == 1.0", "qualifier_preservation", 1.0),
-        ("presenter_accuracy >= 0.9", "presenter_accuracy", 0.9),
-    ):
-        value = summary.get(key)
-        if value is not None:
-            gates[name] = value >= bar
-    return gates
 
 
 def f2_gates(summary: dict[str, Any], *, baseline_recall: float | None) -> dict[str, bool]:
@@ -970,8 +928,6 @@ def score_taxonomy(
     """``label_lines`` (D-LABEL), ``unresolved_subject`` (F-SUBJ), ``unspecific_bullets``
     (D-SPEC), ``volume`` (D-VOL) and ``headings`` (D-STRUCT).
     """
-    from note_service.domain.meeting_doc.verify import _has_date_word
-
     language = meeting.get("language", "en")
     pronouns = _PRONOUNS.get(language, _PRONOUNS["en"])
     known = frozenset(n for name in known_names for n in [name, *name.split()] if n)
@@ -994,11 +950,11 @@ def score_taxonomy(
         1
         for ln in bullets
         # A label is not a name, and its digit is not a number.
-        if support_rules.specificity(
+        if _textrules.specificity(
             _DEFAULT_LABEL.sub("", ln["text"]),
             language,
             known=known,
-            has_date=_has_date_word(ln["text"]),
+            has_date=_textrules.has_date_word(ln["text"]),
         )
         == 0
     )
@@ -1017,224 +973,17 @@ def score_taxonomy(
     return out
 
 
-# ── Composition to the standard ─────────────────────────
-
-
-def score_d2(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str, Any]:
-    """Per-note composition metrics as ``[hit, total]`` pairs; absent when the arm writes no sections."""
-    from note_service.domain.meeting_doc import doclint
-    from note_service.domain.meeting_doc import support as rules
-
-    inputs = _lint_inputs(meeting, produced)
-    if inputs is None:
-        return {}
-    sections, ctx = inputs
-    out: dict[str, Any] = {}
-    headed = [s for s in sections if s.role == "topics" and (s.title or "").strip()]
-    if ctx.minutes >= doclint.SECTIONS_FROM_MINUTES:
-        target = doclint.target_sections(ctx.minutes)
-        low = max(doclint.SECTIONS_MIN, target - doclint.SECTIONS_TOLERANCE)
-        high = min(doclint.SECTIONS_MAX, target + doclint.SECTIONS_TOLERANCE)
-        out["sections_in_band"] = [1 if low <= len(headed) <= high else 0, 1]
-    good = [
-        s
-        for s in headed
-        if not doclint.heading_faults(s.title or "")
-        and (s.title or "").casefold() not in doclint.GENERIC_HEADINGS
-    ]
-    out["headings_pass"] = [len(good), len(headed)]
-    points = [
-        (s, n, ln)
-        for s in sections
-        for n, ln in enumerate(s.lines)
-        if ln.kind == "bullet" and not ln.parent
-    ]
-    out["bullets_specific"] = [
-        sum(1 for _s, _n, ln in points if doclint.specificity(ln, ctx) > 0),
-        len(points),
-    ]
-    with_children = sum(1 for s, n, _ln in points if n + 1 < len(s.lines) and s.lines[n + 1].parent)
-    out["children"] = [with_children, len(points)]
-    out["subject_failures"] = sum(
-        1
-        for s in sections
-        for ln in s.lines
-        if (fault := doclint.line_fault(ln, ctx)) and fault[0] == "line.subject"
-    )
-    stats = produced.get("stats") or {}
-    roles = stats.get("roles") or {}
-    names = (meeting.get("gold") or {}).get("speakers") or {}
-    errors = 0
-    for fact in produced.get("facts", []):
-        holder = fact.get("attributed_to")
-        label = fact.get("speaker_label")
-        if not holder:
-            continue
-        if rules.real_name(holder) is None:
-            errors += 1  # a label as a holder
-        elif (
-            roles.get(label) in ("narrator", "host")
-            and holder == names.get(label)
-            and not _FIRST_PERSON_CUE.search(fact.get("quote", ""))
-        ):
-            errors += 1  # the narrator holding what it reports
-    out["narrator_attribution_errors"] = errors
-    gold_roles = (meeting.get("gold") or {}).get("roles") or {}
-    if gold_roles:
-        out["roles_correct"] = [
-            sum(1 for label, role in gold_roles.items() if roles.get(label) == role),
-            len(gold_roles),
-        ]
-    top = next((s for s in sections if s.section_key == "gen:overview"), None)
-    first = [ln for ln in top.lines if ln.kind in ("framing", "presenter")] if top else []
-    if first:
-        out["orientation_p1_ok"] = [0 if doclint.p1_faults(first, ctx) else 1, 1]
-    lint = stats.get("lint") or {}
-    if lint and not lint.get("error"):
-        hard = {c for c, sev in doclint.SEVERITY.items() if sev in doclint.HARD}
-        found = set(lint.get("findings_by_code") or {}) & hard
-        left = set(lint.get("unresolved_hard") or {})
-        out["lint_first_pass"] = [0 if found else 1, 1]
-        out["lint_after_regeneration"] = [0 if left else 1, 1]
-    if stats.get("summary_ladder"):
-        out["summary_ladder"] = stats["summary_ladder"]
-    return out
-
-
-_FIRST_PERSON_CUE = re.compile(r"\b(?:ich|wir|I|we|я|ми)\b", re.IGNORECASE)
-
-
-def d2_gates(summary: dict[str, Any]) -> dict[str, bool]:
-    """Sprint D2 acceptance 2: the linter passes first time on ≥ 90 % of
-    notes and after one regeneration on ≥ 98 %; roles and types right on
-    ≥ 95 %; no rendered line whose subject is a pronoun or a label."""
-    if summary.get("lint_first_pass") is None:
-        return {}
-    out = {
-        "d2_lint_first_pass_90pct": summary["lint_first_pass"] >= 0.9,
-        "d2_lint_after_regeneration_98pct": summary["lint_after_regeneration"] >= 0.98,
-        "d2_no_subject_failures": summary["subject_failures"] == 0,
-    }
-    if summary.get("roles_correct") is not None:
-        out["d2_roles_correct_95pct"] = summary["roles_correct"] >= 0.95
-    if summary.get("recording_type_acc") is not None:
-        out["d2_type_correct_95pct"] = summary["recording_type_acc"] >= 0.95
-    return out
-
-
-# F- codes that are S2; the other F- codes the linter reports are S1.
-_S2_F = frozenset({"F-COPY", "F-DESC", "F-TYPE", "F-DROP", "F-COV"})
-
-
-def d1_gates(summary: dict[str, Any]) -> dict[str, bool]:
-    """Lint acceptance: no unresolved S1; unresolved S2 in <= 2 % of notes; bands met on
-    >= 90 %; no label/pronoun subject, no empty line.
-    """
-    if summary.get("d1_unresolved_s1") is None:
-        return {}
-    return {
-        "d1_no_unresolved_s1": summary["d1_unresolved_s1"] == 0,
-        "d1_unresolved_s2_le_2pct": summary["d1_unresolved_s2_share"] <= 0.02,
-        "d1_volume_band_90pct": summary["d1_volume_band"] >= 0.9,
-        "d1_section_band_90pct": summary["d1_section_band"] >= 0.9,
-        "d1_no_label_or_pronoun_subject": summary["d1_label_or_pronoun_lines"] == 0,
-        "d1_no_unspecific_line": summary["d1_unspecific_lines"] == 0,
-    }
-
-
-def _lint_inputs(meeting: dict[str, Any], produced: dict[str, Any]) -> tuple[Any, Any] | None:
-    """The produced note as the linter reads it: rendered sections and a
-    context from the meeting. None when the arm writes no sections."""
-    from types import SimpleNamespace
-
-    from note_service.domain.meeting_doc import doclint
-
-    if "sections" not in produced:
-        return None
-    sections = doclint.as_rendered(produced["sections"], produced.get("lines", []))
-    speech = _merged_span([(t["t_start_ms"], t["t_end_ms"]) for t in meeting.get("transcript", [])])
-    excluded = _merged_span([(int(r[0]), int(r[1])) for r in produced.get("noise_ranges", [])])
-    gold = meeting.get("gold") or {}
-    names = [
-        *gold.get("name_candidates", []),
-        *(gold.get("speakers") or {}).values(),
-        *(e["canonical"] for e in gold.get("entities", [])),
-    ]
-    stats = produced.get("stats") or {}
-    facts = {
-        f["item_key"]: SimpleNamespace(
-            item_key=f["item_key"],
-            text=f.get("text", ""),
-            quote=f.get("quote", ""),
-            start_ms=int(f.get("start_ms") or 0),
-            certainty=f.get("certainty"),
-            evidence_only=bool(f.get("evidence_only")),
-            figure=f.get("figure"),
-            person=f.get("person"),
-        )
-        for f in produced.get("facts", [])
-    }
-    ctx = doclint.LintContext(
-        language=meeting.get("language", "en"),
-        speech_ms=max(0, speech - excluded),
-        recording_type=stats.get("recording_type"),
-        facts=facts,  # type: ignore[arg-type]
-        known=frozenset(w for n in names for w in [n, *n.split()]),
-        brief=dict(produced.get("brief") or {}),
-        title=produced.get("title"),
-    )
-    return sections, ctx
-
-
-def lint_produced(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str, Any] | None:
-    """The production linter on a produced note; a pipeline-arm note was enforced already
-    (``stats.lint``), so only its unresolved findings remain.
-    """
-    from note_service.domain.meeting_doc import doclint
-
-    stats_lint = (produced.get("stats") or {}).get("lint")
-    if stats_lint and not stats_lint.get("error"):
-        return dict(stats_lint)
-    inputs = _lint_inputs(meeting, produced)
-    if inputs is None:
-        return None
-    findings = doclint.check(*inputs)
-    return {
-        "findings_by_code": doclint._count(f.code for f in findings),
-        "unresolved": doclint._count(f.code for f in findings),
-        "unresolved_rules": doclint._count(f.rule for f in findings),
-        "unresolved_hard": doclint._count(f.code for f in findings if f.hard),
-    }
-
-
-def rubric_auto(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str, Any] | None:
-    from note_service.domain.meeting_doc import doclint
-
-    inputs = _lint_inputs(meeting, produced)
-    return None if inputs is None else doclint.rubric_auto(*inputs)
-
-
 _PAIRS = (
-    # Composition
-    "sections_in_band",
-    "headings_pass",
-    "bullets_specific",
-    "children",
-    "roles_correct",
-    "orientation_p1_ok",
-    "lint_first_pass",
-    "lint_after_regeneration",
     "unresolved_subject",
     "unspecific_bullets",
     "volume",
     "headings",
-    "figure_recall",
-    "figure_value_accuracy",
-    "qualifier_preservation",
-    "presenter_accuracy",
-    "contact_present",
     "lines_cited",
     "claims_recall",
+    "certainty_accuracy",
+    "certainty_labels_found",
+    "holder_accuracy",
+    "holder_presence",
     "key_dates_recall",
     "model_tier_precision",
     "unsupported",
@@ -1258,6 +1007,78 @@ def _rate(pair: list[int] | None) -> float | None:
     return (pair[0] / pair[1]) if pair and pair[1] else None
 
 
+# A1: a gold label accepts the engine's finer value for the same thing (B2's relayed-claim
+# verdicts are allegations with a verdict; a plain fact may carry no certainty at all).
+_CERTAINTY_EQUIVALENT: dict[str, frozenset[str]] = {
+    "allegation": frozenset({"allegation", "reported", "unproven", "refuted"}),
+    "fact": frozenset({"fact", "none"}),
+}
+_CLAIM_TYPES = frozenset(
+    {
+        "statement",
+        "allegation",
+        "opinion",
+        "prediction",
+        "estimate",
+        "proposal",
+        "reported",
+        "unproven",
+        "refuted",
+    }
+)
+
+
+def certainty_columns(
+    labels: list[dict[str, Any]], facts: list[dict[str, Any]], language: str = "en"
+) -> dict[str, Any]:
+    """``certainty_accuracy`` [right, labelled and found], ``holder_accuracy`` [right, labelled
+    with a holder and found with one], ``holder_presence`` [with a holder, claim-type facts]."""
+    out: dict[str, Any] = {}
+    claim_facts = [f for f in facts if (f.get("certainty") or "") in _CLAIM_TYPES]
+    out["holder_presence"] = [
+        sum(1 for f in claim_facts if (f.get("attributed_to") or "").strip()),
+        len(claim_facts),
+    ]
+    out["holders_from_turn"] = sum(
+        1 for f in claim_facts if "holder_from_turn" in (f.get("flags") or [])
+    )
+    out["holders_unknown"] = sum(
+        1 for f in claim_facts if "holder_unknown" in (f.get("flags") or [])
+    )
+    if not labels:
+        return out
+    right = found = holder_right = holder_judged = 0
+    # Diagnosis (A1 review): every (gold, predicted) pair, for the confusion matrix.
+    pairs: list[list[str]] = []
+    for label in labels:
+        hit = next(
+            (
+                f
+                for f in facts
+                if _normalize.contains(f.get("quote") or "", label["match"], language)
+                or _normalize.contains(f.get("text") or "", label["match"], language)
+            ),
+            None,
+        )
+        if hit is None:
+            continue
+        found += 1
+        got = hit.get("certainty") or "none"
+        pairs.append([label["certainty"], got])
+        accepted = _CERTAINTY_EQUIVALENT.get(label["certainty"], frozenset({label["certainty"]}))
+        right += got in accepted
+        want = (label.get("holder") or "").strip()
+        have = (hit.get("attributed_to") or "").strip()
+        if want and have:
+            holder_judged += 1
+            holder_right += want.split()[-1].casefold() == have.split()[-1].casefold()
+    out["certainty_accuracy"] = [right, found]
+    out["certainty_labels_found"] = [found, len(labels)]
+    out["holder_accuracy"] = [holder_right, holder_judged]
+    out["certainty_pairs"] = pairs
+    return out
+
+
 def _provenance_share(rows: list[dict[str, Any]]) -> dict[str, float] | None:
     totals = dict.fromkeys(("verbatim", "paraphrase", "composed", "none"), 0)
     for row in rows:
@@ -1275,15 +1096,7 @@ def aggregate(
     sums: dict[str, list[int]] = {k: [0, 0] for k in _PAIRS}
     thirds = {k: [0, 0] for k in ("1", "2", "3")}
     excluded = [0, 0]
-    invented = echo = labels = 0
-    lint_found: dict[str, int] = {}
-    lint_codes: dict[str, int] = {}
-    s1_left = s2_notes = volume_ok = sections_ok = 0
-    subject_left = unspecific_left = 0
-    auto: dict[str, list[int]] = {"Q3": [], "Q7": []}
-    subject_failures = narrator_errors = 0
-    ladders: dict[str, int] = {}
-    linted_docs = lint_clean = 0
+    invented = labels = 0
     f2 = {"copied_lines": 0, "no_information_lines": 0, "first_person_lines": 0}
     sq1 = {"filler_lines": 0, "propagated_from_asr": 0, "invented_vs_truth": 0}
     truth_docs = 0
@@ -1305,32 +1118,7 @@ def aggregate(
             excluded[0] += row["excluded_ms"][0]
             excluded[1] += row["excluded_ms"][1]
         invented += int(row.get("invented_claims") or 0)
-        echo += int(row.get("example_echo") or 0)
         labels += int(row.get("label_lines") or 0)
-        subject_failures += int(row.get("subject_failures") or 0)
-        narrator_errors += int(row.get("narrator_attribution_errors") or 0)
-        if row.get("summary_ladder"):
-            ladders[row["summary_ladder"]] = ladders.get(row["summary_ladder"], 0) + 1
-        for q, score in (row.get("rubric_auto") or {}).items():
-            if score is not None:
-                auto[q].append(int(score))
-        if "lint" in row:
-            lint = row["lint"]
-            left = lint.get("unresolved") or {}
-            left_rules = lint.get("unresolved_rules") or {}
-            linted_docs += 1
-            lint_clean += 0 if left else 1
-            for code, count in (lint.get("findings_by_code") or {}).items():
-                lint_found[code] = lint_found.get(code, 0) + int(count)
-            for code, count in left.items():
-                lint_codes[code] = lint_codes.get(code, 0) + int(count)
-            hard = lint.get("unresolved_hard") or {}
-            s1_left += sum(int(n) for c, n in hard.items() if c.startswith("F-") and c not in _S2_F)
-            s2_notes += 1 if any(not c.startswith("F-") or c in _S2_F for c in hard) else 0
-            volume_ok += 0 if left_rules.get("volume.words") else 1
-            sections_ok += 0 if left_rules.get("sections.count") else 1
-            subject_left += int(left_rules.get("line.subject") or 0)
-            unspecific_left += int(left_rules.get("line.specific") or 0)
         for key in f2:
             f2[key] += int(row.get(key) or 0)
         for key in sq1:
@@ -1355,7 +1143,6 @@ def aggregate(
     return {
         "unsupported_rate": _rate(sums["unsupported"]),
         "invented_claims": invented,
-        "example_echo": echo,
         "key_fact_recall": _rate(sums["key_fact_recall"]),
         "coverage_ratio": (min(present) / max(present)) if present and max(present) > 0 else None,
         "recall_by_third": per_third,
@@ -1370,16 +1157,18 @@ def aggregate(
         "model_tier_precision": _rate(sums["model_tier_precision"]),
         "lines_cited": _rate(sums["lines_cited"]),
         "claims_recall": _rate(sums["claims_recall"]),
+        # A1
+        "certainty_accuracy": _rate(sums["certainty_accuracy"]),
+        "certainty_labels_found": _rate(sums["certainty_labels_found"]),
+        "holder_accuracy": _rate(sums["holder_accuracy"]),
+        "holder_presence": _rate(sums["holder_presence"]),
+        "holders_from_turn": int(sum(r.get("holders_from_turn") or 0 for r in rows)),
+        "holders_unknown": int(sum(r.get("holders_unknown") or 0 for r in rows)),
         # B4: the share of written lines that are verbatim, one fact or several.
         "provenance_share": _provenance_share(rows),
         "key_dates_recall": _rate(sums["key_dates_recall"]),
         "entity_sources": _sum_sources(rows),
         "date_resolution": _rate(sums["date_resolution"]),
-        "figure_recall": _rate(sums["figure_recall"]),
-        "figure_value_accuracy": _rate(sums["figure_value_accuracy"]),
-        "qualifier_preservation": _rate(sums["qualifier_preservation"]),
-        "presenter_accuracy": _rate(sums["presenter_accuracy"]),
-        "contact_present": _rate(sums["contact_present"]),
         **f2,
         # Error taxonomy detectors.
         "label_lines": labels,
@@ -1388,31 +1177,6 @@ def aggregate(
         "words_per_minute": (
             sums["volume"][0] * 60 / sums["volume"][1] if sums["volume"][1] else None
         ),
-        # Composition.
-        "sections_in_band": _rate(sums["sections_in_band"]),
-        "headings_pass": _rate(sums["headings_pass"]),
-        "bullets_specific_share": _rate(sums["bullets_specific"]),
-        "children_share": _rate(sums["children"]),
-        "subject_failures": subject_failures,
-        "narrator_attribution_errors": narrator_errors,
-        "roles_correct": _rate(sums["roles_correct"]),
-        "orientation_p1_ok": _rate(sums["orientation_p1_ok"]),
-        "lint_first_pass": _rate(sums["lint_first_pass"]),
-        "lint_after_regeneration": _rate(sums["lint_after_regeneration"]),
-        "summary_ladder": dict(sorted(ladders.items())),
-        # What the linter found, what it could not repair, and its gate numbers.
-        "lint_findings": dict(sorted(lint_found.items())),
-        "lint_unresolved": dict(sorted(lint_codes.items())),
-        "lint_clean_rate": (lint_clean / linted_docs) if linted_docs else None,
-        "d1_unresolved_s1": s1_left if linted_docs else None,
-        "d1_unresolved_s2_share": (s2_notes / linted_docs) if linted_docs else None,
-        "d1_volume_band": (volume_ok / linted_docs) if linted_docs else None,
-        "d1_section_band": (sections_ok / linted_docs) if linted_docs else None,
-        "d1_label_or_pronoun_lines": subject_left if linted_docs else None,
-        "d1_unspecific_lines": unspecific_left if linted_docs else None,
-        # The rubric's Q3 and Q7 read by code, mean of 0–2 per note.
-        "rubric_auto_q3": (sum(auto["Q3"]) / len(auto["Q3"])) if auto["Q3"] else None,
-        "rubric_auto_q7": (sum(auto["Q7"]) / len(auto["Q7"])) if auto["Q7"] else None,
         "headings_per_10_min": (
             sums["headings"][0] * 600 / sums["headings"][1] if sums["headings"][1] else None
         ),
@@ -1423,8 +1187,8 @@ def aggregate(
         "filler_lines": sq1["filler_lines"],
         "title_ok": _rate(sums["title_ok"]),
         "by_third_ratio": (min(present) / max(present)) if present and max(present) > 0 else None,
-        # Coverage.
-        "sections_count_ok": (sections_ok / linted_docs) if linted_docs else None,
+        # Coverage (``sections_count_ok`` was the old linter's band; P3 decides its successor).
+        "sections_count_ok": None,
         "near_empty_rate": _rate(near_empty),
         "one_bullet_sections": one_bullet,
         # Form.

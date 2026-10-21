@@ -385,6 +385,8 @@ final class NoteViewModel: ObservableObject {
 
     /// Offered on an editable draft from a recording, once the server answered with the feature on.
     var canWriteDifferently: Bool { editable && jobId != nil && noteInstructions != nil }
+    /// "Regenerate as…" (P2): an editable note with a recording.
+    var canRegenerate: Bool { editable && jobId != nil }
 
     /// Asked once per note; a failure leaves the menu item hidden.
     func loadNoteInstructions() async {
@@ -392,8 +394,16 @@ final class NoteViewModel: ObservableObject {
         noteInstructions = try? await api.noteInstructions(noteId: noteId)
     }
 
-    func previewNoteInstructions(_ text: String) async throws -> AIInstructions {
-        try await api.previewNoteInstructions(noteId: noteId, text: text)
+    /// P2 — "Regenerate as…": write the note again with `template` from now on.
+    /// Returns `notRewrittenText` when the rewrite was refused (409).
+    func regenerate(as template: NoteTemplate) async throws -> String? {
+        do {
+            try await api.regenerate(noteId: noteId, template: template)
+        } catch APIError.http(status: 409, problem: _) {
+            return Self.notRewrittenText
+        }
+        await loadGeneration()
+        return nil
     }
 
     /// Saves `text` (nil removes the instructions), then writes the note again.
@@ -1279,6 +1289,9 @@ final class NoteViewModel: ObservableObject {
 
     /// The rows behind the generated note, by line key; empty when not generated.
     @Published private(set) var generatedRows: [GeneratedItem] = []
+    /// A3 — the note's respellings, shown over the transcript until the reader asks for the words as heard.
+    @Published private(set) var noteCorrections: [NoteCorrection] = []
+    @Published var showAsTranscribed = false
     @Published private(set) var rowsByKey: [String: GeneratedItem] = [:]
     /// Short / Standard / Detailed, remembered per note on this phone.
     @Published var detail: DetailLevel = .standard {
@@ -1303,6 +1316,15 @@ final class NoteViewModel: ObservableObject {
         let rows = (try? await api.generatedItems(noteId: noteId)) ?? []
         generatedRows = rows
         rowsByKey = Dictionary(rows.map { ($0.itemKey, $0) }, uniquingKeysWith: { a, _ in a })
+        noteCorrections = rows.isEmpty ? [] : ((try? await api.correctionsSummary(noteId: noteId)) ?? [])
+    }
+
+    /// The transcript paragraph as the reader asked for it: the note's spellings in place, or as heard.
+    func transcriptParagraph(_ paragraph: String) -> AttributedString {
+        if !showAsTranscribed, let substituted = NoteCorrection.substituted(paragraph, noteCorrections) {
+            return substituted
+        }
+        return EntityCorrection.underlined(paragraph, entityCorrections)
     }
 
     /// The row behind a displayed line, marker and all — or nil.

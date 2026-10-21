@@ -4,19 +4,18 @@ import { ApiError } from "../api/http";
 import {
   deleteNoteInstructions,
   getNoteInstructions,
-  previewNoteInstructions,
   putNoteInstructions,
 } from "../api/aiInstructions";
 import type { AiInstructions } from "../api/types";
-import { FAILED_COPY, Readout, errorCopy } from "./NoteInstructionsCard";
+import { SKELETON, errorCopy } from "./NoteInstructionsCard";
 import { useToast } from "./Toaster";
 
 const NEAR_LIMIT = 200;
 
 /**
- * "Write this note differently…" (N4): instructions for this note only, added to the
- * workspace's and the meeting type's, then the note is written again. Any editor of the
- * note. Save and rewrite = save, then rewrite; Remove and rewrite = remove, then rewrite.
+ * "Write this note differently…": instructions for this note only, added to the
+ * workspace's, then the note is written again. Any editor of the note. Regenerate = save,
+ * then rewrite; Remove and rewrite = remove, then rewrite.
  */
 export function NoteInstructionsSheet({
   noteId,
@@ -32,8 +31,7 @@ export function NoteInstructionsSheet({
   const [stored, setStored] = useState<AiInstructions | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [draft, setDraft] = useState("");
-  const [preview, setPreview] = useState<AiInstructions | null>(null);
-  const [busy, setBusy] = useState<"checking" | "saving" | null>(null);
+  const [busy, setBusy] = useState<"saving" | null>(null);
   // Read through refs: the page rebuilds them each render, and the text must load once.
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -68,18 +66,7 @@ export function NoteInstructionsSheet({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const max = stored?.max_chars ?? 8000;
-
-  const check = async () => {
-    setBusy("checking");
-    try {
-      setPreview(await previewNoteInstructions(noteId, { text: draft }));
-    } catch (err) {
-      toast.error(errorCopy(err));
-    } finally {
-      setBusy(null);
-    }
-  };
+  const max = stored?.max_chars ?? 4000;
 
   const rewrite = async (save: () => Promise<unknown>, saved: string) => {
     setBusy("saving");
@@ -130,20 +117,12 @@ export function NoteInstructionsSheet({
               aria-label="Instructions for this note"
               aria-describedby="note-instructions-counter"
               value={draft}
+              placeholder={SKELETON}
               maxLength={max}
               rows={8}
               spellCheck
               disabled={busy !== null}
-              onChange={(e) => {
-                setDraft(e.target.value);
-                setPreview(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && draft.trim()) {
-                  e.preventDefault();
-                  void check();
-                }
-              }}
+              onChange={(e) => setDraft(e.target.value)}
             />
             <p
               id="note-instructions-counter"
@@ -151,30 +130,7 @@ export function NoteInstructionsSheet({
             >
               {draft.length} / {max}
             </p>
-            {busy === "checking" && (
-              <p className="help" role="status">
-                Reading your instructions…
-              </p>
-            )}
-            {preview && (
-              <>
-                {preview.compile_status === "failed" && (
-                  <p className="banner banner-warn" role="status">
-                    {FAILED_COPY}
-                  </p>
-                )}
-                <Readout data={preview} />
-              </>
-            )}
             <div className="settings-actions">
-              <button
-                type="button"
-                className="btn"
-                disabled={busy !== null || !draft.trim()}
-                onClick={() => void check()}
-              >
-                Check
-              </button>
               <button
                 type="button"
                 className="btn primary"
@@ -186,7 +142,7 @@ export function NoteInstructionsSheet({
                   )
                 }
               >
-                {busy === "saving" ? "Rewriting…" : "Save and rewrite"}
+                {busy === "saving" ? "Regenerating…" : "Regenerate this note with the new instructions"}
               </button>
               {stored.version > 0 && (
                 <button

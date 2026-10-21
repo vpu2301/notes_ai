@@ -44,6 +44,19 @@ _artefact_total = _meter.create_counter(
 LOOP_MIN_N = 2
 LOOP_MAX_N = 6
 KEEP_REPETITIONS = 2
+# A3 T2 — the decoder's stock outro lines ("Thank you for watching!"), per language: cut when
+# the decoder itself doubts the speech (no_speech_prob) OR a gap of at least this long
+# precedes the segment — a real "thanks for watching" spoken mid-speech, with no gap and a
+# confident decoder, stays. A segment is an outro when its normalised text is one of these
+# or starts with one and has at most OUTRO_MAX_TOKENS tokens.
+STOCK_OUTROS: dict[str, tuple[str, ...]] = {
+    "en": ("thank you for watching", "thanks for watching", "subscribe"),
+    "de": ("danke fürs zuschauen", "untertitel von", "untertitelung"),
+    "uk": ("дякую за перегляд", "підпишіться"),
+}
+OUTRO_GAP_MS = 3_000
+OUTRO_NO_SPEECH = 0.5
+OUTRO_MAX_TOKENS = 6
 # Dropped before grams are compared (B3 T3): a drifting loop swaps these ("das" / "der").
 _ARTICLES = frozenset(
     [
@@ -152,6 +165,20 @@ def loop_cut(
     return None
 
 
+def is_stock_outro(text: str, language: str | None) -> bool:
+    """True when ``text`` is a stock outro line of ``language`` (every language when None)."""
+    norm = _norm(text)
+    if not norm:
+        return False
+    tables = [STOCK_OUTROS[language]] if language in STOCK_OUTROS else list(STOCK_OUTROS.values())
+    for phrases in tables:
+        for phrase in phrases:
+            key = _norm(phrase)
+            if norm == key or (norm.startswith(key) and len(norm.split()) <= OUTRO_MAX_TOKENS):
+                return True
+    return False
+
+
 def _artefact_id(phrase: object) -> str:
     for k, p in enumerate(load_artefacts()):
         if p is phrase:
@@ -191,6 +218,7 @@ def apply(output: TranscriptionOutput, speech: Sequence[SpeechSegment]) -> GateR
 
     previous_norm: str | None = None
     same_run = 0
+    previous_end: int | None = None
     for seg in output.segments:
         d = _diag_for(seg, diags)
         share = speech_share(seg.start_ms, seg.end_ms, speech)
@@ -205,6 +233,18 @@ def apply(output: TranscriptionOutput, speech: Sequence[SpeechSegment]) -> GateR
         ):
             if value is None:
                 unavailable[name] = unavailable.get(name, 0) + 1
+
+        # A3 T2 — a stock outro the decoder writes over the credits: cut when the decoder
+        # doubts the speech or a gap of OUTRO_GAP_MS precedes it; spoken mid-speech it stays.
+        gap_before = seg.start_ms - previous_end if previous_end is not None else seg.start_ms
+        previous_end = max(seg.end_ms, seg.start_ms)
+        if is_stock_outro(seg.text, seg.language or output.language) and (
+            (no_speech is not None and no_speech >= OUTRO_NO_SPEECH) or gap_before >= OUTRO_GAP_MS
+        ):
+            record(seg, "artefact_outro", d, share)
+            if not enabled:
+                out_segments.append(seg)
+            continue
 
         # T3
         phrase = match_artefact(seg.text)

@@ -50,6 +50,8 @@ final class CaptureViewModel: ObservableObject {
     }
     /// Picks the template family the note is written into. Per meeting, not a preference.
     @Published var meetingType: MeetingType = .auto
+    /// P2 — the writer's template for the next note. Per meeting, like the kind; `auto` lets the model choose.
+    @Published var template: NoteTemplate = .auto
     /// The note this capture is typing into, once the server has opened one.
     @Published private(set) var noteId: String?
     /// True while typed text has not reached the server.
@@ -434,6 +436,7 @@ final class CaptureViewModel: ObservableObject {
                 startedAt: recordingStartedAt,
                 language: language == Self.autoLanguage ? nil : language,
                 meetingType: meetingType,
+                template: template,
                 calendar: meetingCalendar)
             noteId = created.id
             await loadNoteContent(created.id)
@@ -500,7 +503,8 @@ final class CaptureViewModel: ObservableObject {
             calendar: meetingCalendar,
             identityId: app.identityId,
             tenantId: boundTenantId ?? app.tenantId,
-            updatedAt: Date()))
+            updatedAt: Date(),
+            template: template == .auto ? nil : template.rawValue))
     }
 
     /// Autosave into the note; only the author's section changes.
@@ -630,6 +634,7 @@ final class CaptureViewModel: ObservableObject {
                 startedAt: pending.startedAt,
                 language: pending.language == Self.autoLanguage ? nil : pending.language,
                 meetingType: MeetingType(rawValue: pending.meetingType) ?? .auto,
+                template: pending.template.flatMap { NoteTemplate(rawValue: $0) } ?? .auto,
                 calendar: pending.calendar,
                 bearer: bearer)
             id = created.id

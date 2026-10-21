@@ -25,8 +25,7 @@ transcript is not committed.
 These and the golden claims (`../fidelity/golden_claims.json`) are the acceptance examples of
 `docs/development/ai-notes-quality/05-prompt-instructions.md`.
 
-The legacy `other_language` exclusion record (readable; never used for new
-exclusions) is a unit test: `services/note-service/tests/unit/test_meeting_doc_multilingual.py`.
+The legacy `other_language` exclusion record went with the old writing path (Sprint R0).
 Monolingual controls are the main corpus (`tests/fixtures/eval/notes`).
 
     make eval-multilingual BACKEND=mistral_eu            # new path, 3 runs each

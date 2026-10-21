@@ -17,6 +17,8 @@ struct NoteView: View {
     @State private var historyPresented = false
     /// "Write this note differently…" (N4).
     @State private var instructionsPresented = false
+    /// "Regenerate as…" (P2).
+    @State private var regeneratePresented = false
     /// Which speaker label is being renamed, and the name it starts from.
     @State private var renaming: SpeakerRename?
     /// The turn whose avatar was tapped ("Move this turn to").
@@ -179,6 +181,10 @@ struct NoteView: View {
             NoteInstructionsSheet(model: model) { instructionsPresented = false }
                 .presentationDetents([.large])
         }
+        .sheet(isPresented: $regeneratePresented) {
+            RegenerateSheet(model: model) { regeneratePresented = false }
+                .presentationDetents([.medium])
+        }
         .sheet(item: $model.evidenceRow) { row in
             EvidenceSheet(model: model, row: row) { model.evidenceRow = nil }
                 .presentationDetents([.medium, .large])
@@ -266,6 +272,11 @@ struct NoteView: View {
         items.append(.item("Share Markdown", symbol: "doc.plaintext", disabled: model.busy) {
             model.exportMarkdown()
         })
+        if model.canRegenerate {
+            items.append(.item("Regenerate as…", symbol: "arrow.clockwise") {
+                regeneratePresented = true
+            })
+        }
         if model.canWriteDifferently {
             items.append(.item("Write this note differently…", symbol: "wand.and.stars") {
                 instructionsPresented = true
@@ -657,7 +668,10 @@ struct NoteView: View {
         guard model.isGenerated else { return nil }
         return { raw in
             guard let row = model.row(forLine: raw) else { return nil }
-            return RichLineExtra(chip: row.chipLabel, names: row.correctedNames) { model.evidenceRow = row }
+            return RichLineExtra(chip: row.chipLabel, names: row.correctedNames,
+                                 noReference: !row.hasReference, unsupported: row.isUnsupported) {
+                if row.hasReference { model.evidenceRow = row }
+            }
         }
     }
 
@@ -894,6 +908,13 @@ struct NoteView: View {
                         .font(.dsMeta)
                         .foregroundStyle(DS.muted)
                     Spacer()
+                    if !model.noteCorrections.isEmpty {
+                        Toggle(NoteLabels.asTranscribed(language: model.transcriptLanguage), isOn: $model.showAsTranscribed)
+                            .toggleStyle(.switch)
+                            .font(.dsMeta)
+                            .foregroundStyle(DS.muted)
+                            .fixedSize()
+                    }
                     Button {
                         copyToPasteboard(model.transcriptText())
                         copied = true
@@ -933,7 +954,7 @@ struct NoteView: View {
                                 .foregroundStyle(DS.muted)
                         }
                         ForEach(Array(turn.paragraphs.enumerated()), id: \.offset) { _, paragraph in
-                            Text(EntityCorrection.underlined(paragraph, model.entityCorrections))
+                            Text(model.transcriptParagraph(paragraph))
                                 .font(.dsBody)
                                 .foregroundStyle(DS.text1)
                                 .lineSpacing(3)
@@ -1274,6 +1295,34 @@ struct NoiseMarkerLine: View {
             .foregroundStyle(DS.muted)
             .padding(.vertical, 2)
             .accessibilityLabel(marker.line(language: language))
+    }
+}
+
+extension NoteCorrection {
+    /// The paragraph with the note's spelling in place of each heard one (whole words only),
+    /// each replaced span dotted-underlined; `nil` when nothing in it was respelled.
+    static func substituted(_ paragraph: String, _ corrections: [NoteCorrection]) -> AttributedString? {
+        var out = AttributedString(paragraph)
+        var changed = false
+        for c in corrections.sorted(by: { $0.surface.count > $1.surface.count })
+        where !c.surface.isEmpty && !c.canonical.isEmpty && c.surface != c.canonical {
+            var search = out.startIndex..<out.endIndex
+            while let range = out[search].range(of: c.surface) {
+                let before = range.lowerBound == out.startIndex ? nil : out.characters[out.characters.index(before: range.lowerBound)]
+                let after = range.upperBound == out.endIndex ? nil : out.characters[range.upperBound]
+                if !(before?.isLetter ?? false), !(after?.isLetter ?? false) {
+                    var replacement = AttributedString(c.canonical)
+                    replacement.underlineStyle = Text.LineStyle(pattern: .dot)
+                    out.replaceSubrange(range, with: replacement)
+                    changed = true
+                    let next = out.index(range.lowerBound, offsetByCharacters: c.canonical.count)
+                    search = next..<out.endIndex
+                } else {
+                    search = range.upperBound..<out.endIndex
+                }
+            }
+        }
+        return changed ? out : nil
     }
 }
 

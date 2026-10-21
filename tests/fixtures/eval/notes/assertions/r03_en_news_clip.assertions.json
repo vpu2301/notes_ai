@@ -1,0 +1,57 @@
+{
+ "id": "r03_en_news_clip",
+ "sentinel": "A3 T1 — the spy-chief clip (NOTE-2026-00078). The transcript fixture is not in the repo (content): export it to eval/notes/v2/r03_en_news_clip.json with scripts/ops/export_job_for_eval.py; until then this checklist reports NOT RUN.",
+ "recording_type": "podcast_broadcast",
+ "must_contain_any": [
+  [
+   "at risk of a violent conflict",
+   "risk of a violent conflict"
+  ],
+  [
+   "real and imminent"
+  ],
+  [
+   "new, more dangerous quality",
+   "more dangerous quality"
+  ],
+  [
+   "Leipzig"
+  ],
+  [
+   "no other country poses such a direct threat",
+   "no other country"
+  ],
+  [
+   "extremist",
+   "internal threats"
+  ],
+  [
+   "younger"
+  ],
+  [
+   "test NATO",
+   "NATO's reaction",
+   "NATO"
+  ],
+  [
+   "shadow war"
+  ]
+ ],
+ "must_not_contain": [
+  "It is claimed"
+ ],
+ "framing_must_not_contain": [],
+ "headings_must_not_match": [
+  "^\\d{1,2}:\\d{2}",
+  "^(?:Martin Jäger|Jäger)$"
+ ],
+ "overview": {
+  "prose_paragraphs_min": 1,
+  "names_recording_type": true
+ },
+ "codes": {
+  "must_not_contain[0]": [
+   "F-ATTR"
+  ]
+ }
+}

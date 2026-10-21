@@ -145,31 +145,6 @@ def test_the_hint_is_truncated_at_a_term_boundary() -> None:
     assert not hint.endswith(",")
 
 
-# Owner and name correction lives in `meeting_doc.entities`, which applies the
-# glossary to every name in a line, not only to owners.
-
-
-def test_an_owner_that_is_a_known_mishearing_is_canonicalised() -> None:
-    from note_service.domain.meeting_doc import entities
-
-    fixed, applied, _ = entities.correct("Jon Meyer", glossary=tuple(_terms()))
-    assert fixed == "John Mayer"
-    assert [c.source for c in applied] == ["glossary"]
-    assert entities.correct("John Mayer", glossary=tuple(_terms()))[0] == "John Mayer"
-
-
-def test_a_partial_match_is_a_different_person_not_a_mishearing() -> None:
-    from note_service.domain.meeting_doc import entities
-
-    assert entities.correct("Jonathan Pryce", glossary=tuple(_terms()))[0] == "Jonathan Pryce"
-
-
-def test_a_company_heard_as_is_spelled_the_workspaces_way_too() -> None:
-    from note_service.domain.meeting_doc import entities
-
-    assert entities.correct("Con Tozo ships it", glossary=tuple(_terms()))[0] == "Contoso ships it"
-
-
 def test_the_prompt_carries_only_the_terms_that_were_spoken() -> None:
     window = "so con tozo wants the klarnote rollout by March"
     found = rules.terms_in(window, _terms())

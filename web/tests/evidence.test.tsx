@@ -43,6 +43,20 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+/** P3 — a row as the writer stores it: the turns it cites travel with it. */
+const ROW_P3: GeneratedItem = {
+  ...ROW,
+  kind: "bullet",
+  certainty: null,
+  attributed_to: null,
+  corrections: [],
+  cites: ["turn:12", "turn:41"],
+  cited_turns: [
+    { turn: 12, start_ms: 45_000, end_ms: 52_000, speaker: "Fabian Reinbold", text: "das Aus für die Rente mit 63 wird wohl abgeschwächt" },
+    { turn: 41, start_ms: 754_000, end_ms: 760_000, speaker: "Anna Keller", text: "die Koalition will das noch im Herbst beschließen" },
+  ],
+};
+
 describe("evidence on a generated line", () => {
   it("opens the quote, the moment and the speaker", () => {
     render(<LineEvidence noteId="n1" row={ROW} />);
@@ -52,6 +66,55 @@ describe("evidence on a generated line", () => {
     expect(dialog).toHaveTextContent("00:45 · Fabian Reinbold");
     expect(dialog).toHaveTextContent("and 1 more");
     fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("lists every cited turn with its time highlighted, the first in full (P3)", () => {
+    render(<LineEvidence noteId="n1" row={ROW_P3} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show where this came from" }));
+    const dialog = screen.getByRole("dialog", { name: "Evidence" });
+    const items = dialog.querySelectorAll(".evidence-turns li");
+    expect(items).toHaveLength(2);
+    expect(items[0]!.querySelector("mark")).toHaveTextContent("00:45");
+    expect(items[0]).toHaveTextContent("Fabian Reinbold");
+    expect(items[1]!.querySelector("mark")).toHaveTextContent("12:34");
+    expect(items[1]).toHaveTextContent("die Koalition will das noch im Herbst beschließen");
+    expect(dialog).not.toHaveTextContent("and 1 more");
+    expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+  });
+
+  it("says when the time named no turn exactly (nearest match)", () => {
+    render(<LineEvidence noteId="n1" row={{ ...ROW_P3, cite_nearest: true }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show where this came from" }));
+    expect(screen.getByRole("dialog", { name: "Evidence" })).toHaveTextContent("Nearest match");
+  });
+
+  it("marks a line without a cite as having no reference, and opens nothing", () => {
+    render(<LineEvidence noteId="n1" row={{ ...ROW_P3, cites: [], cited_turns: [] }} />);
+    expect(screen.getByRole("img", { name: "No reference" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Show where this came from/ })).toBeNull();
+  });
+
+  it("shows the check call's mark and reason, and the words are untouched", () => {
+    render(
+      <RichText
+        text={`- ${ROW_P3.text}`}
+        lineExtra={() => <LineEvidence noteId="n1" row={{ ...ROW_P3, check: "unsupported", check_reason: "not said" }} />}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: /not found in the transcript/i });
+    expect(toggle.className).toContain("unsupported");
+    expect(screen.getByRole("listitem")).toHaveTextContent(ROW_P3.text);
+    fireEvent.click(toggle);
+    expect(screen.getByRole("note")).toHaveTextContent("Not found in the transcript — not said");
+  });
+
+  it("opens the transcript at the first cited moment", () => {
+    const seeks: number[] = [];
+    render(<LineEvidence noteId="n1" row={ROW_P3} onSeek={(ms) => seeks.push(ms)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show where this came from" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show in transcript" }));
+    expect(seeks).toEqual([45_000]);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 

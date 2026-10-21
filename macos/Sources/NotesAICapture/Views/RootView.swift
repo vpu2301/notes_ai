@@ -81,6 +81,7 @@ struct RootView: View {
                     HStack(spacing: 6) {
                         NewMeetingButton(fill: true, height: 32)
                         MeetingTypeMenu()
+                        NoteTemplateMenu()
                     }
                 } else {
                     ActiveCaptureCard(compact: true)

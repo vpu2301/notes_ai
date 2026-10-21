@@ -865,3 +865,14 @@ def test_a_transcript_only_note_says_preparing_while_the_writer_works(
     client.world["version"] = _version(note)
     body = client.get(f"/v1/shared/{TOKEN}").json()
     assert body["sections"] and body["preparing"] is False
+
+
+def test_the_shared_page_carries_the_time_of_each_cited_line_by_key() -> None:
+    """P3 — ``line_times`` per section: keys and start_ms only, for the lines the text carries."""
+    from note_service.domain import lines as line_rules
+    from note_service.routers.shared_public import _times_for
+
+    cited = line_rules.key_of("Go with option B")
+    times = {cited: 754_000, "elsewhere": 1}
+    assert _times_for("- Go with option B.\n- A line nobody cited.", times) == {cited: 754_000}
+    assert _times_for("", times) == {}

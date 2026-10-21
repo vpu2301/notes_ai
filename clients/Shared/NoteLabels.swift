@@ -11,6 +11,23 @@ enum NoteLabels {
         }
     }
 
+    /// A3 — the transcript's "heard as" marker and the toggle that shows the words as heard.
+    static func heardAs(language: String?) -> String {
+        switch language {
+        case "de": return "gehört als"
+        case "uk": return "почуто як"
+        default: return "heard as"
+        }
+    }
+
+    static func asTranscribed(language: String?) -> String {
+        switch language {
+        case "de": return "Wie transkribiert anzeigen"
+        case "uk": return "Показати як транскрибовано"
+        default: return "Show as transcribed"
+        }
+    }
+
     /// B4 — what a written line is: the speaker's words, one fact, or several (`count`).
     static func provenance(language: String?, provenance: String?, count: Int) -> String? {
         let n = max(2, count)

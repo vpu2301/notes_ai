@@ -30,8 +30,6 @@ from .domain.draft_audit_buffer import DraftAuditBuffer
 from .domain.google_calendar import GoogleCalendarClient
 from .domain.ics_calendar import IcsFeedClient
 from .domain.model_routing import load_registry, probe_chat
-from .domain.note_instructions_compiler import CompilerProviders
-from .domain.note_instructions_rate_limit import NoteInstructionsRateLimiter
 from .domain.public_rate_limit import PublicRateLimiter
 from .domain.recipient_mail import ShareMailCaps
 from .domain.search_audit_buffer import SearchAuditBuffer
@@ -76,9 +74,6 @@ class ServiceState:
     model_registry: Any
     clips_store: EncryptedObjectStore
     clip_rate_limiter: ClipRateLimiter
-    # Note instructions (N1): the writing model that compiles them, and the preview cap.
-    note_instructions_compiler: CompilerProviders
-    note_instructions_rate_limiter: NoteInstructionsRateLimiter
     search_audit_buffer: SearchAuditBuffer
     # The envelope seals OAuth tokens at rest; the Google client is unconfigured without a client id.
     envelope: Envelope
@@ -269,12 +264,6 @@ async def build_state() -> ServiceState:
         model_registry=model_registry,
         clips_store=clips_store,
         clip_rate_limiter=ClipRateLimiter(redis, per_hour=settings.clips_per_user_per_hour),
-        note_instructions_compiler=CompilerProviders(
-            registry=model_registry, settings_source=workspace_model_settings
-        ),
-        note_instructions_rate_limiter=NoteInstructionsRateLimiter(
-            redis, per_hour=settings.note_instructions_previews_per_hour
-        ),
         email_provider=email_provider,
         share_email_rate_limiter=ShareEmailRateLimiter(
             redis, per_hour=settings.share_emails_per_user_per_hour
@@ -322,7 +311,6 @@ async def teardown_state(state: ServiceState) -> None:
     await state.email_provider.aclose()
     await state.google_calendar.aclose()
     await state.ics_feeds.aclose()
-    await state.note_instructions_compiler.aclose()
     await state.jwks_cache.aclose()
     await state.app_pool.close()
     await state.audit_writer_pool.close()

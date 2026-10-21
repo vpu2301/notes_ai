@@ -19,7 +19,7 @@ _spec.loader.exec_module(check)
 
 CONFIG = {
     "routing": {
-        "summarize": {"standard": "hf_eu", "premium": "hf_eu"},
+        "write": {"standard": "hf_eu", "premium": "hf_eu"},
         "asr": {"standard": "hf_eu_asr"},
     },
     "env_overrides": {

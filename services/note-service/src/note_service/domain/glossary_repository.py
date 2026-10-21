@@ -212,6 +212,20 @@ def name_review_tag(surface: str, canonical: str) -> str:
     return f"{NAME_TAG_PREFIX}{digest}"
 
 
+async def rejected_name_tags(conn: asyncpg.Connection, *, note_id: UUID) -> set[str]:
+    """A3 — respellings the author rejected in this note: the transcript does not show
+    them as the note's spelling."""
+    rows = await conn.fetch(
+        """
+        SELECT DISTINCT tag
+        FROM note_item_corrections, unnest(flags_at_time) AS tag
+        WHERE note_id = $1 AND action = 'correction_rejected' AND tag LIKE 'name:%'
+        """,
+        note_id,
+    )
+    return {str(r["tag"]) for r in rows}
+
+
 async def reviewed_name_tags(conn: asyncpg.Connection, *, note_id: UUID) -> set[str]:
     """Respellings the author already accepted or rejected in this note,
     so the "Names in this note" list does not ask twice."""

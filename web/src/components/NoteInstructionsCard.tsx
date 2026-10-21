@@ -1,126 +1,57 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  deleteAiInstructions,
-  getAiInstructions,
-  previewAiInstructions,
-  putAiInstructions,
-} from "../api/aiInstructions";
+import { deleteAiInstructions, getAiInstructions, putAiInstructions } from "../api/aiInstructions";
 import { ApiError } from "../api/http";
-import type { AiInstructions, InstructionsScope } from "../api/types";
+import type { AiInstructions } from "../api/types";
 import { messageFor } from "../lib/errorCopy";
 import { relativeTime } from "../lib/time";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { NoteInstructionsGuide } from "./NoteInstructionsGuide";
 import { useToast } from "./Toaster";
 
-export const FAILED_COPY =
-  "Your text was saved but could not be read right now (the model was unavailable). Notes are written as usual until you press Check again.";
 // The Spend view's sentence: one wording for a spent budget.
 const BUDGET_COPY =
   "This workspace has used its AI budget for the month, so new recordings are transcribed but not written up.";
 // The counter warns this close to the limit.
 const NEAR_LIMIT = 200;
 
-/** The tabs: the workspace text, then one per meeting type that extends it (N4). */
-export const SCOPES: ReadonlyArray<readonly [InstructionsScope, string, string]> = [
-  ["workspace", "Workspace", "note"],
-  ["client", "Client calls", "client call"],
-  ["team", "Team meetings", "team meeting"],
-  ["sales", "Sales calls", "sales call"],
-  ["one_on_one", "1:1s", "1:1"],
-  ["interview", "Interviews", "interview"],
-  ["broadcast", "Broadcasts", "broadcast"],
-  ["memo", "Memos", "memo"],
-];
+/** The skeleton one note's own text shows as its placeholder (the sheet). */
+export const SKELETON = `Reader: who reads these notes and what they need from them.
+Length: how long a note should be.
+Sections: which sections every note must have, and in what order.
+Emphasis: what to bring out (decisions, numbers, risks, next steps).
+Wording: tone, person, terms to use or avoid.
+Examples: a line or two written the way you want.`;
+
+/** The help line under the box (P2a): what a workspace adds below the default rules. */
+export const OWN_RULES_HELP =
+  "Add your own rules below the defaults: who reads these notes, how long, which sections, what to emphasise, wording, examples.";
 
 export function errorCopy(err: unknown): string {
-  if (err instanceof ApiError && err.status === 429) {
-    if (err.code === "too_many_previews") {
-      return `Too many checks — try again in ${err.retryAfter ?? 60} s.`;
-    }
-    if (err.code === "budget_exceeded") return BUDGET_COPY;
+  if (err instanceof ApiError && err.status === 429 && err.code === "budget_exceeded") {
+    return BUDGET_COPY;
   }
   return messageFor(err);
 }
 
-/** What the writer understood: rendered by the server, shown as sent. */
-export function Readout({ data }: { data: AiInstructions }) {
-  return (
-    <div className="instructions-readout">
-      <h3 className="settings-sub">Understood</h3>
-      {data.understood.length > 0 ? (
-        <ul className="instructions-list">
-          {data.understood.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-      ) : (
-        data.text.trim() && (
-          <p className="help">Nothing specific — the notes are written as usual.</p>
-        )
-      )}
-      {data.guidance.length > 0 && (
-        <>
-          <h3 className="settings-sub">Also passed to the writer as wording guidance</h3>
-          <ul className="instructions-list">
-            {data.guidance.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        </>
-      )}
-      {data.not_applied.length > 0 && (
-        <>
-          <h3 className="settings-sub">Not applied</h3>
-          <ul className="instructions-list">
-            {data.not_applied.map((item) => (
-              <li key={`${item.reason}:${item.text}`} className="help">
-                “{item.text}” — {item.message}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-    </div>
-  );
-}
-
 /**
- * Settings → Data & AI → Note writing: how this workspace wants its notes written. Every
- * member reads the text and what the writer understood; an admin edits, presses Check
- * (compiled, nothing saved) and saves. Absent while the server has the feature off.
+ * Settings › Note writing › Instructions: the text the writer follows, verbatim. It holds
+ * the default rules until an admin edits them (or pastes a file); "Reset to default" goes
+ * back to the rules that ship. Every member reads it. Absent while the server has the
+ * feature off.
  */
-export function NoteInstructionsCard({
-  onLoaded,
-}: {
-  /** The stored instructions whenever they load or change (null: none or the feature off). */
-  onLoaded?: (instructions: AiInstructions | null) => void;
-} = {}) {
+export function NoteInstructionsCard() {
   const toast = useToast();
-  const [scope, setScope] = useState<InstructionsScope>("workspace");
   const [stored, setStored] = useState<AiInstructions | null>(null);
-  // The workspace text: the tabs' state (`scopes`) and the parent a type text extends.
-  const [workspace, setWorkspace] = useState<AiInstructions | null>(null);
-  const loadedRef = useRef(onLoaded);
-  loadedRef.current = onLoaded;
-  useEffect(
-    () => loadedRef.current?.(workspace && workspace.version > 0 ? workspace : null),
-    [workspace],
-  );
   const [absent, setAbsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const [preview, setPreview] = useState<AiInstructions | null>(null);
-  const [busy, setBusy] = useState<"checking" | "saving" | "clearing" | null>(null);
-  const [confirmClear, setConfirmClear] = useState(false);
+  const [busy, setBusy] = useState<"saving" | "resetting" | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
 
-  const load = useCallback(async (which: InstructionsScope) => {
+  const load = useCallback(async () => {
     try {
-      const data = await getAiInstructions(which);
-      setStored(data);
-      if (which === "workspace") setWorkspace(data);
-      else setWorkspace(await getAiInstructions());
+      setStored(await getAiInstructions());
       setError(null);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404 && err.code === "not_available") {
@@ -132,8 +63,8 @@ export function NoteInstructionsCard({
   }, []);
 
   useEffect(() => {
-    void load(scope);
-  }, [load, scope]);
+    void load();
+  }, [load]);
 
   const dirty = stored !== null && draft.trim() !== stored.text.trim();
 
@@ -149,53 +80,16 @@ export function NoteInstructionsCard({
 
   if (absent) return null;
 
-  const [, , noun] = SCOPES.find(([v]) => v === scope) ?? SCOPES[0]!;
-  const parentVersion = workspace?.version ?? 0;
-  const has = (s: InstructionsScope) => workspace?.scopes?.find((x) => x.scope === s);
-  const switchTo = (next: InstructionsScope) => {
-    if (next === scope) return;
-    if (editing && dirty && !window.confirm("Discard your unsaved changes?")) return;
-    setEditing(false);
-    setPreview(null);
-    setStored(null);
-    setScope(next);
-  };
-
-  const startEditing = (text?: string) => {
-    setDraft(text ?? stored?.text ?? "");
-    setPreview(null);
-    setEditing(true);
-  };
-
-  const cancel = () => {
-    setEditing(false);
-    setPreview(null);
-  };
-
-  const check = async (text = draft) => {
-    setBusy("checking");
-    try {
-      setPreview(await previewAiInstructions({ text }, scope));
-    } catch (err) {
-      toast.error(errorCopy(err));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const save = async (text: string) => {
+  const save = async () => {
     setBusy("saving");
     try {
-      const saved = await putAiInstructions({ text }, scope);
+      const saved = await putAiInstructions({ text: draft });
       setStored(saved);
       setEditing(false);
-      setPreview(null);
-      // The tabs' state (a type may now wait for its recompile).
-      setWorkspace(await getAiInstructions());
       toast.success(
-        saved.version === 0
-          ? "Instructions cleared. Notes are written as usual."
-          : `Instructions saved (v${saved.version}). The next ${noun} written in this workspace follows them.`,
+        saved.source === "default"
+          ? "Back to the default rules."
+          : `Instructions saved (v${saved.version}). The next note written in this workspace follows them.`,
       );
     } catch (err) {
       toast.error(errorCopy(err));
@@ -204,19 +98,14 @@ export function NoteInstructionsCard({
     }
   };
 
-  const clear = async () => {
-    setBusy("clearing");
+  const reset = async () => {
+    setBusy("resetting");
     try {
-      await deleteAiInstructions(scope);
-      setConfirmClear(false);
+      await deleteAiInstructions();
+      setConfirmReset(false);
       setEditing(false);
-      setPreview(null);
-      toast.success(
-        scope === "workspace"
-          ? "Instructions cleared. Notes are written as usual."
-          : `Instructions cleared. A ${noun} is written with the workspace instructions.`,
-      );
-      await load(scope);
+      toast.success("Back to the default rules.");
+      await load();
     } catch (err) {
       toast.error(errorCopy(err));
     } finally {
@@ -225,98 +114,67 @@ export function NoteInstructionsCard({
   };
 
   const max = stored?.max_chars ?? 0;
-  const shown = preview ?? stored;
+
+  // "Load from file": the file is read here, into the box only; nothing is saved until Save.
+  const loadFile = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? "");
+      if (text.length > max) {
+        toast.error(`That file is longer than the limit of ${max} characters.`);
+        return;
+      }
+      setDraft(text);
+    };
+    reader.onerror = () => toast.error("That file could not be read.");
+    reader.readAsText(file);
+  };
+
+  const sourceLabel = stored?.source === "default" ? "Default rules" : "Edited";
 
   return (
     <section className="card pad settings-card" aria-label="Note instructions">
-      <h2 className="settings-h">Note instructions</h2>
+      <h2 className="settings-h">Instructions</h2>
       <p className="help">
-        How this workspace wants its notes written — length, sections, emphasis and wording. They
-        change the form of a note, never what it says.
+        The rules the writer follows, as written here, with the template and the transcript. Edit
+        them, paste your own file, or reset to the default rules.
       </p>
-      {workspace && (
-        <div className="seg instructions-scopes" role="tablist" aria-label="Instructions for">
-          {SCOPES.map(([value, label]) => {
-            const state = has(value);
-            return (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                className="seg-opt"
-                aria-selected={scope === value}
-                aria-pressed={scope === value}
-                onClick={() => switchTo(value)}
-              >
-                {label}
-                {state && <span className="scope-dot" aria-label="has instructions" />}
-                {state?.stale && <span className="help"> Updating…</span>}
-              </button>
-            );
-          })}
-        </div>
-      )}
-      {scope !== "workspace" && workspace && (
-        <>
-          <p className="help">
-            {parentVersion > 0
-              ? `Extends the workspace instructions (v${parentVersion}) — the readout below is the combined result.`
-              : "No workspace instructions yet — this text stands on its own."}
-          </p>
-          {parentVersion > 0 && (
-            <details className="instructions-parent">
-              <summary className="help">Workspace instructions</summary>
-              <pre className="instructions-text">{workspace.text}</pre>
-            </details>
-          )}
-        </>
-      )}
-      {stored?.stale && (
-        <p className="banner banner-warn" role="status">
-          Updating — this text is being read again with the new workspace instructions. Until then a{" "}
-          {noun} is written with the workspace instructions.
-        </p>
-      )}
       {error && !stored && <p className="help danger-text">{error}</p>}
       {!error && !stored && <p className="help">Loading…</p>}
 
       {stored && !editing && (
         <>
-          {stored.version === 0 ? (
-            <p className="help">
-              None set — notes are written as usual.
-              {!stored.can_edit && " A workspace admin can add them."}
-            </p>
-          ) : (
-            <>
-              <pre className="instructions-text">{stored.text}</pre>
-              {stored.compile_status === "failed" && (
-                <div className="banner banner-warn" role="status">
-                  {FAILED_COPY}{" "}
-                  {stored.can_edit && (
-                    <button
-                      type="button"
-                      className="btn sm ghost"
-                      disabled={busy !== null}
-                      onClick={() => void save(stored.text)}
-                    >
-                      Try again
-                    </button>
-                  )}
-                </div>
-              )}
-              <Readout data={stored} />
-              <p className="help">
-                v{stored.version}
-                {stored.updated_at ? ` · updated ${relativeTime(stored.updated_at)}` : ""}
-              </p>
-            </>
-          )}
+          <p className="help instructions-source" data-testid="instructions-source">
+            <strong>{sourceLabel}</strong>
+            {stored.source !== "default" && stored.version > 0 ? ` · v${stored.version}` : ""}
+            {stored.source !== "default" && stored.updated_at
+              ? ` · updated ${relativeTime(stored.updated_at)}`
+              : ""}
+          </p>
+          <pre className="instructions-text">{stored.text}</pre>
           {stored.can_edit && (
             <div className="settings-actions">
-              <button type="button" className="btn" onClick={() => startEditing()}>
-                {stored.version === 0 ? "Add instructions" : "Edit"}
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setDraft(stored.text);
+                  setEditing(true);
+                }}
+              >
+                Edit
               </button>
+              {stored.source !== "default" && (
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={busy !== null}
+                  onClick={() => setConfirmReset(true)}
+                >
+                  Reset to default
+                </button>
+              )}
             </div>
           )}
         </>
@@ -324,114 +182,89 @@ export function NoteInstructionsCard({
 
       {stored && editing && (
         <>
+          <p className="help instructions-source" data-testid="instructions-source">
+            <strong>{dirty ? "Edited" : sourceLabel}</strong>
+          </p>
           <textarea
             className="textarea instructions-input"
             aria-label="Note instructions"
-            aria-describedby="instructions-counter"
+            aria-describedby="instructions-help instructions-counter"
             value={draft}
             maxLength={max}
-            rows={12}
+            rows={18}
             spellCheck
             disabled={busy !== null}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              setPreview(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && draft.trim()) {
-                e.preventDefault();
-                void check();
-              }
-            }}
+            onChange={(e) => setDraft(e.target.value)}
           />
+          <p id="instructions-help" className="help">
+            {OWN_RULES_HELP}
+          </p>
           <p
             id="instructions-counter"
             className={`help${max - draft.length <= NEAR_LIMIT ? " danger-text" : ""}`}
           >
             {draft.length} / {max}
           </p>
-          {busy === "checking" && (
-            <p className="help" role="status">
-              Reading your instructions…
-            </p>
-          )}
-          {preview && (
-            <>
-              <span className="chip draft">Preview — not saved yet</span>
-              {preview.compile_status === "failed" && (
-                <p className="banner banner-warn" role="status">
-                  Your text could not be read right now (the model was unavailable). Try Check
-                  again.
-                </p>
-              )}
-              <Readout data={preview} />
-            </>
-          )}
           <div className="settings-actions">
-            <button
-              type="button"
-              className="btn"
-              disabled={busy !== null || !draft.trim()}
-              onClick={() => void check()}
-            >
-              Check
-            </button>
             <button
               type="button"
               className="btn primary"
               disabled={busy !== null || !dirty}
-              onClick={() => void save(draft)}
+              onClick={() => void save()}
             >
               {busy === "saving" ? "Saving…" : "Save"}
             </button>
-            <button type="button" className="btn ghost" disabled={busy !== null} onClick={cancel}>
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={busy !== null}
+              onClick={() => setEditing(false)}
+            >
               Cancel
             </button>
-            {stored.version > 0 && (
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={busy !== null}
+              onClick={() => fileInput.current?.click()}
+            >
+              Load from file
+            </button>
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".md,.txt,text/markdown,text/plain"
+              aria-label="Instructions file"
+              hidden
+              onChange={(e) => {
+                loadFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            {stored.source !== "default" && (
               <button
                 type="button"
-                className="btn ghost danger-text"
+                className="btn ghost"
                 disabled={busy !== null}
-                onClick={() => setConfirmClear(true)}
+                onClick={() => setConfirmReset(true)}
               >
-                Clear
+                Reset to default
               </button>
             )}
           </div>
         </>
       )}
 
-      {shown && (
-        <NoteInstructionsGuide
-          onPreset={
-            stored?.can_edit
-              ? (preset) => {
-                  // An example fills the text and is checked at once; it is saved only by Save.
-                  if (editing) {
-                    setDraft(preset.text);
-                    setPreview(null);
-                  } else {
-                    startEditing(preset.text);
-                  }
-                  void check(preset.text);
-                }
-              : undefined
-          }
-          presetsDisabled={editing ? draft.trim() !== "" : (stored?.text ?? "").trim() !== ""}
-        />
-      )}
-
-      {confirmClear && (
+      {confirmReset && (
         <ConfirmDialog
-          title="Clear the note instructions?"
-          confirmLabel="Clear"
+          title="Replace your instructions with the default rules?"
+          confirmLabel="Reset"
           confirmDanger
-          busy={busy === "clearing"}
-          onConfirm={() => void clear()}
-          onCancel={() => setConfirmClear(false)}
+          busy={busy === "resetting"}
+          onConfirm={() => void reset()}
+          onCancel={() => setConfirmReset(false)}
         >
-          Notes written from now on follow no workspace instructions. Notes already written keep
-          every word they have.
+          Your text will be lost. Notes already written keep every word they have.
         </ConfirmDialog>
       )}
     </section>

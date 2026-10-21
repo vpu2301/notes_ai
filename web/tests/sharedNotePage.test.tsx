@@ -166,3 +166,26 @@ describe("shared outcome page", () => {
     expect(screen.queryByText("Verify it's you")).toBeNull();
   });
 });
+
+
+describe("the time after a line (P3)", () => {
+  it("prints [mm:ss] after a line the writer cited, and nothing after the others", async () => {
+    const { lineKey } = await import("../src/lib/itemKey");
+    stub(200, {
+      ...VIEW,
+      sections: [
+        {
+          section_key: "decisions",
+          name: "Decisions",
+          text: "- Go with option B.\n- A line nobody cited.",
+          role: "decisions",
+          line_times: { [lineKey("- Go with option B.")]: 754_000 },
+        },
+      ],
+    });
+    page();
+    const items = await screen.findAllByRole("listitem");
+    expect(items[0]).toHaveTextContent("[12:34]");
+    expect(items[1]).not.toHaveTextContent("[");
+  });
+});

@@ -1,4 +1,5 @@
-"""Instructions for one note — "Write this note differently" (Sprint N4)."""
+"""Instructions for one note — "Write this note differently" (Sprint N4), stored as
+written since Sprint R0."""
 
 from __future__ import annotations
 
@@ -15,11 +16,8 @@ from fastapi.testclient import TestClient
 
 from auth import Claims
 from note_models import NoteStatus
-from note_service.domain import ai_settings as settings_rules
 from note_service.domain import note_instructions_repository as repo
 from note_service.domain.notes_repository import NoteRow
-
-from .test_ai_instructions_router import BRIEF_PROFILE, Scripted
 
 TENANT_A = UUID("22222222-2222-2222-2222-222222222222")
 TENANT_B = UUID("33333333-3333-3333-3333-333333333333")
@@ -50,8 +48,8 @@ def _note(status: NoteStatus = NoteStatus.DRAFT, job: UUID | None = JOB) -> Note
 def _parent(scope: str, text: str, version: int) -> repo.Row:
     now = datetime.now(UTC)
     return repo.Row(
-        tenant_id=TENANT_A, scope=scope, version=version, text=text, profile={}, profile_hash="h",
-        compile_status="compiled", compile_error_kind=None, compiler_version="x", backend="b",
+        tenant_id=TENANT_A, scope=scope, version=version, text=text, profile={}, profile_hash="",
+        compile_status="compiled", compile_error_kind=None, compiler_version="none", backend=None,
         updated_by=AUTHOR, created_at=now, updated_at=now,
     )  # fmt: skip
 
@@ -67,7 +65,6 @@ def api(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):  # n
 
     caplog.set_level(logging.DEBUG)
     audit: list[dict] = []
-    model = Scripted()
     note = {"row": _note()}
     stored: dict[UUID, repo.NoteRow] = {}
     current = {"tenant": TENANT_A}
@@ -75,20 +72,10 @@ def api(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):  # n
     async def _write_event(**kwargs: Any) -> None:
         audit.append(kwargs)
 
-    class _Compiler:
-        async def for_workspace(self, workspace_id: str) -> Scripted:
-            return model
-
-    class _Limiter:
-        async def check(self, *, tenant_id: UUID) -> tuple[bool, int]:
-            return True, 0
-
     deps.install_state(  # type: ignore[arg-type]
         SimpleNamespace(
             app_pool=object(),
             audit_writer=SimpleNamespace(write_event=_write_event),
-            note_instructions_compiler=_Compiler(),
-            note_instructions_rate_limiter=_Limiter(),
         )
     )
 
@@ -121,20 +108,8 @@ def api(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):  # n
     async def _delete_note(conn: Any, *, note_id: UUID) -> bool:
         return stored.pop(note_id, None) is not None
 
-    async def _none(*_a: Any, **_k: Any) -> Any:
-        return None
-
     async def _meeting(conn: Any, *, note_id: UUID) -> Any:
         return SimpleNamespace(meeting_type="client")
-
-    async def _settings(conn: Any, *, tenant_id: UUID) -> Any:
-        return settings_rules.SettingsRow(tenant_id=tenant_id, monthly_budget_cents=1000)
-
-    async def _spent(conn: Any, *, tenant_id: UUID) -> int:
-        return 0
-
-    async def _plan(conn: Any, tenant_id: UUID) -> Any:
-        return "pro", {}
 
     monkeypatch.setattr(mod, "tenant_connection", _conn)
     monkeypatch.setattr(mod.notes_repo, "fetch_note", _fetch_note)
@@ -142,11 +117,7 @@ def api(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):  # n
     monkeypatch.setattr(mod.repo, "fetch_note", _get_note_row)
     monkeypatch.setattr(mod.repo, "upsert_note", _upsert_note)
     monkeypatch.setattr(mod.repo, "delete_note", _delete_note)
-    monkeypatch.setattr(mod.gen_repo, "latest_for_note", _none)
     monkeypatch.setattr(mod.meetings, "fetch", _meeting)
-    monkeypatch.setattr(workspace_mod.settings_rules, "fetch", _settings)
-    monkeypatch.setattr(workspace_mod.settings_rules, "month_to_date_cents", _spent)
-    monkeypatch.setattr(workspace_mod.ai_settings_router, "_plan", _plan)
     monkeypatch.setattr(workspace_mod.settings, "note_instructions_enabled", True)
 
     app = create_app()
@@ -155,7 +126,7 @@ def api(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):  # n
         app.dependency_overrides[deps.current_user] = lambda: claims
 
     as_(_claims(AUTHOR, ["member"]))
-    yield SimpleNamespace(client=TestClient(app), as_=as_, model=model, audit=audit, note=note,
+    yield SimpleNamespace(client=TestClient(app), as_=as_, audit=audit, note=note,
                           stored=stored, caplog=caplog)  # fmt: skip
     app.dependency_overrides.clear()
     deps.install_state(None)  # type: ignore[arg-type]
@@ -164,20 +135,17 @@ def api(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):  # n
 URL = f"/v1/notes/{NOTE}/instructions"
 
 
-def test_an_editor_saves_with_the_parents_compiled_first(api: Any) -> None:
-    api.model.answers.append(BRIEF_PROFILE)
+def test_an_editor_saves_against_the_parents(api: Any) -> None:
     r = api.client.put(URL, json={"text": NOTE_TEXT})
     assert r.status_code == 201
     body = r.json()
-    prompt = api.model.prompts[-1]
-    assert prompt.index(WORKSPACE_TEXT) < prompt.index(CLIENT_TEXT) < prompt.index(NOTE_TEXT)
     assert body["scope"] == "note" and body["base_versions"] == {"workspace": 3, "client": 1}
     assert body["extends"] == {"scope": "client", "version": 1}
+    assert body["understood"] == [] and body["profile"] == {}
     assert api.client.get(URL).json()["text"] == NOTE_TEXT
 
 
 def test_empty_text_removes_and_delete_is_idempotent(api: Any) -> None:
-    api.model.answers.append(BRIEF_PROFILE)
     api.client.put(URL, json={"text": NOTE_TEXT})
     assert api.client.put(URL, json={"text": "  "}).json()["version"] == 0 and api.stored == {}
     assert api.client.delete(URL).status_code == 204
@@ -189,28 +157,25 @@ def test_a_viewer_is_refused_and_another_workspace_sees_nothing(api: Any) -> Non
     assert api.client.put(URL, json={"text": NOTE_TEXT}).status_code == 403
     api.as_(_claims(AUTHOR, ["member"], tenant=TENANT_B))
     for call in (lambda: api.client.get(URL), lambda: api.client.put(URL, json={"text": "x"}),
-                 lambda: api.client.delete(URL), lambda: api.client.post(f"{URL}/preview", json={"text": "x"})):  # fmt: skip
+                 lambda: api.client.delete(URL)):  # fmt: skip
         assert call().status_code == 404
-    assert api.model.calls == 0
 
 
-def test_a_note_that_cannot_be_rewritten_is_refused_before_a_compile(api: Any) -> None:
+def test_a_note_that_cannot_be_rewritten_is_refused(api: Any) -> None:
     api.note["row"] = _note(job=None)
     r = api.client.put(URL, json={"text": NOTE_TEXT})
     assert r.status_code == 409 and r.json()["code"] == "no_transcript"
     api.note["row"] = _note(status=NoteStatus.CANCELLED)
     assert api.client.put(URL, json={"text": NOTE_TEXT}).json()["code"] == "note_cancelled"
-    assert api.model.calls == 0
+    assert api.stored == {}
 
 
-def test_the_preview_writes_nothing(api: Any) -> None:
-    api.model.answers.append(BRIEF_PROFILE)
-    body = api.client.post(f"{URL}/preview", json={"text": NOTE_TEXT}).json()
-    assert body["profile"]["length"] == "short" and api.stored == {}
+def test_the_preview_route_is_gone(api: Any) -> None:
+    assert api.client.post(f"{URL}/preview", json={"text": NOTE_TEXT}).status_code in (404, 405)
+    assert api.stored == {}
 
 
 def test_no_text_reaches_logs_or_audit(api: Any) -> None:
-    api.model.answers.append(BRIEF_PROFILE)
     api.client.put(URL, json={"text": NOTE_TEXT})
     api.client.put(URL, json={"text": ""})
     assert "Quillhaven" not in api.caplog.text

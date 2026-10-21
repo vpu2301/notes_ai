@@ -1,6 +1,6 @@
-"""What the generation path does when nobody is watching: shadow runs store
-nothing, snapshots do not outlive their generation, the retired synthesis
-route does not answer.
+"""What the generation path does when nobody is watching: snapshots do not outlive
+their generation and the retired synthesis route does not answer. (Shadow runs went
+with the old writing path, Sprint R0.)
 """
 
 from __future__ import annotations
@@ -27,107 +27,6 @@ def _deps(**over) -> generate_note.GenerationDeps:  # noqa: ANN003
     base = {"app_pool": object(), "transcripts_store": object(), "provider_for": None}
     base.update(over)
     return generate_note.GenerationDeps(**base)  # type: ignore[arg-type]
-
-
-# ── Shadow runs ─────────────────────────────────────────────────────
-
-
-@pytest.mark.anyio
-async def test_no_shadow_backend_means_no_second_model_call(monkeypatch) -> None:  # noqa: ANN001
-    calls: list[str] = []
-    monkeypatch.setattr(generate_note.pipeline, "run", lambda *a, **k: calls.append("run"))
-
-    await generate_note._shadow_run(
-        _deps(), TENANT, uuid4(), {}, _Document(3), role_by_key={}, language="en"
-    )
-    assert calls == []
-
-
-@pytest.mark.anyio
-async def test_the_sample_is_a_sample_of_meetings_not_of_attempts(monkeypatch) -> None:  # noqa: ANN001
-    """Deterministic on the generation id: re-running the same generation
-    makes the same choice, so 5 % means 5 % of meetings — not 5 % of the
-    attempts a retried meeting happens to make."""
-    ran: list[UUID] = []
-
-    async def _provider(_workspace):  # noqa: ANN001, ANN202
-        return SimpleNamespace(backend_name="candidate")
-
-    deps = _deps(shadow_provider_for=_provider, shadow_percent=5)
-
-    async def _record(gid: UUID):  # noqa: ANN202
-        async def _inner(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
-            ran.append(gid)
-            return _Document(2)
-
-        return _inner
-
-    ids = [uuid4() for _ in range(300)]
-    for gid in ids:
-        before = len(ran)
-        monkeypatch.setattr(generate_note.pipeline, "run", await _record(gid))
-        await generate_note._shadow_run(
-            deps, TENANT, gid, {}, _Document(3), role_by_key={}, language="en"
-        )
-        assert (len(ran) > before) == (gid.int % 100 < 5)
-
-    # Same generation twice, same decision.
-    sampled = next((g for g in ids if g.int % 100 < 5), UUID(int=0))
-    ran.clear()
-    monkeypatch.setattr(generate_note.pipeline, "run", await _record(sampled))
-    for _ in range(2):
-        await generate_note._shadow_run(
-            deps, TENANT, sampled, {}, _Document(3), role_by_key={}, language="en"
-        )
-    assert len(ran) == 2
-
-
-@pytest.mark.anyio
-async def test_a_workspace_that_has_not_acknowledged_the_candidate_is_not_shadowed(
-    monkeypatch,  # noqa: ANN001
-) -> None:
-    """The provider factory says None, and the pipeline is never run: a
-    shadow run processes a real meeting, so it only ever happens on a
-    processor the workspace already agreed to."""
-    calls: list[str] = []
-    monkeypatch.setattr(generate_note.pipeline, "run", lambda *a, **k: calls.append("run"))
-
-    async def _no_provider(_workspace):  # noqa: ANN001, ANN202
-        return None
-
-    gid = UUID(int=0)  # 0 % 100 == 0 → inside any sample
-    await generate_note._shadow_run(
-        _deps(shadow_provider_for=_no_provider, shadow_percent=100),
-        TENANT,
-        gid,
-        {},
-        _Document(3),
-        role_by_key={},
-        language="en",
-    )
-    assert calls == []
-
-
-@pytest.mark.anyio
-async def test_a_failing_shadow_run_never_touches_the_real_note(monkeypatch) -> None:  # noqa: ANN001
-    async def _boom(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
-        raise RuntimeError("candidate backend is down")
-
-    monkeypatch.setattr(generate_note.pipeline, "run", _boom)
-
-    async def _provider(_workspace):  # noqa: ANN001, ANN202
-        return SimpleNamespace(backend_name="candidate")
-
-    # No exception escapes: the note is already written by this point.
-    await generate_note._shadow_run(
-        _deps(shadow_provider_for=_provider, shadow_percent=100),
-        TENANT,
-        UUID(int=0),
-        {},
-        _Document(3),
-        role_by_key={},
-        language="en",
-    )
 
 
 # ── Snapshot retention ──────────────────────────────────────────────
