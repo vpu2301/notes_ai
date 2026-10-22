@@ -13,9 +13,6 @@ from .jobs import JobResult
 
 logger = logging.getLogger(__name__)
 
-# The platform tenant scheduler audit rows are written under.
-GLOBAL_TENANT_SETTING = "auth_platform_tenant_id"
-
 
 @dataclass(frozen=True, slots=True)
 class Job:

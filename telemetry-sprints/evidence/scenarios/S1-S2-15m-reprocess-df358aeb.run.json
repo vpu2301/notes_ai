@@ -1,0 +1,444 @@
+{
+ "telemetry_schema_version": 1,
+ "processing_run": {
+  "null_reasons": {
+   "user_wait_seconds": "not_measured",
+   "time_to_notes_seconds": "not_measured",
+   "time_to_transcript_seconds": "not_measured",
+   "asr_audio_processed_seconds": "not_measured",
+   "time_to_speaker_labels_seconds": "not_measured"
+  },
+  "processing_run_id": "df358aeb-a767-4e92-ba5a-4c833bf97b1c",
+  "tenant_id": "00000000-0000-0000-0000-00000000000b",
+  "recording_id": "7967deba-52de-45d6-a0e2-1356966ffc9c",
+  "note_id": null,
+  "note_generation_id": null,
+  "kind": "reprocess",
+  "reprocess_scope": "diarization",
+  "trigger": "user",
+  "telemetry_schema_version": 1,
+  "attempts": 1,
+  "status": "succeeded",
+  "error_category": null,
+  "submitted_at": "2026-10-22T15:45:40.650171Z",
+  "started_at": "2026-10-22T15:45:40.664712Z",
+  "finished_at": "2026-10-22T15:47:27.874515Z",
+  "processing_wall_seconds": 107.218751,
+  "user_wait_seconds": null,
+  "user_wait_cross_device": null,
+  "time_to_transcript_seconds": null,
+  "time_to_speaker_labels_seconds": null,
+  "time_to_notes_seconds": null,
+  "rtf": 0.11913194555555555,
+  "speedup": 8.394054133311066,
+  "audio_duration_seconds": 900.0,
+  "asr_audio_processed_seconds": null,
+  "created_by": "0c000000-0000-0000-0000-00000000000b",
+  "concurrent_runs_at_start": 0,
+  "other_model_activity": [],
+  "telemetry_overhead_seconds": 0.050652,
+  "telemetry_buffer_peak_bytes": 946,
+  "retention_until": "2027-01-20T15:45:40.650171Z",
+  "trace_id": "86b8d084682dd0f037a189dc9125fee0"
+ },
+ "run_context": {
+  "null_reasons": {
+   "app_build": "unavailable",
+   "chip_model": "not_supported",
+   "device_llm": "not_applicable",
+   "container_mem_limit": "unavailable"
+  },
+  "processing_run_id": "df358aeb-a767-4e92-ba5a-4c833bf97b1c",
+  "tenant_id": "00000000-0000-0000-0000-00000000000b",
+  "telemetry_schema_version": 1,
+  "app_commit": "ce7f25a",
+  "app_build": null,
+  "os_name": "Linux",
+  "os_version": "7.0.14-linuxkit",
+  "arch": "aarch64",
+  "chip_model": null,
+  "memory_total_bytes": 14636097536,
+  "execution_mode": "container",
+  "effective_config": {
+   "asr_model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+   "asr_device": "cpu",
+   "asr_engine": "faster_whisper",
+   "asr_backend": "inproc_cpu_asr",
+   "diar_device": "cpu",
+   "diar_engine": "legacy",
+   "diar_v2_pins": "",
+   "asr_beam_size": 5,
+   "asr_lid_model": "/opt/models/whisper-tiny",
+   "diar_v2_batch": 0,
+   "asr_jobs_group": "asr-workers",
+   "asr_model_repo": "Systran/faster-whisper-large-v3",
+   "asr_vad_pad_ms": 0,
+   "diar_model_dir": "/opt/models/ecapa",
+   "asr_jobs_stream": "asr:jobs",
+   "asr_shadow_rate": 0.2,
+   "diar_model_repo": "speechbrain/spkrec-ecapa-voxceleb",
+   "asr_compute_type": "int8",
+   "asr_gate_logprob": -1.0,
+   "asr_model_sha256": "69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1",
+   "asr_gates_enabled": true,
+   "diar_http_backend": "",
+   "diar_model_sha256": "0575cb64845e6b9a10db9bcb74d5ac32b326b8dc90352671d345e2ee3d0126a2",
+   "diar_v2_model_dir": "/opt/models/pyannote-community-1",
+   "asr_condition_prev": true,
+   "asr_gate_no_speech": 0.6,
+   "asr_model_revision": "edaa852ec7e145841d8ffdb056a99866b5f0a478",
+   "asr_shadow_backend": "",
+   "diar_shadow_engine": "",
+   "diar_v2_model_repo": "pyannote/speaker-diarization-community-1",
+   "asr_jobs_dlq_stream": "asr:jobs:dlq",
+   "asr_vocabulary_mode": "prompt",
+   "diar_meanvar_sha256": "cd70225b05b37be64fc5a95e24395d804231d43f74b2e1e5a513db7b69b34c33",
+   "diar_model_revision": "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286",
+   "asr_gate_compression": 2.4,
+   "asr_jobs_max_retries": 3,
+   "asr_loop_fuzzy_ratio": 0.8,
+   "asr_chunk_language_id": true,
+   "asr_gate_loop_repeats": 4,
+   "asr_gate_speech_share": 0.3,
+   "asr_vad_floor_enabled": true,
+   "asr_http_group_seconds": 300.0,
+   "asr_segment_lid_min_ms": 3000,
+   "diar_min_speaker_share": 0.03,
+   "diar_v2_model_revision": "",
+   "asr_gate_low_confidence": 0.25,
+   "asr_jobs_before_recycle": 100,
+   "asr_second_pass_enabled": true,
+   "asr_segment_lid_enabled": true,
+   "asr_shadow_budget_hours": 4.0,
+   "asr_vad_floor_threshold": 0.35,
+   "asr_jobs_idle_reclaim_ms": 60000,
+   "asr_streaming_vad_filter": true,
+   "diar_min_speaker_speech_ms": 8000,
+   "asr_gate_artefact_no_speech": 0.5,
+   "asr_shadow_max_wait_seconds": 120.0,
+   "asr_segment_lid_foreign_share": 0.6,
+   "asr_gate_low_confidence_max_ms": 1500,
+   "asr_vad_floor_max_speech_share": 0.2,
+   "asr_streaming_vad_min_silence_ms": 300,
+   "diar_http_seconds_per_audio_second": 0.5,
+   "asr_max_inference_seconds_multiplier": 52.0
+  },
+  "device_asr": {
+   "value": "cpu",
+   "observation": "observed"
+  },
+  "device_diarization": {
+   "value": "cpu",
+   "observation": "configured"
+  },
+  "device_llm": null,
+  "memory_pressure_start": "some_avg10=0.00",
+  "memory_pressure_end": "some_avg10=0.00",
+  "process_rss_start": 2343591936,
+  "process_rss_end": 2393894912,
+  "swap_used_start": 1054547968,
+  "swap_used_end": 1054081024,
+  "container_mem_limit": null
+ },
+ "spans": [
+  {
+   "span_id": "9f5a4ac5-62aa-45bf-8288-45f987c5b6a4",
+   "processing_run_id": "df358aeb-a767-4e92-ba5a-4c833bf97b1c",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "032bca2e-4841-4386-b600-96aab809f75b",
+   "stage": "queue",
+   "name": "asr.queue_wait",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": null,
+   "end_monotonic_ns": null,
+   "start_wall_utc": "2026-10-22T15:45:40.657000Z",
+   "end_wall_utc": "2026-10-22T15:45:40.679041Z",
+   "clock_source": "wall",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "_reasons": {
+     "queue_depth_at_enqueue": "unavailable"
+    },
+    "queue_name": "asr:jobs",
+    "redelivery": false,
+    "started_at": "2026-10-22T15:45:40.679041+00:00",
+    "enqueued_at": "2026-10-22T15:45:40.657000+00:00",
+    "queue_wait_seconds": 0.022,
+    "queue_depth_at_enqueue": null
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "032bca2e-4841-4386-b600-96aab809f75b",
+   "processing_run_id": "df358aeb-a767-4e92-ba5a-4c833bf97b1c",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": null,
+   "stage": "other",
+   "name": "worker_job",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 15178016287492,
+   "end_monotonic_ns": 15285207731415,
+   "start_wall_utc": "2026-10-22T15:45:40.677856Z",
+   "end_wall_utc": "2026-10-22T15:47:27.868922Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "job_status": "complete"
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "2e059ae1-8bae-49f6-afaf-e85ede55b8ed",
+   "processing_run_id": "df358aeb-a767-4e92-ba5a-4c833bf97b1c",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "032bca2e-4841-4386-b600-96aab809f75b",
+   "stage": "audio_prep",
+   "name": "asr.audio_prep",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 15178022156325,
+   "end_monotonic_ns": 15179150885242,
+   "start_wall_utc": "2026-10-22T15:45:40.683652Z",
+   "end_wall_utc": "2026-10-22T15:45:41.812546Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "_reasons": {
+     "decrypt_seconds": "not_supported",
+     "resample_seconds": "not_supported",
+     "source_sample_rate_hz": "unavailable"
+    },
+    "decode_seconds": 0.9266,
+    "decrypt_seconds": null,
+    "resample_seconds": null,
+    "retrieve_seconds": 0.202,
+    "source_sample_rate_hz": null,
+    "target_sample_rate_hz": 16000
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "f8c668ee-6c0c-48db-8cb3-eff4c65699e5",
+   "processing_run_id": "df358aeb-a767-4e92-ba5a-4c833bf97b1c",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "032bca2e-4841-4386-b600-96aab809f75b",
+   "stage": "diarization_load",
+   "name": "diarization.load",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 15179151520326,
+   "end_monotonic_ns": 15179151746534,
+   "start_wall_utc": "2026-10-22T15:45:41.813020Z",
+   "end_wall_utc": "2026-10-22T15:45:41.813282Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "model": "spkrec-ecapa-voxceleb@0f99f2d",
+    "state": "warm",
+    "device": {
+     "value": "cpu",
+     "observation": "configured"
+    },
+    "backend": "legacy-ecapa-ahc",
+    "_reasons": {
+     "speakers_detected": "not_applicable",
+     "unknown_speaker_share": "not_applicable"
+    },
+    "load_seconds": 0.0001,
+    "audio_seconds": 900.0,
+    "speakers_detected": null,
+    "unknown_speaker_share": null
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "599f831f-488b-4224-a1f4-c2133c0d8949",
+   "processing_run_id": "df358aeb-a767-4e92-ba5a-4c833bf97b1c",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "032bca2e-4841-4386-b600-96aab809f75b",
+   "stage": "diarization_infer",
+   "name": "diarization.infer",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 15179151915492,
+   "end_monotonic_ns": 15284785639415,
+   "start_wall_utc": "2026-10-22T15:45:41.813411Z",
+   "end_wall_utc": "2026-10-22T15:47:27.447568Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "model": "spkrec-ecapa-voxceleb@0f99f2d",
+    "device": {
+     "value": "cpu",
+     "observation": "configured"
+    },
+    "layout": "mono",
+    "backend": "legacy-ecapa-ahc",
+    "audio_seconds": 900.0,
+    "infer_seconds": 105.6313,
+    "speakers_detected": 5,
+    "unknown_speaker_share": 0.0967
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "a58c1127-569c-4227-8659-518cd6d62c6c",
+   "processing_run_id": "df358aeb-a767-4e92-ba5a-4c833bf97b1c",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "032bca2e-4841-4386-b600-96aab809f75b",
+   "stage": "postprocess_attribute",
+   "name": "asr.speaker_attribution",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 15284794542165,
+   "end_monotonic_ns": 15285106666623,
+   "start_wall_utc": "2026-10-22T15:47:27.455699Z",
+   "end_wall_utc": "2026-10-22T15:47:27.767868Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "items": 223,
+    "duration_seconds": 0.3121
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "f6f6882b-f70f-40e3-bcb1-dcd9d03d44e5",
+   "processing_run_id": "df358aeb-a767-4e92-ba5a-4c833bf97b1c",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "032bca2e-4841-4386-b600-96aab809f75b",
+   "stage": "persist",
+   "name": "asr.persist",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 15285112410873,
+   "end_monotonic_ns": 15285189756373,
+   "start_wall_utc": "2026-10-22T15:47:27.773566Z",
+   "end_wall_utc": "2026-10-22T15:47:27.850958Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "items": 223,
+    "duration_seconds": 0.0773
+   },
+   "is_parallel_with": null
+  }
+ ],
+ "llm_calls": [],
+ "client_events": [],
+ "missing_measurements": [
+  {
+   "group": "audio_prep",
+   "item": "asr.audio_prep",
+   "field": "decrypt_seconds",
+   "reason": "not_supported"
+  },
+  {
+   "group": "audio_prep",
+   "item": "asr.audio_prep",
+   "field": "resample_seconds",
+   "reason": "not_supported"
+  },
+  {
+   "group": "audio_prep",
+   "item": "asr.audio_prep",
+   "field": "source_sample_rate_hz",
+   "reason": "unavailable"
+  },
+  {
+   "group": "context",
+   "item": "context",
+   "field": "app_build",
+   "reason": "unavailable"
+  },
+  {
+   "group": "context",
+   "item": "context",
+   "field": "chip_model",
+   "reason": "not_supported"
+  },
+  {
+   "group": "context",
+   "item": "context",
+   "field": "container_mem_limit",
+   "reason": "unavailable"
+  },
+  {
+   "group": "context",
+   "item": "context",
+   "field": "device_llm",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "diarization_load",
+   "item": "diarization.load",
+   "field": "speakers_detected",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "diarization_load",
+   "item": "diarization.load",
+   "field": "unknown_speaker_share",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "queue",
+   "item": "asr.queue_wait",
+   "field": "queue_depth_at_enqueue",
+   "reason": "unavailable"
+  },
+  {
+   "group": "run",
+   "item": "run",
+   "field": "asr_audio_processed_seconds",
+   "reason": "not_measured"
+  },
+  {
+   "group": "run",
+   "item": "run",
+   "field": "time_to_notes_seconds",
+   "reason": "not_measured"
+  },
+  {
+   "group": "run",
+   "item": "run",
+   "field": "time_to_speaker_labels_seconds",
+   "reason": "not_measured"
+  },
+  {
+   "group": "run",
+   "item": "run",
+   "field": "time_to_transcript_seconds",
+   "reason": "not_measured"
+  },
+  {
+   "group": "run",
+   "item": "run",
+   "field": "user_wait_seconds",
+   "reason": "not_measured"
+  }
+ ]
+}

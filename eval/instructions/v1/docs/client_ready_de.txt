@@ -1,8 +1,0 @@
-# Leser
-Projektleitung beim Mandanten; liest die Notiz vollständig.
-# Umfang
-Standard.
-# Formulierung
-Formelles Geschäftsdeutsch. Verwende „Mandant“ statt „Kunde“, „Projektleitung“ statt „PM“, „Lieferobjekt“ statt „Deliverable“.
-# Schwerpunkt
-Vereinbarte Liefertermine, offene Entscheidungen des Mandanten, Risiken.

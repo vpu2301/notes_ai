@@ -463,7 +463,6 @@ struct InviteLandingSheet: View {
 
 /// The recordings this Mac is still holding: send, send elsewhere, save, forget. A section of the home page, not Settings: an unsent meeting is work in progress.
 struct PendingUploadsSection: View {
-    @EnvironmentObject private var app: AppState
     @ObservedObject var pending: PendingUploads
     /// On the sign-in screen there is no session, so only Export and Delete are offered.
     var canSend = true

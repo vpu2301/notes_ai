@@ -23,11 +23,6 @@ user_lines = _meter.create_counter(
     description="Captures by how much the author typed (label: bucket)",
     unit="1",
 )
-user_line_state = _meter.create_counter(
-    "mdx_note_user_line_state_total",
-    description="User lines the recording did or did not back up (label: state)",
-    unit="1",
-)
 states_swept = _meter.create_counter(
     "mdx_note_meeting_state_swept_total",
     description="Captures reclaimed as no_audio by the sweeper",

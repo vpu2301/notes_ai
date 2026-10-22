@@ -169,5 +169,11 @@ class Settings(BaseSettings):
     # Redis denylist pushed by auth-service; fail-OPEN on Redis outage (ADR-0040).
     session_revocation_enabled: bool = Field(default=False, alias="MDX_SESSION_REVOCATION_ENABLED")
 
+    # ── Pipeline telemetry (telemetry sprints; libs/telemetry) ──────────
+    telemetry_enabled: bool = Field(default=True, alias="MDX_TELEMETRY_ENABLED")
+    telemetry_retention_days: int = Field(default=90, ge=1, alias="MDX_TELEMETRY_RETENTION_DAYS")
+    # The commit this image was built from (Dockerfile ARG BUILD_SHA), recorded per run.
+    build_sha: str = Field(default="", alias="MDX_BUILD_SHA")
+
 
 settings = Settings()

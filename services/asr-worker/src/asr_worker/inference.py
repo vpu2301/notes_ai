@@ -15,6 +15,7 @@ from typing import Any
 
 import numpy as np
 
+import telemetry
 from asr_models import (
     AUTO_LANGUAGE,
     Diagnostics,
@@ -251,9 +252,13 @@ class WhisperEngine:
             if should_cancel is not None and await should_cancel():
                 raise TranscriptionCancelledError
             self._chunk_diagnostics = []
-            segs = await loop.run_in_executor(
-                None, self._run_chunk, chunk, run.language, prompt, run.start_ms
-            )
+            # One child span per chunk; the decode generator is consumed inside _run_chunk.
+            with telemetry.span("asr_primary", "asr.chunk") as chunk_span:
+                t_chunk = time.monotonic()
+                segs = await loop.run_in_executor(
+                    None, self._run_chunk, chunk, run.language, prompt, run.start_ms
+                )
+                self._note_chunk(chunk_span, segs, chunk.size / 16_000, time.monotonic() - t_chunk)
             seg_diagnostics.extend(self._take_chunk_diagnostics(run.language))
             if run.language != language:
                 segs = [seg.model_copy(update={"language": run.language}) for seg in segs]
@@ -271,6 +276,24 @@ class WhisperEngine:
                 beam_size=settings.asr_beam_size,
             ),
             diagnostics=Diagnostics(segments=seg_diagnostics),
+        )
+
+    def _note_chunk(
+        self, s: telemetry.Span, segs: list[Segment], seconds: float, wall: float
+    ) -> None:
+        device = telemetry.observe_device(self._model, settings.asr_device)
+        s.update(
+            backend="faster_whisper",
+            model=settings.asr_model,
+            device=device.model_dump() if device else None,
+            compute_type=settings.asr_compute_type,
+            beam_size=settings.asr_beam_size,
+            wall_seconds=round(wall, 4),
+            audio_processed_seconds=round(seconds, 3),
+            chunk_count=1,
+            chunk_seconds=[round(seconds, 3)],
+            word_count=sum(len(g.words) if g.words else len(g.text.split()) for g in segs),
+            segment_count=len(segs),
         )
 
     async def _second_pass(

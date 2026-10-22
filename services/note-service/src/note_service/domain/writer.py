@@ -17,7 +17,8 @@ from datetime import date
 from importlib import resources
 from typing import Any, Final, Literal
 
-from models import ErrorKind, ProviderError
+import telemetry
+from models import ErrorKind, ProviderError, faults
 
 from . import prompts
 
@@ -280,10 +281,15 @@ async def write(
     backend = model_id = None
     started = time.monotonic()
 
-    async def call(user: str) -> str:
+    async def call(user: str, purpose: str = "note_write") -> str:
         nonlocal calls, tokens_in, tokens_out, latency_ms, backend, model_id
-        result = await provider.complete(
-            user, None, max_tokens=max_tokens, temperature=temperature, system=system
+        _arm_dev_fault_once()
+        result = await telemetry.llm.call(
+            purpose,
+            provider,
+            lambda: provider.complete(
+                user, None, max_tokens=max_tokens, temperature=temperature, system=system
+            ),
         )
         calls += 1
         tokens_in += int(result.input_tokens or 0)
@@ -319,7 +325,7 @@ async def write(
         text = ""
         for attempt in range(MERGE_RETRIES + 1):
             try:
-                text = await call(user)
+                text = await call(user, "note_merge")
                 break
             except ProviderError as exc:
                 if attempt >= MERGE_RETRIES or exc.kind is ErrorKind.AUTH:
@@ -352,3 +358,19 @@ async def write(
             "merge_failed": merge_failed,
         },
     )
+
+
+_fault_armed = False
+
+
+def _arm_dev_fault_once() -> None:
+    """Telemetry sprint 5 (S3): arm the configured transient failures at the first note_write
+    of the process, so the startup probes do not use them up."""
+    global _fault_armed
+    if _fault_armed:
+        return
+    _fault_armed = True
+    from ..config import settings
+
+    if settings.dev_fault_llm_failures:
+        faults.arm_chat_failures(settings.dev_fault_llm_failures)

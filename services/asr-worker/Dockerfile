@@ -152,7 +152,8 @@ RUN python3.12 -m uv pip install --system --no-cache \
     /build/libs/diarization \
     /build/libs/secret \
     /build/libs/notification_events \
-    /build/libs/models
+    /build/libs/models \
+    /build/libs/telemetry
 
 # Bake the verified weights from the fetch stages.
 COPY --from=model-fetch /opt/models/whisper /opt/models/whisper-large-v3
@@ -196,6 +197,10 @@ ENV PYTHONPATH=/deps \
 # Model-provider registry; ASR_BACKEND is resolved against it at startup.
 COPY --chown=nonroot:nonroot config/models.yaml /app/config/models.yaml
 ENV MODELS_CONFIG=/app/config/models.yaml
+
+# The commit the image was built from, recorded with every telemetry run (app_commit).
+ARG BUILD_SHA=unknown
+ENV MDX_BUILD_SHA=${BUILD_SHA}
 
 USER nonroot
 WORKDIR /app

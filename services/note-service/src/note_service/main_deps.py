@@ -10,11 +10,13 @@ import asyncpg
 from opentelemetry import metrics
 from redis.asyncio import Redis
 
+import telemetry
 from audit import AuditWriter, Severity
 from auth import IssuerConfig, JwksCache, issuer_url_map, issuers_from_env
 from crypto import Envelope, TenantKekRepository, build_master_key_provider
 from db import create_pool
 from jobs import JobQueue
+from models import set_attempt_sink
 from storage import EncryptedObjectStore, S3Client
 
 from . import audit_kinds
@@ -246,6 +248,15 @@ async def build_state() -> ServiceState:
     workspace_model_settings = WorkspaceSettings(app_pool)
     model_registry = await _model_registry(workspace_model_settings)
 
+    telemetry.configure(
+        app_pool,
+        enabled=settings.telemetry_enabled,
+        retention_days=settings.telemetry_retention_days,
+        app_commit=settings.build_sha or None,
+    )
+    # Every model call's attempts become llm_call rows when a run is current (sprint 3).
+    telemetry.llm.install(set_attempt_sink)
+
     return ServiceState(
         jwks_cache=jwks_cache,
         app_pool=app_pool,
@@ -305,6 +316,7 @@ async def _model_registry(workspace_model_settings: Any) -> Any:
 
 
 async def teardown_state(state: ServiceState) -> None:
+    await telemetry.get_store().close()
     await state.draft_audit_buffer.stop()
     await state.search_audit_buffer.stop()
     await state.redis.aclose()

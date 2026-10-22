@@ -78,8 +78,3 @@ share_abuse_reports = _meter.create_counter(
     description="Reports from the shared page (label: reason)",
     unit="1",
 )
-share_retention_cleared = _meter.create_counter(
-    "mdx_share_retention_cleared_total",
-    description="Rows cleared by the retention job (label: kind)",
-    unit="1",
-)

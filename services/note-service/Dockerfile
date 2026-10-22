@@ -41,7 +41,8 @@ RUN uv pip install --system --no-cache \
     /build/libs/notification_events \
     /build/libs/ratelimit \
     /build/libs/crypto \
-    /build/libs/storage
+    /build/libs/storage \
+    /build/libs/telemetry
 
 # Editable libs install as .pth files, honoured only in a site dir (not via PYTHONPATH):
 # sitecustomize re-registers /deps as one so they activate.

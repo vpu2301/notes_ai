@@ -1,0 +1,43 @@
+upload · asr.submit.upload · ok · 2026-10-22T14:06:02.680857Z → 2026-10-22T14:06:02.998512Z
+capture_input · asr.submit.probe · ok · 2026-10-22T14:06:02.752478Z → 2026-10-22T14:06:02.896191Z
+other · worker_job · ok · 2026-10-22T14:06:03.056261Z → 2026-10-22T14:10:45.378662Z
+  queue · asr.queue_wait · ok · 2026-10-22T14:06:03.025000Z → 2026-10-22T14:06:03.056772Z
+  audio_prep · asr.audio_prep · ok · 2026-10-22T14:06:03.072175Z → 2026-10-22T14:06:03.324903Z
+  model_init · asr.model · ok · 2026-10-22T14:06:03.327453Z → 2026-10-22T14:06:03.327709Z
+  model_init · vad.model · ok · 2026-10-22T14:06:03.327827Z → 2026-10-22T14:06:03.329522Z
+  vad · vad.speech_runs · ok · 2026-10-22T14:06:03.329622Z → 2026-10-22T14:06:08.155934Z
+  language_detection · lid.run · ok · 2026-10-22T14:06:08.159347Z → 2026-10-22T14:06:19.499833Z
+  language_detection · lid.run · ok · 2026-10-22T14:06:19.505363Z → 2026-10-22T14:06:31.280148Z
+  language_detection · lid.run · ok · 2026-10-22T14:06:31.293814Z → 2026-10-22T14:06:41.918532Z
+  language_detection · lid.run · ok · 2026-10-22T14:06:41.922311Z → 2026-10-22T14:06:51.914002Z
+  language_detection · lid.run · ok · 2026-10-22T14:06:51.918171Z → 2026-10-22T14:07:02.370242Z
+  language_detection · lid.run · ok · 2026-10-22T14:07:02.380518Z → 2026-10-22T14:07:12.978418Z
+  language_detection · lid.run · ok · 2026-10-22T14:07:12.984385Z → 2026-10-22T14:07:23.553581Z
+  asr_primary · asr.transcribe_runs · ok · 2026-10-22T14:07:23.555676Z → 2026-10-22T14:10:28.807863Z
+    asr_primary · asr.chunk · ok · 2026-10-22T14:07:23.561402Z → 2026-10-22T14:07:51.479215Z
+    asr_primary · asr.chunk · ok · 2026-10-22T14:07:51.498663Z → 2026-10-22T14:08:09.360107Z
+    asr_primary · asr.chunk · ok · 2026-10-22T14:08:09.373167Z → 2026-10-22T14:08:31.704387Z
+    asr_primary · asr.chunk · ok · 2026-10-22T14:08:31.714047Z → 2026-10-22T14:09:20.804062Z
+    asr_primary · asr.chunk · ok · 2026-10-22T14:09:20.815183Z → 2026-10-22T14:09:50.384402Z
+    asr_primary · asr.chunk · ok · 2026-10-22T14:09:50.397320Z → 2026-10-22T14:10:13.006221Z
+    asr_primary · asr.chunk · ok · 2026-10-22T14:10:13.014234Z → 2026-10-22T14:10:28.804212Z
+  postprocess_cleanup · asr.guards · ok · 2026-10-22T14:10:28.808443Z → 2026-10-22T14:10:28.813545Z
+  postprocess_cleanup · asr.prompt_echo · ok · 2026-10-22T14:10:28.813707Z → 2026-10-22T14:10:28.813788Z
+  postprocess_cleanup · asr.noise_markers · ok · 2026-10-22T14:10:28.818663Z → 2026-10-22T14:10:28.818757Z
+  diarization_load · diarization.load · ok · 2026-10-22T14:10:28.819368Z → 2026-10-22T14:10:28.819731Z
+  diarization_infer · diarization.infer · ok · 2026-10-22T14:10:28.819845Z → 2026-10-22T14:10:45.285266Z
+  postprocess_attribute · asr.speaker_attribution · ok · 2026-10-22T14:10:45.286261Z → 2026-10-22T14:10:45.292602Z
+  postprocess_align · asr.align · skipped · 2026-10-22T14:10:45.293258Z → 2026-10-22T14:10:45.293312Z
+  persist · asr.persist · ok · 2026-10-22T14:10:45.296087Z → 2026-10-22T14:10:45.370215Z
+other · worker_job · skipped · 2026-10-22T14:10:45.399472Z → 2026-10-22T14:10:45.403433Z
+  queue · asr.queue_wait · ok · 2026-10-22T14:06:03.025000Z → 2026-10-22T14:10:45.399564Z
+other · worker_job · skipped · 2026-10-22T14:10:45.406603Z → 2026-10-22T14:10:45.409201Z
+  queue · asr.queue_wait · ok · 2026-10-22T14:06:03.025000Z → 2026-10-22T14:10:45.406654Z
+other · worker_job · skipped · 2026-10-22T14:10:45.411699Z → 2026-10-22T14:10:45.414167Z
+  queue · asr.queue_wait · ok · 2026-10-22T14:06:03.025000Z → 2026-10-22T14:10:45.411762Z
+other · worker_job · skipped · 2026-10-22T14:10:45.416537Z → 2026-10-22T14:10:45.418918Z
+  queue · asr.queue_wait · ok · 2026-10-22T14:06:03.025000Z → 2026-10-22T14:10:45.416579Z
+llm_call · llm.provider_probe · ok · 2026-10-22T14:11:07.589044Z → 2026-10-22T14:11:15.807192Z
+other · notes.generate · ok · 2026-10-22T14:11:15.811713Z → 2026-10-22T14:11:27.250222Z
+  llm_call · llm.note_write · error · 2026-10-22T14:11:16.216809Z → 2026-10-22T14:11:16.216838Z
+  llm_call · llm.note_write · ok · 2026-10-22T14:11:17.218752Z → 2026-10-22T14:11:27.156670Z

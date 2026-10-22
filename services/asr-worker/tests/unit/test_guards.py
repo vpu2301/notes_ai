@@ -287,7 +287,7 @@ def test_g2_exact_loops_are_cut_as_before() -> None:
     assert guards.loop_cut([w.text for w in seg.words], 4, fuzzy_ratio=1.0) == 4
 
 
-# ── Stock outros (Sprint A3 T2) ──────────────────────────────────────
+# ── Stock credit lines (Sprint A3 T2, S1) ────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -306,7 +306,7 @@ def test_a_stock_outro_after_a_gap_is_cut(language: str, text: str) -> None:
     result = guards.apply(out, [SpeechSegment(0, outro.end_ms)])
     assert [s.start_ms for s in result.output.segments] == [speech.start_ms]
     (drop,) = result.output.diagnostics.dropped_segments
-    assert drop.reason == "artefact_outro"
+    assert drop.reason == "artefact_stock_line"
 
 
 def test_a_stock_outro_the_decoder_doubts_is_cut_without_a_gap() -> None:
@@ -319,9 +319,59 @@ def test_a_stock_outro_the_decoder_doubts_is_cut_without_a_gap() -> None:
     assert len(result.output.segments) == 1
 
 
+def test_a_short_credit_line_is_cut_without_gap_or_doubt() -> None:
+    # NOTE-2026-00086: a confident 6-token credit 1 s after the narrator's sentence.
+    before = _seg(61410, "In ganz China.")
+    credit = _seg(64098, "Untertitelung des ZDF für funk, 2017")
+    after = _seg(66626, "Chinesische E-Autos sind weltweit auf der Überholspur.")
+    out = _out(
+        [before, credit, after],
+        [_d(s, no_speech_prob=0.01) for s in (before, credit, after)],
+    )
+    result = guards.apply(out, [SpeechSegment(0, after.end_ms)])
+    texts = [s.text for s in result.output.segments]
+    assert texts == [before.text, after.text]
+    (drop,) = result.output.diagnostics.dropped_segments
+    assert drop.reason == "artefact_stock_line"
+    assert drop.segment_index == 1 and drop.artefact == "de:0"
+    assert (drop.start_ms, drop.end_ms) == (credit.start_ms, credit.end_ms)
+
+
+def test_a_credit_heading_a_long_segment_loses_only_the_credit() -> None:
+    text = (
+        "Untertitelung des ZDF für funk, 2017 Chinesische E-Autos sind weltweit auf der "
+        "Überholspur und das ist kein Zufall"
+    )
+    seg = _seg(64098, text)
+    out = _out([seg], [_d(seg, no_speech_prob=0.6)])
+    result = guards.apply(out, [SpeechSegment(0, seg.end_ms)])
+    (kept,) = result.output.segments
+    assert kept.text.startswith("Chinesische E-Autos") and "Untertitelung" not in kept.text
+    assert (kept.start_ms, kept.end_ms) == (seg.start_ms, seg.end_ms)
+    assert kept.words == seg.words[6:]
+    (drop,) = result.output.diagnostics.dropped_segments
+    assert drop.reason == "artefact_stock_line" and drop.segment_index == 0
+    assert (drop.start_ms, drop.end_ms) == (seg.start_ms, seg.words[5].end_ms)
+
+
+def test_a_credit_heading_a_long_segment_without_words_cuts_the_substring() -> None:
+    text = (
+        "Untertitelung des ZDF für funk, 2017 Chinesische E-Autos sind weltweit auf der "
+        "Überholspur und das ist kein Zufall"
+    )
+    seg = Segment(text=text, start_ms=10_000, end_ms=18_000, avg_confidence=0.9)
+    out = _out([seg], [_d(seg, no_speech_prob=0.6)])
+    (kept,) = guards.apply(out, [SpeechSegment(0, seg.end_ms)]).output.segments
+    assert kept.text == text.split(" 2017 ", 1)[1]
+    assert (kept.start_ms, kept.end_ms) == (10_000, 18_000)
+
+
 def test_thanks_for_watching_spoken_mid_speech_stays() -> None:
     speech = _seg(0, "we talk about the budget and the delivery date today")
-    said = _seg(speech.end_ms + 200, "Thanks for watching, and now the second item on the budget")
+    said = _seg(
+        speech.end_ms + 200,
+        "Thanks for watching the budget numbers so closely, and now the second item on the list",
+    )
     out = _out([speech, said], [_d(speech, no_speech_prob=0.01), _d(said, no_speech_prob=0.02)])
     result = guards.apply(
         out.model_copy(update={"language": "en"}), [SpeechSegment(0, said.end_ms)]
@@ -329,9 +379,70 @@ def test_thanks_for_watching_spoken_mid_speech_stays() -> None:
     assert len(result.output.segments) == 2 and result.output.diagnostics.dropped_segments == []
 
 
-def test_the_outro_table_names_each_language() -> None:
-    assert guards.is_stock_outro("Untertitelung des ZDF", "de")
-    assert guards.is_stock_outro("Підпишіться на канал", "uk")
-    assert not guards.is_stock_outro(
-        "Subscribe to our newsletter for the budget details next week", "en"
+def test_a_long_sentence_starting_with_subscribe_stays() -> None:
+    speech = _seg(0, "we talk about the budget and the delivery date today")
+    said = _seg(
+        speech.end_ms + 100,
+        "Subscribe to the vendor portal before Friday so the finance team can approve the order",
     )
+    out = _out([speech, said], [_d(speech, no_speech_prob=0.01), _d(said, no_speech_prob=0.02)])
+    result = guards.apply(
+        out.model_copy(update={"language": "en"}), [SpeechSegment(0, said.end_ms)]
+    )
+    assert [s.text for s in result.output.segments] == [speech.text, said.text]
+
+
+def test_a_stock_line_in_dry_run_is_recorded_and_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "asr_gates_enabled", False)
+    seg = _seg(0, "Untertitelung des ZDF für funk, 2017")
+    result = guards.apply(_out([seg]), [SpeechSegment(0, seg.end_ms)])
+    assert result.output.segments == [seg]
+    (drop,) = result.output.diagnostics.dropped_segments
+    assert drop.dry_run and drop.reason == "artefact_stock_line"
+
+
+@pytest.mark.parametrize(
+    ("language", "text", "prefix"),
+    [
+        ("de", "Untertitelung des ZDF für funk, 2017", "untertitelung des zdf"),
+        ("de", "Untertitel im Auftrag des ZDF, 2020", "untertitel im auftrag des zdf"),
+        ("de", "Untertitelung. BR 2018", "untertitelung"),
+        ("de", "Untertitel von Stephanie Geiges", "untertitel von"),
+        ("de", "Copyright WDR 2021", "copyright wdr"),
+        ("de", "Danke fürs Zuschauen!", "danke fürs zuschauen"),
+        ("de", "Vielen Dank fürs Zuschauen!", "vielen dank fürs zuschauen"),
+        ("de", "Abonniert den Kanal!", "abonniert"),
+        ("en", "Thank you for watching!", "thank you for watching"),
+        ("en", "Thanks for watching!", "thanks for watching"),
+        ("en", "Subscribe to my channel", "subscribe to"),
+        ("en", "Subtitles by the Amara.org community", "subtitles by"),
+        ("en", "Captions by GetTranscribed.com", "captions by"),
+        ("en", "Transcribed by ESO", "transcribed by"),
+        ("uk", "Дякую за перегляд!", "дякую за перегляд"),
+        ("uk", "Підпишіться на канал", "підпишіться"),
+        ("uk", "Субтитри зроблені спільнотою", "субтитри"),
+    ],
+)
+def test_the_stock_line_table_names_each_language(language: str, text: str, prefix: str) -> None:
+    match = guards.stock_line(text.split(), language)
+    assert match is not None
+    lang, k = match[0].split(":")
+    assert guards.STOCK_LINES[lang][int(k)] == prefix
+
+
+def test_stock_lines_match_only_at_the_start() -> None:
+    assert guards.stock_line(["Wir", "haben", "die", "Untertitelung", "bestellt"], "de") is None
+    assert guards.stock_line(["Subscribers", "grew", "this", "quarter"], "en") is None
+
+
+def test_a_long_sentence_opening_with_a_stock_line_after_a_gap_stays() -> None:
+    # The Pardo opening (Sprint I3): a gap before it, but no end to a credit in sight.
+    text = (
+        "Thank you for watching this highly anticipated world debut of the Pardo 65 GT here "
+        "at the Cannes Yachting Festival"
+    )
+    seg = _seg(11_000, text)
+    out = _out([seg], [_d(seg, no_speech_prob=0.01)]).model_copy(update={"language": "en"})
+    result = guards.apply(out, [SpeechSegment(0, seg.end_ms)])
+    assert [s.text for s in result.output.segments] == [text]
+    assert result.output.diagnostics.dropped_segments == []

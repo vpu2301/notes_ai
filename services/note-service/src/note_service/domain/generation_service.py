@@ -16,6 +16,8 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
+import telemetry
+
 from . import ai_settings, prompts
 from . import generation_repository as gen_repo
 
@@ -123,7 +125,11 @@ async def start(
         tenant_id,
         JOB_KIND,
         # Ids only: a job row is read by operators and shipped to metrics.
-        {"generation_id": str(stored_id), "note_id": str(note_id)},
+        {
+            "generation_id": str(stored_id),
+            "note_id": str(note_id),
+            **await _telemetry_fields(conn, note_id=note_id, reason=reason),
+        },
         max_attempts=MAX_ATTEMPTS,
         priority=PRIORITY_REGENERATE
         if reason == "regenerate"
@@ -167,3 +173,32 @@ class ProcessorUnacknowledgedError(Exception):
     def __init__(self, processors: list[Any]) -> None:
         super().__init__("processor_unacknowledged")
         self.processors = processors
+
+
+async def _telemetry_fields(
+    conn: asyncpg.Connection, *, note_id: UUID, reason: str
+) -> dict[str, str]:
+    """The telemetry run this generation belongs to (ids only, fail-open): an automatic one
+    continues its recording's newest run; a regeneration asks the worker for a new
+    ``reprocess`` run of the recording. A savepoint keeps a failure out of the caller's
+    transaction."""
+    try:
+        async with conn.transaction():
+            recording = await conn.fetchval(
+                """
+                SELECT COALESCE(n.source_asr_job_id, m.asr_job_id)
+                  FROM notes n LEFT JOIN note_meetings m ON m.note_id = n.id
+                 WHERE n.id = $1
+                """,
+                note_id,
+            )
+    except Exception:  # noqa: BLE001 — telemetry never blocks a generation
+        logger.debug("generation.telemetry_lookup_failed", exc_info=True)
+        return {}
+    if recording is None:
+        return {}
+    fields = {"telemetry_recording_id": str(recording)}
+    if reason == "regenerate":
+        return fields | {"telemetry_kind": "reprocess"}
+    run = await telemetry.get_store().latest_run(conn, recording)
+    return fields | {"processing_run_id": str(run)} if run else {}

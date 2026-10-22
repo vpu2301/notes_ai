@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+import telemetry
 from models import ChatProvider, Registry, build_chat_provider
 
 logger = logging.getLogger(__name__)
@@ -157,12 +158,16 @@ class NoteAsker:
             question=question,
             max_chars=self._max_chars,
         )
-        result = await provider.complete(
-            prompt,
-            None,
-            max_tokens=max_tokens or self._max_tokens,
-            temperature=temperature,
-            system=SYSTEM_PROMPT,
+        result = await telemetry.llm.call(
+            "note_ask",
+            provider,
+            lambda: provider.complete(
+                prompt,
+                None,
+                max_tokens=max_tokens or self._max_tokens,
+                temperature=temperature,
+                system=SYSTEM_PROMPT,
+            ),
         )
         return Answer(
             text=result.text.strip(),

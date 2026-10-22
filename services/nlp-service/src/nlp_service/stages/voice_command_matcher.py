@@ -74,7 +74,6 @@ class VoiceCommandMatcher:
         language: str,
         template_sections: tuple[TemplateSection, ...] = (),
     ) -> None:
-        self._language = language
         self._sections = template_sections
         flat: list[_PhraseSpec] = []
         for spec in specs:

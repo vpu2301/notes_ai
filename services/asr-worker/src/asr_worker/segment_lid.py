@@ -29,6 +29,7 @@ from uuid import UUID
 import numpy as np
 from opentelemetry import metrics
 
+import telemetry
 from asr_models import Diagnostics, Segment, SegmentDiagnostics, TranscriptionOutput
 from asr_models.output import SegmentLanguage
 from models import ProviderError
@@ -392,17 +393,21 @@ async def rediscover(
             continue
         slice_start = max(0, suspect.start_ms - PAD_MS)
         span = pcm[slice_start * 16 : (suspect.end_ms + PAD_MS) * 16]
+        recovery = _recovery(provider, suspect.trigger, len(span) / 16_000)
         try:
-            second = await asyncio.wait_for(
-                provider.transcribe(  # type: ignore[attr-defined]
-                    span,
-                    language=suspect.language,
-                    prompt=None,
-                    should_cancel=should_cancel,
-                    second_pass=True,
-                ),
-                timeout=remaining,
-            )
+            async with recovery:
+                t_rec = time.monotonic()
+                second = await asyncio.wait_for(
+                    provider.transcribe(  # type: ignore[attr-defined]
+                        span,
+                        language=suspect.language,
+                        prompt=None,
+                        should_cancel=should_cancel,
+                        second_pass=True,
+                    ),
+                    timeout=remaining,
+                )
+                recovery.set("wall_seconds", round(time.monotonic() - t_rec, 4))
         except (TimeoutError, ProviderError) as exc:
             logger.warning(
                 "asr.segment_lid_failed",
@@ -493,3 +498,20 @@ async def rediscover(
         }
     )
     return output.model_copy(update={"segments": final_segments, "diagnostics": diagnostics})
+
+
+def _recovery(provider: object, trigger: str, seconds: float) -> telemetry.Span:
+    """A segment re-decoded in another language: an ``asr_recovery`` span. It relabels rather
+    than recovers lost speech, so ``recovered_words`` is not applicable."""
+    s = telemetry.span("asr_recovery", "asr.segment_language")
+    s.update(
+        trigger_reason=f"segment_language.{trigger}",
+        attempt=1,
+        audio_reprocessed_seconds=round(seconds, 3),
+        backend=settings.asr_backend,
+        model=getattr(provider, "model_name", None),
+    )
+    s.missing("recovered_words", "not_applicable")
+    s.missing("device", "unavailable")
+    telemetry.add_audio_processed(seconds)
+    return s

@@ -1583,6 +1583,20 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
+    /// "Export diagnostics…" (telemetry sprint 4): the recording's processing report, shared as Markdown.
+    func exportDiagnostics() async {
+        guard let jobId else { return }
+        busy = true
+        actionError = nil
+        defer { busy = false }
+        do {
+            let report = try await api.latestDiagnostics(recordingId: jobId)
+            shareItem = ShareItem(url: try Self.exportFile(named: report.filename, data: report.data))
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
     func exportMarkdown() {
         do {
             shareItem = ShareItem(url: try Self.exportFile(named: "\(note?.code ?? "note").md",

@@ -1,0 +1,7 @@
+other · worker_job · ok · 2026-10-22T15:45:40.677856Z → 2026-10-22T15:47:27.868922Z
+  queue · asr.queue_wait · ok · 2026-10-22T15:45:40.657000Z → 2026-10-22T15:45:40.679041Z
+  audio_prep · asr.audio_prep · ok · 2026-10-22T15:45:40.683652Z → 2026-10-22T15:45:41.812546Z
+  diarization_load · diarization.load · ok · 2026-10-22T15:45:41.813020Z → 2026-10-22T15:45:41.813282Z
+  diarization_infer · diarization.infer · ok · 2026-10-22T15:45:41.813411Z → 2026-10-22T15:47:27.447568Z
+  postprocess_attribute · asr.speaker_attribution · ok · 2026-10-22T15:47:27.455699Z → 2026-10-22T15:47:27.767868Z
+  persist · asr.persist · ok · 2026-10-22T15:47:27.773566Z → 2026-10-22T15:47:27.850958Z

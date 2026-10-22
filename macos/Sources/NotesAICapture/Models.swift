@@ -222,9 +222,7 @@ struct ReauthPrompt: Identifiable {
     let challengeId: String?
     let answer: (Bool) -> Void
 
-    var offersTOTP: Bool { methods.contains("totp") }
     var offersRecoveryCode: Bool { methods.contains("recovery_code") }
-    var offersEmailCode: Bool { methods.contains("email_code") }
 }
 
 extension Locale {
@@ -273,15 +271,6 @@ enum JobStatus: String, Codable, Sendable {
         }
     }
 
-    var label: String {
-        switch self {
-        case .queued: return "Queued"
-        case .running: return "Transcribing"
-        case .complete: return "Done"
-        case .failed: return "Failed"
-        case .cancelled: return "Cancelled"
-        }
-    }
 }
 
 /// Subset of `TranscriptionJobView` this app needs.
@@ -545,11 +534,6 @@ enum JSONValue: Codable, Equatable, Sendable {
         case .array(let value): try container.encode(value)
         case .object(let value): try container.encode(value)
         }
-    }
-
-    var stringValue: String? {
-        if case .string(let value) = self { return value }
-        return nil
     }
 }
 
@@ -2266,9 +2250,6 @@ enum MeetingState: String, Codable, Sendable {
     case recording, uploading, transcribing, generating, ready
     case noAudio = "no_audio"
     case failed
-
-    /// The recording still has to reach the server; the sweeper reclaims these after 12 hours.
-    var isPreUpload: Bool { self == .recording || self == .uploading }
 }
 
 /// What kind of meeting this is — picks the template family the note is

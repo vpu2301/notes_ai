@@ -16,7 +16,6 @@ from auth import Claims
 from note_models import NoteContent
 
 from . import access, action_items, carry_over
-from . import action_items_repository as items_repo
 from . import meetings_repository as meetings
 from . import notes_repository as repo
 from . import series as series_rules
@@ -196,12 +195,3 @@ async def carried_view(
             )
         )
     return carry_over.apply_states(items, states), previous
-
-
-async def item_rows_for(
-    conn: asyncpg.Connection, *, note: repo.NoteRow
-) -> list[items_repo.ItemRow]:
-    version = await repo.fetch_version(conn, version_id=note.current_version_id)
-    if version is None:
-        return []
-    return await action_items.ensure_items(conn, note=note, version=version)

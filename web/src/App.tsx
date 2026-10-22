@@ -33,6 +33,8 @@ import { JoinPage } from "./pages/JoinPage";
 import { SharedNotePage } from "./pages/SharedNotePage";
 import { SharedPrivacyPage } from "./pages/SharedPrivacyPage";
 import { SharingStatsPage } from "./pages/SharingStatsPage";
+import { TelemetryDashboardPage } from "./pages/admin/TelemetryDashboardPage";
+import { TelemetryRunPage } from "./pages/admin/TelemetryRunPage";
 import { AppShell } from "./shell/AppShell";
 import { SpacesProvider } from "./spaces/SpacesContext";
 
@@ -186,6 +188,9 @@ export function App() {
               />
               {/* Workspace admins only; the API enforces it. */}
               <Route path="/admin/sharing" element={<SharingStatsPage />} />
+              {/* Platform admins only (telemetry sprint 4); the API enforces it. */}
+              <Route path="/admin/dashboard" element={<TelemetryDashboardPage />} />
+              <Route path="/admin/dashboard/runs/:processingRunId" element={<TelemetryRunPage />} />
               <Route path="/capture" element={<Navigate to="/meeting/new" replace />} />
               <Route path="/settings" element={<SettingsLayout />}>
                 <Route index element={<Navigate to="/settings/account" replace />} />

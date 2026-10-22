@@ -5,7 +5,6 @@ The engine, the shared page, the action-item projection and the PDF all call
 
 from __future__ import annotations
 
-import re
 from typing import Final
 
 # ── The vocabulary ──────────────────────────────────────────────────
@@ -96,19 +95,6 @@ def is_generated(section_key: str) -> bool:
     return section_key.startswith(GENERATED_PREFIX)
 
 
-def generated_key(title: str, taken: set[str] | frozenset[str] = frozenset()) -> str:
-    """A stable, readable key for a topic section: ``gen:transfer-strategy``.
-    Unique within ``taken`` by a numeric suffix."""
-    slug = re.sub(r"[^\w]+", "-", title.casefold(), flags=re.UNICODE).strip("-")[:40].strip("-")
-    slug = slug or "topic"
-    key = f"{GENERATED_PREFIX}{slug}"
-    n = 2
-    while key in taken or key == OVERVIEW_KEY:
-        key = f"{GENERATED_PREFIX}{slug}-{n}"
-        n += 1
-    return key
-
-
 def role_of(section: object) -> Role:
     """The role of a template section or bare key: the declared `role`, else the id
     map; a generated section's role is in its key."""
@@ -139,8 +125,3 @@ def role_map(definition: object) -> dict[str, Role]:
 def keys_with_role(definition: object, role: Role) -> list[str]:
     """Every section of this template with the given role, in template order."""
     return [key for key, value in role_map(definition).items() if value == role]
-
-
-def first_key_with_role(definition: object, role: Role) -> str | None:
-    keys = keys_with_role(definition, role)
-    return keys[0] if keys else None

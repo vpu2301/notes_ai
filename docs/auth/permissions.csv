@@ -272,3 +272,59 @@ guest,ai_settings.read,tenant,false,W1: a guest token authenticates and reaches 
 guest,ai_settings.write,tenant,false,W1: a guest token authenticates and reaches nothing until W3
 guest,billing.read,tenant,false,W1: a guest token authenticates and reaches nothing until W3
 guest,billing.write,tenant,false,W1: a guest token authenticates and reaches nothing until W3
+platform_admin,tenant.read,tenant,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,tenant.update,tenant,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,tenant.create,tenant,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,tenant.manage_members,tenant,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,user.read,user,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,user.invite,user,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,user.manage_roles,user,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,user.deactivate,user,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,user.reactivate,user,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,user.reset_mfa,user,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,user.remind_mfa,user,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,audit.read,audit,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,audit.verify,audit,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,asr.write,asr_job,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,asr.read,asr_job,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,asr.cancel,asr_job,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,dictation.start,dictation_session,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,dictation.read,dictation_session,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,dictation.finalize,dictation_session,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,nlp.process,nlp_text,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,nlp.read.abbreviations,abbreviation,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,nlp.write.abbreviations,abbreviation,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,template.read,template,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,template.clone,template,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,template.update,template,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,template.deprecate,template,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,note.write,note,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,note.read,note,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,notification.read,notification,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,notification.write,notification,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,stats.read,tenant,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,autocomplete.read,phrase,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,autocomplete.write,phrase,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,synonym.read,synonym,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,synonym.write,synonym,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,device.manage,credential,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,ai_settings.read,tenant,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,ai_settings.write,tenant,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,billing.read,tenant,false,platform-wide telemetry reader only; holds no workspace or content permission
+platform_admin,billing.write,tenant,false,platform-wide telemetry reader only; holds no workspace or content permission
+tenant_admin,telemetry.read,telemetry,true,workspace admin: runs of the workspace (content-free)
+member,telemetry.read,telemetry,true,runs of recordings the caller requested or can view
+viewer,telemetry.read,telemetry,true,runs of recordings the caller can view
+auditor,telemetry.read,telemetry,false,audit reach is the audit log
+service,telemetry.read,telemetry,false,no S2S telemetry reader
+device,telemetry.read,telemetry,false,room-capture hardware: capture only
+guest,telemetry.read,telemetry,false,a guest reaches only the notes it was given
+platform_admin,telemetry.read,telemetry,true,reads any run through telemetry.read_all
+tenant_admin,telemetry.read_all,telemetry,false,cross-tenant reads are the platform admin's alone
+member,telemetry.read_all,telemetry,false,cross-tenant reads are the platform admin's alone
+viewer,telemetry.read_all,telemetry,false,cross-tenant reads are the platform admin's alone
+auditor,telemetry.read_all,telemetry,false,cross-tenant reads are the platform admin's alone
+service,telemetry.read_all,telemetry,false,cross-tenant reads are the platform admin's alone
+device,telemetry.read_all,telemetry,false,cross-tenant reads are the platform admin's alone
+guest,telemetry.read_all,telemetry,false,cross-tenant reads are the platform admin's alone
+platform_admin,telemetry.read_all,telemetry,true,cross-tenant dashboard: platform admin only

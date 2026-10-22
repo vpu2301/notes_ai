@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Fixed-window Redis rate limiter (house INCR+EXPIRE pattern) with explicit fail-open/fail-closed posture, plus trusted-proxy client-IP resolution (IDX-A3)"
 requires-python = ">=3.12"
 dependencies = [
-    "redis>=5.0",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,15 @@
+upload · asr.submit.upload · ok · 2026-10-22T14:22:18.585710Z → 2026-10-22T14:22:19.143117Z
+capture_input · asr.submit.probe · ok · 2026-10-22T14:22:18.765380Z → 2026-10-22T14:22:18.911797Z
+other · worker_job · cancelled · 2026-10-22T14:22:19.177167Z → 2026-10-22T14:23:50.774500Z
+  queue · asr.queue_wait · ok · 2026-10-22T14:22:19.160000Z → 2026-10-22T14:22:19.177728Z
+  audio_prep · asr.audio_prep · ok · 2026-10-22T14:22:19.185438Z → 2026-10-22T14:22:19.979818Z
+  model_init · asr.model · ok · 2026-10-22T14:22:19.984388Z → 2026-10-22T14:22:19.984752Z
+  model_init · vad.model · ok · 2026-10-22T14:22:19.984859Z → 2026-10-22T14:22:19.986724Z
+  vad · vad.speech_runs · ok · 2026-10-22T14:22:19.986840Z → 2026-10-22T14:22:56.496968Z
+  language_detection · lid.run · ok · 2026-10-22T14:22:56.525608Z → 2026-10-22T14:23:08.510442Z
+  language_detection · lid.run · ok · 2026-10-22T14:23:08.517160Z → 2026-10-22T14:23:19.897816Z
+  language_detection · lid.run · ok · 2026-10-22T14:23:19.903974Z → 2026-10-22T14:23:30.039118Z
+  language_detection · lid.run · ok · 2026-10-22T14:23:30.045684Z → 2026-10-22T14:23:40.695474Z
+  language_detection · lid.run · ok · 2026-10-22T14:23:40.705486Z → 2026-10-22T14:23:50.741216Z
+other · worker_job · cancelled · 2026-10-22T14:23:50.795156Z → 2026-10-22T14:23:50.797901Z
+  queue · asr.queue_wait · ok · 2026-10-22T14:22:19.160000Z → 2026-10-22T14:23:50.795229Z

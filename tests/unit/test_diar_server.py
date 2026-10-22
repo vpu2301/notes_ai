@@ -196,13 +196,6 @@ def test_the_audio_never_touches_the_filesystem(monkeypatch: pytest.MonkeyPatch)
 def test_a_bad_token_is_refused_before_the_body_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
     """FastAPI parses the form BEFORE route dependencies run, so the check must be middleware."""
     module = _load_app(monkeypatch, MDX_DIAR_SERVER_TOKEN="s3cret")
-    read: list[int] = []
-
-    class _CountingBytes(bytes):
-        def __iter__(self) -> Any:  # pragma: no cover - only if the body is consumed
-            read.append(1)
-            return super().__iter__()
-
     with TestClient(module.app) as client:
         response = client.post(
             "/v1/audio/diarizations",

@@ -1,0 +1,5 @@
+# Nightly telemetry retention (scripts/jobs/telemetry_retention.py): runs past
+# retention_until (MDX_TELEMETRY_RETENTION_DAYS at submission, default 90) are deleted with
+# their spans, LLM calls, client events and run context; stuck runs are closed as failed.
+CRON_TZ=UTC
+50 2 * * *  cd /opt/notes-ai-backend && DATABASE_URL=postgresql://app_role:app_role@localhost:5432/notes /usr/bin/env uv run python scripts/jobs/telemetry_retention.py >> /var/log/mdx/telemetry-retention.log 2>&1

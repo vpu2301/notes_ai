@@ -140,6 +140,8 @@ final class AppState: ObservableObject {
     }
 
     let api: APIClient
+    /// Telemetry: client events for the recording's processing run (fail-open, offline queue).
+    let telemetry: TelemetryReporter
     private(set) lazy var capture = CaptureViewModel(app: self)
     /// Recordings this Mac is still holding.
     private(set) lazy var pending = PendingUploads(host: self)
@@ -150,6 +152,15 @@ final class AppState: ObservableObject {
         self.settings = stored
         self.email = UserDefaults.standard.string(forKey: Keys.email) ?? ""
         self.api = APIClient(settings: stored)
+        let client = self.api
+        self.telemetry = TelemetryReporter(
+            client: "macos",
+            version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev",
+            file: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+                .appending(path: "Notes AI Capture", directoryHint: .isDirectory)
+                .appending(path: "telemetry-queue.json"),
+            send: { body in try await client.postClientEvents(body) }
+        )
         // Recents belong to an identity and a workspace; until the session is restored, the best guess is the last sign-in.
         let store = LocalStore()
         self.local = store
@@ -1126,12 +1137,6 @@ final class AppState: ObservableObject {
     private static func load<T: Decodable>(_ type: T.Type, key: String) -> T? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(type, from: data)
-    }
-
-    private func persist<T: Encodable>(_ value: T, key: String) {
-        if let data = try? JSONEncoder().encode(value) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
     }
 }
 

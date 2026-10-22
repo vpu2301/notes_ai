@@ -3,7 +3,6 @@ import SwiftUI
 
 /// The Connectors tab of Settings: the Mac's calendars and the remote MCP servers the user has connected.
 struct ConnectorsView: View {
-    @EnvironmentObject private var app: AppState
     @ObservedObject var calendar: CalendarService
     @ObservedObject var google: GoogleCalendarService
     @ObservedObject var store: ConnectorStore

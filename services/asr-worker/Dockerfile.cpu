@@ -112,7 +112,8 @@ RUN uv pip install --system --no-cache \
     /build/libs/diarization \
     /build/libs/secret \
     /build/libs/notification_events \
-    /build/libs/models
+    /build/libs/models \
+    /build/libs/telemetry
 
 COPY --from=model-fetch /opt/models/whisper /opt/models/whisper-tiny
 COPY --from=ecapa-fetch /opt/models/ecapa /opt/models/ecapa
@@ -146,6 +147,10 @@ COPY --chown=nonroot:nonroot config/models.yaml /app/config/models.yaml
 ENV MODELS_CONFIG=/app/config/models.yaml
 # Local LID model for HTTP ASR backends (offline at runtime).
 ENV MDX_ASR_LID_MODEL=/opt/models/whisper-tiny
+
+# The commit the image was built from, recorded with every telemetry run (app_commit).
+ARG BUILD_SHA=unknown
+ENV MDX_BUILD_SHA=${BUILD_SHA}
 
 USER nonroot
 WORKDIR /app

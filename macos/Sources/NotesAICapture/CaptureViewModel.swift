@@ -280,10 +280,12 @@ final class CaptureViewModel: ObservableObject {
         title = meetingTitle
         recordingStartedAt = Date()
         let context = CaptureContext(speakersMax: nil, nameCandidates: [], source: .upload)
+        let submittedAt = Date()
         pipelineTask = Task {
             vocabularyHint = try? await app.api.glossaryHint().hint
             await process(fileURL: copy, meetingTitle: meetingTitle, context: context,
-                          contentType: Self.contentType(forExtension: ext))
+                          contentType: Self.contentType(forExtension: ext),
+                          started: (.importSubmitted, submittedAt))
         }
     }
 
@@ -307,6 +309,7 @@ final class CaptureViewModel: ObservableObject {
             phase = .idle
             return
         }
+        let stoppedAt = Date()  // telemetry: `recording_stopped`, sent once the server names the recording
         // Read now — the next recording resets it.
         let timing = recorder.captureTiming
         // Whatever was typed in the last second goes with the meeting.
@@ -319,12 +322,14 @@ final class CaptureViewModel: ObservableObject {
         let context = self.context
         self.context = .manual
         pipelineTask = Task {
-            await process(fileURL: fileURL, meetingTitle: meetingTitle, context: context, timing: timing)
+            await process(fileURL: fileURL, meetingTitle: meetingTitle, context: context, timing: timing,
+                          started: (.recordingStopped, stoppedAt))
         }
     }
 
     private func process(fileURL: URL, meetingTitle: String, context: CaptureContext,
-                         timing: CaptureTiming? = nil, contentType: String? = nil) async {
+                         timing: CaptureTiming? = nil, contentType: String? = nil,
+                         started: (ClientEventName, Date)? = nil) async {
         // The recording is deleted only once the server has it; every other exit moves it to `pending/` with a sidecar. A meeting cannot be recorded twice.
         var uploaded = false
         let recordedAt = Date()
@@ -340,6 +345,13 @@ final class CaptureViewModel: ObservableObject {
             }
         }
         var jobId: String?
+        // Telemetry: this capture's events wait for the recording id the server returns.
+        let capture = fileURL.lastPathComponent
+        let bytes = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        if let (event, at) = started {
+            await app.telemetry.reportBeforeRecording(event, capture: capture, at: at)
+        }
+        await app.telemetry.reportBeforeRecording(.uploadStarted, capture: capture, attributes: ["bytes": bytes])
         do {
             phase = .uploading
             let job = try await app.api.submitJob(fileURL: fileURL,
@@ -354,6 +366,9 @@ final class CaptureViewModel: ObservableObject {
             uploaded = true
             jobId = job.id
             activeJobId = job.id
+            await app.telemetry.reportBeforeRecording(.uploadFinished, capture: capture,
+                                                      attributes: ["bytes": bytes, "retries": 0])
+            await app.telemetry.attachRecording(job.id, capture: capture)
             // The recording and the typed note are one meeting from here on.
             await attachRecording(jobId: job.id)
             app.addRecent(jobId: job.id, title: meetingTitle, meetingNoteId: noteId)

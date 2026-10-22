@@ -1754,3 +1754,8 @@ li:hover > span > .line-comment, p:hover > .line-comment, .line-comment:focus-vi
 .doc-section { scroll-margin-top: calc(var(--topbar-h) + 16px); }
 .doc-section.nav-target { background: var(--accent-soft); border-radius: var(--radius-sm); transition: background var(--t-fast) var(--ease); }
 @media (max-width: 1023px) { .section-nav { display: none; } }
+
+/* Telemetry run page: the raw span tree (telemetry sprint 4). */
+.span-tree { list-style: none; margin: 0; padding-left: calc(14px * var(--density)); border-left: 1px solid var(--line); }
+.span-tree li { margin: calc(6px * var(--density)) 0; }
+.span-tree pre { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: calc(12px * var(--fs)); }

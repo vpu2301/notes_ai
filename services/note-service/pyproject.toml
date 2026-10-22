@@ -40,6 +40,7 @@ dependencies = [
     "ratelimit",
     # The generation queue (ADR-0058)
     "jobs",
+    "telemetry",
     # Note titles: the common-word and name lists (asr_models/resources).
     "asr_models",
 ]
@@ -58,6 +59,7 @@ crypto = { workspace = true }
 storage = { workspace = true }
 models = { workspace = true }
 jobs = { workspace = true }
+telemetry = { workspace = true }
 asr_models = { workspace = true }
 
 [project.optional-dependencies]
@@ -67,7 +69,6 @@ dev = [
     "httpx>=0.27.0",
     "ruff>=0.4.0",
     "mypy>=1.10.0",
-    "hypothesis>=6.103",
     "fakeredis>=2.23",
 ]
 

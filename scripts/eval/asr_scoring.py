@@ -242,8 +242,7 @@ def _parse_de(tok: str) -> int | None:
         return None
     if tok.isdigit():
         return None
-    value = _de_compound(tok)
-    return value
+    return _de_compound(tok)
 
 
 def _numbers_to_digits(toks: list[str], language: str) -> list[str]:

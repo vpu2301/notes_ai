@@ -369,7 +369,6 @@ private struct SidebarNewRow: View {
     @EnvironmentObject private var capture: CaptureViewModel
     @State private var hover = false
     @State private var menuOpen = false
-    @State private var pressed = false
 
     var body: some View {
         ZStack(alignment: .trailing) {

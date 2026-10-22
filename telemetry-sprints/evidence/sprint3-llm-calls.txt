@@ -1,0 +1,20 @@
+# Sprint 3 — real local note generation (docker dev stack, 2026-10-22)
+# recording 78f2823c (90 s German clip from Sprint 2), note NOTE-2026-00087, regenerated → reprocess run
+          processing_run_id           |   kind    | trigger |  status   | attempts | reprocess_scope 
+--------------------------------------+-----------+---------+-----------+----------+-----------------
+ 83d1f157-04db-4fc2-99e2-241cc8e8c12f | initial   | user    | succeeded |        1 | 
+ 18e1c7b8-bd5b-4b24-a835-2964f7f72f92 | reprocess | user    | succeeded |        1 | notes
+(2 rows)
+
+    purpose     |  backend   |       model        | execution_mode | attempt | status | queue_wait_seconds | total_latency_seconds | input_tokens | output_tokens | cached_input_tokens | reasoning_tokens | token_source | prompt_chars | completion_chars |                                                                null_reasons                                                                
+----------------+------------+--------------------+----------------+---------+--------+--------------------+-----------------------+--------------+---------------+---------------------+------------------+--------------+--------------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------
+ provider_probe | mistral_eu | mistral-large-2512 | remote         |       1 | ok     |                  0 |                 0.625 |           12 |             6 |                   0 |                0 | provider     |           29 |               12 | {"model_load_seconds": "not_applicable", "time_to_first_token_seconds": "not_applicable", "generation_tokens_per_second": "not_supported"}
+ note_write     | mistral_eu | mistral-large-2512 | remote         |       1 | ok     |                  0 |                  2.15 |         1654 |           137 |                   0 |                0 | provider     |         6808 |              449 | {"model_load_seconds": "not_applicable", "time_to_first_token_seconds": "not_applicable", "generation_tokens_per_second": "not_supported"}
+(2 rows)
+  stage   |        name        | status | seconds | child 
+----------+--------------------+--------+---------+-------
+ llm_call | llm.provider_probe | ok     |    0.63 | f
+ other    | notes.generate     | ok     |    2.48 | f
+ llm_call | llm.note_write     | ok     |    2.15 | t
+(3 rows)
+

@@ -120,11 +120,13 @@ import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toaster";
 import { useAuth } from "../auth/AuthContext";
 import { jobForNote, rememberLink } from "../lib/captures";
+import { copyDiagnostics, downloadDiagnostics, latestRun } from "../lib/diagnostics";
 import { noteToMarkdown, safeFilename, saveBlob } from "../lib/exportNote";
 import { formatDateTime, formatElapsed, relativeTime } from "../lib/time";
 import { defFor, noteBlocks } from "../lib/noteBlocks";
 import { generatedSectionKeys, isGeneratedSection } from "../lib/generatedSections";
 import { useDismiss } from "../lib/useDismiss";
+import { useReportDisplayed } from "../lib/telemetry";
 import { useSpaces } from "../spaces/SpacesContext";
 
 const AUTOSAVE_MS = 900;
@@ -884,6 +886,10 @@ export function TranscriptView({
   const speakerCount = useMemo(() => new Set(turns.map((t) => t.speaker).filter(Boolean)).size, [turns]);
   const diarized = speakerCount > 0;
   const roster = result?.speakers ?? [];
+  // Telemetry: the first render that shows this recording's transcript / speaker labels.
+  useReportDisplayed(jobId, "transcript_displayed", !error && turns.length > 0);
+  useReportDisplayed(jobId, "speaker_labels_displayed", !error && diarized && turns.length > 0);
+  useReportDisplayed(jobId, "error_shown", Boolean(error) && !fallback);
   // Moving turns needs the server revision (stale guard), a connection, and no re-label in flight.
   const canMove =
     !readOnly && diarized && roster.length > 0 && online && !relabelRunning && typeof result?.result_rev === "number";
@@ -1897,6 +1903,25 @@ export function NoteEditorPage() {
     }
   };
 
+  // Telemetry sprint 4: the processing report of the recording's newest run (timings only).
+  const onDiagnostics = async (recordingId: string, how: "download" | "copy") => {
+    try {
+      const run = await latestRun(recordingId);
+      if (!run) {
+        toast.error("No diagnostics for this recording yet.");
+        return;
+      }
+      if (how === "download") {
+        await downloadDiagnostics(run);
+      } else {
+        await copyDiagnostics(run);
+        toast.success("Diagnostics copied as Markdown");
+      }
+    } catch (err) {
+      toast.error(messageFor(err));
+    }
+  };
+
   const copyToClipboard = async (text: string, done: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -1961,6 +1986,8 @@ export function NoteEditorPage() {
   // Evidence and the detail toggle only for the current, engine-written note.
   const generated = !viewing && genRows.length > 0;
   const genSectionKeys = useMemo(() => generatedSectionKeys(genRows), [genRows]);
+  // Telemetry: the first render of this recording's written notes (the notes tab, current version).
+  useReportDisplayed(jobId, "notes_displayed", tab === "notes" && generated);
   const blocks = generated && detail === "short" ? allBlocks.filter((b) => b.key === "gen:overview") : allBlocks;
   // P3: "Show in transcript" opens the transcript tab at the cited moment.
   const seekTranscript = jobId
@@ -2146,6 +2173,10 @@ export function NoteEditorPage() {
   menu.push({ label: `Copy note code (${note.code})`, icon: <CopyIcon size={14} />, sep: true, onClick: () => void copyToClipboard(note.code, "Note code copied") });
   if (jobId) {
     menu.push({ label: "Copy job ID", icon: <CopyIcon size={14} />, onClick: () => void copyToClipboard(jobId, "Job ID copied") });
+    menu.push(
+      { label: "Export diagnostics", icon: <FileDownIcon size={14} />, onClick: () => void onDiagnostics(jobId, "download") },
+      { label: "Copy diagnostics as Markdown", icon: <CopyIcon size={14} />, onClick: () => void onDiagnostics(jobId, "copy") },
+    );
   }
   if (!viewing && canDelete) {
     menu.push({

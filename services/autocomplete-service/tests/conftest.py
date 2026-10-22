@@ -1,1 +1,0 @@
-"""autocomplete-service test scaffolding."""

@@ -217,6 +217,17 @@ class Settings(BaseSettings):
     note_check_enabled: bool = Field(default=False, alias="MDX_NOTE_CHECK")
     # The commit this image was built from (Dockerfile ARG BUILD_SHA); shown with every run.
     build_sha: str = Field(default="", alias="MDX_BUILD_SHA")
+    # ── Pipeline telemetry (telemetry sprints; libs/telemetry) ──
+    telemetry_enabled: bool = Field(default=True, alias="MDX_TELEMETRY_ENABLED")
+    telemetry_retention_days: int = Field(default=90, ge=1, alias="MDX_TELEMETRY_RETENTION_DAYS")
+    # Dev-only fault (telemetry sprint 5, S3): the first N note_write requests of the process
+    # fail as an HTTP 503 inside the provider's retry loop. Ignored outside development.
+    dev_fault_llm_failures_n: int = Field(default=0, ge=0, alias="MDX_DEV_FAULT_LLM_FAILURES")
+
+    @property
+    def dev_fault_llm_failures(self) -> int:
+        return self.dev_fault_llm_failures_n if self.environment == "development" else 0
+
     # `none` shows plans and changes nothing; `manual` changes the plan at once; `stripe` later.
     billing_provider: Literal["none", "manual"] = Field(
         default="none", alias="MDX_BILLING_PROVIDER"

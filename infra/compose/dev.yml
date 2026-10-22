@@ -78,48 +78,6 @@ services:
       redis:
         condition: service_healthy
 
-  dictation-service:
-    build:
-      context: ../..
-      dockerfile: services/dictation-service/Dockerfile.cpu
-    restart: unless-stopped
-    environment:
-      ENVIRONMENT: development
-      LOG_LEVEL: INFO
-      MD_ASR_DEVICE: cpu
-      # PLUMBING ONLY: tiny invents Ukrainian words, so its transcripts are
-      # worthless for quality. Use the root override (large-v3) or dev-up-gpu.
-      MD_ASR_MODEL: /opt/models/whisper-tiny  # baked + offline (Dockerfile.cpu)
-      MD_ASR_COMPUTE_TYPE: int8
-      MDX_WORKER_ID: dictation-dev-1
-      AUTH_ISSUER: http://keycloak:8080/realms/notes
-      AUTH_JWKS_URL: http://keycloak:8080/realms/notes/protocol/openid-connect/certs
-      DB_APP_ROLE_DSN: postgresql://app_role:app_role@postgres:5432/notes
-      DB_AUDIT_WRITER_DSN: postgresql://audit_writer:audit_writer@postgres:5432/notes
-      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
-      REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: ${S3_ENDPOINT:-}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-      MDX_MASTER_KEY_PATH: /etc/mdx/master.key
-      MDX_TMPFS_ROOT: /run/dictation
-      MDX_WS_ALLOWED_ORIGINS: '["http://localhost:5173","http://localhost:3000"]'
-    volumes:
-      - ../../infra/dev/master.key:/etc/mdx/master.key:ro
-    tmpfs:
-      # RAM-backed so decrypted PCM never hits disk; owned by the nonroot uid.
-      - /run/dictation:size=2g,mode=0700,uid=65532,gid=65532
-    ports:
-      - "8002:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      keycloak:
-        condition: service_healthy
-
   nlp-service:
     build:
       context: ../..

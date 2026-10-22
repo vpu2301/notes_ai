@@ -42,8 +42,3 @@ export function mailToken(path: string): string | null {
 export function clearMailToken(): void {
   captured = null;
 }
-
-/** Where the mailed link wanted to go, if this load came from one. */
-export function mailLinkPath(): string | null {
-  return captured?.path ?? null;
-}

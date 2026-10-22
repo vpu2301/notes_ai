@@ -141,11 +141,6 @@ class Settings(BaseSettings):
         """Does this deployment sign its own tokens? (`dual` or `native`; gate on this, never `== "native"`)."""
         return self.idp_mode in ("dual", "native")
 
-    @property
-    def keycloak_enabled(self) -> bool:
-        """Does Keycloak still mint tokens here? (`keycloak` or `dual`)"""
-        return self.idp_mode in ("keycloak", "dual")
-
     def signing_keys_json(self) -> str:
         """The raw key list text, from the env value or (dev only) the file."""
         inline = self.auth_signing_keys_json.value()

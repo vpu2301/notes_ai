@@ -22,7 +22,8 @@ RUN uv pip install --system --no-cache \
     /build/libs/storage \
     /build/libs/asr_models \
     /build/libs/secret \
-    /build/libs/ratelimit
+    /build/libs/ratelimit \
+    /build/libs/telemetry
 
 # ── Stage 2: distroless runtime ──────────────────────────────────────
 # asr-service needs libmagic (for python-magic) + ffmpeg (for duration probe).
@@ -51,6 +52,10 @@ RUN printf 'import site\nsite.addsitedir("/deps")\n' > /deps/sitecustomize.py
 ENV PYTHONPATH=/deps \
     PYTHONUNBUFFERED=1 \
     PATH="/deps/bin:${PATH}"
+
+# The commit the image was built from, recorded with every telemetry run (app_commit).
+ARG BUILD_SHA=unknown
+ENV MDX_BUILD_SHA=${BUILD_SHA}
 
 USER nonroot
 EXPOSE 8000

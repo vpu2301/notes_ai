@@ -39,7 +39,6 @@ from notes_scoring import (  # noqa: E402, F401 — re-exported for the harness 
     f2_gates,
     overlap,
     score_meeting,
-    sq2_gates,
     sq3_gates,
     support,
     words,
@@ -51,12 +50,9 @@ from note_service.domain import text as text_rules  # noqa: E402
 DEFAULT_CORPUS = REPO / "tests" / "fixtures" / "eval" / "notes"
 ENGINE_SRC = REPO / "services" / "note-service" / "src"
 TEMPLATES = REPO / "infra" / "seeds" / "templates"
-# Anchor for fixtures without `recorded_on`, so relative dates resolve the same everywhere.
-DEFAULT_RECORDED_ON = "2026-01-15"
 
 # Exit codes the nightly job reads.
 EXIT_FAILED = 1  # a hallucinated quote, or a meeting the model could not finish
-EXIT_BLIND = 2  # the engine saw no transcript — the bug that hid every number
 EXIT_NO_CORPUS = 3
 # Entity model tier: off as in production unless `--entity-model-tier`.
 
@@ -92,35 +88,6 @@ class Totals:
     output_tokens: int = 0
     windows: int = 0
     windows_failed: int = 0
-
-
-class _TokenTally:
-    """Sums the provider's usage records for one meeting (installed per meeting, uninstalled after)."""
-
-    def __init__(self) -> None:
-        self.input_tokens = 0
-        self.output_tokens = 0
-        self.calls = 0
-
-    @classmethod
-    def install(cls) -> _TokenTally:
-        from models import set_usage_sink
-
-        tally = cls()
-
-        def sink(record: Any) -> None:
-            if getattr(record, "ok", True):
-                tally.calls += 1
-                tally.input_tokens += int(getattr(record, "input_tokens", 0) or 0)
-                tally.output_tokens += int(getattr(record, "output_tokens", 0) or 0)
-
-        set_usage_sink(sink)
-        return tally
-
-    def uninstall(self) -> None:
-        from models import set_usage_sink
-
-        set_usage_sink(None)
 
 
 def transcript_text(meeting: dict[str, Any]) -> str:
@@ -193,10 +160,6 @@ def role_map(code: str) -> dict[str, str]:
         return {}
     definition = TemplateDefinition.model_validate(json.loads(path.read_text("utf-8")))
     return dict(roles.role_map(definition))
-
-
-class EngineBlindError(RuntimeError):
-    """A non-empty transcript produced zero windows."""
 
 
 # Sprint R0 removed the pipeline arm (the old writing path). Sprint P3 adds the arm that
@@ -708,54 +671,6 @@ def save_note(folder: Path, meeting_id: str, text: str) -> None:
         raise SystemExit(f"--save-notes must be under {LOCAL}")
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"{meeting_id}.md").write_text(text + "\n", encoding="utf-8")
-
-
-def save_structure(folder: Path, meeting_id: str, sections: list[dict[str, Any]]) -> None:
-    """The note's sections, roles and lines beside its text (``<id>.sections.json``), for
-    instructions_gate.py's code-dial checks. Same rule: only under ``scripts/eval/local/``."""
-    folder = folder.resolve()
-    if not folder.is_relative_to(LOCAL.resolve()):
-        raise SystemExit(f"--save-notes must be under {LOCAL}")
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / f"{meeting_id}.sections.json").write_text(
-        json.dumps(sections, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
-    )
-
-
-def save_citations(folder: Path, meeting_id: str, produced: dict[str, Any]) -> None:
-    """Review step 4: what each line cites and each fact's certainty/holder/flags
-    (``<id>.citations.json``), to read a failed global assertion locally. Keys, enum
-    words and holder names only — never a fact's text or quote. Same ``local/`` rule."""
-    folder = folder.resolve()
-    if not folder.is_relative_to(LOCAL.resolve()):
-        raise SystemExit(f"--save-notes must be under {LOCAL}")
-    payload = {
-        "lines": [
-            {
-                "section_key": ln.get("section_key"),
-                "kind": ln.get("kind"),
-                "fact_ids": ln.get("fact_ids") or [],
-                "text": ln.get("text"),
-            }
-            for ln in produced.get("lines") or []
-        ],
-        "facts": [
-            {
-                "item_key": f.get("item_key"),
-                "certainty": f.get("certainty"),
-                "attributed_to": f.get("attributed_to"),
-                "flags": f.get("flags") or [],
-            }
-            for f in produced.get("facts") or []
-        ],
-        "stats": {
-            k: (produced.get("stats") or {}).get(k)
-            for k in ("attribution_implicit", "attribution_implicit_lines")
-        },
-    }
-    (folder / f"{meeting_id}.citations.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
-    )
 
 
 async def main(

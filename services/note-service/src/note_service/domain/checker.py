@@ -9,6 +9,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+import telemetry
+
 from . import prompts, writer
 
 logger = logging.getLogger(__name__)
@@ -100,8 +102,12 @@ async def check(
         system, user = build_prompt(numbered, windows[w], language)
         out.calls += 1
         try:
-            answer = await provider.complete(
-                user, CHECK_SCHEMA, max_tokens=MAX_OUTPUT_TOKENS, temperature=0.0, system=system
+            answer = await telemetry.llm.call(
+                "note_check",
+                provider,
+                lambda user=user, system=system: provider.complete(
+                    user, CHECK_SCHEMA, max_tokens=MAX_OUTPUT_TOKENS, temperature=0.0, system=system
+                ),
             )
         except Exception:  # noqa: BLE001 — a mark we could not get, never a failed note
             logger.warning("note_check.call_failed", exc_info=True)

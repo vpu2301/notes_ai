@@ -54,20 +54,6 @@ def git_sha(*, short: bool = True) -> str:
         return "unknown"
 
 
-def build_stamp(**flags: Any) -> dict[str, Any]:
-    """``stats.build`` for a generation this process ran itself (the eval harness): the
-    tree's commit and the engine's code digest, as the worker stamps its own."""
-    from note_service import build_info
-    from note_service.domain.prompts import PROMPT_VERSION
-
-    return build_info.stamp(
-        build_sha=git_sha(short=False),
-        prompt_version=PROMPT_VERSION,
-        effective_version=PROMPT_VERSION,
-        flags=flags,
-    )
-
-
 def stale_build(build: dict[str, Any] | None) -> str | None:
     """Why ``build`` is not this checkout (None when it is): a different commit, or a
     different engine source digest (an uncommitted tree the image missed)."""

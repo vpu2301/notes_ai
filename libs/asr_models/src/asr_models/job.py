@@ -58,6 +58,12 @@ class JobEnqueuePayload(BaseModel):
     # Record press → first frame; reported as a ``no_audio`` gap. None from older clients.
     first_frame_offset_ms: int | None = Field(default=None, ge=0, le=600_000)
     requester_sub: UUID
+    # Telemetry (libs/telemetry): the run this job belongs to and the submitter's W3C trace
+    # context. None from an asr-service without telemetry; an old worker ignores both.
+    processing_run_id: UUID | None = None
+    traceparent: str | None = Field(default=None, max_length=128)
+    # Undelivered entries ahead of this one at enqueue (the consumer group's lag), if known.
+    queue_depth_at_enqueue: int | None = Field(default=None, ge=0)
     schema_version: int = 1
 
 

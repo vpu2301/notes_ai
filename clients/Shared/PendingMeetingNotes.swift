@@ -123,11 +123,6 @@ enum PendingMeetingNotes {
         try? FileManager.default.removeItem(at: file(for: clientCaptureId, in: directory))
     }
 
-    /// Sign-out: the typing goes with the session.
-    static func clearAll(in directory: URL = PendingMeetingNotes.directory) {
-        try? FileManager.default.removeItem(at: directory)
-    }
-
     // MARK: - Merging
 
     /// The divider a merge writes between the two devices' lines.

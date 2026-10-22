@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import asyncpg
 import redis.asyncio as aioredis
 
+import telemetry
 from audit import AuditWriter
 from auth import IssuerConfig, JwksCache, issuer_url_map, issuers_from_env
 from crypto import Envelope, TenantKekRepository, build_master_key_provider
@@ -123,6 +124,13 @@ async def build_state() -> ServiceState:
         )
     )
 
+    telemetry.configure(
+        app_pool,
+        enabled=settings.telemetry_enabled,
+        retention_days=settings.telemetry_retention_days,
+        app_commit=settings.build_sha or None,
+    )
+
     return ServiceState(
         jwks_cache=jwks_cache,
         app_pool=app_pool,
@@ -141,6 +149,7 @@ async def build_state() -> ServiceState:
 
 
 async def teardown_state(state: ServiceState) -> None:
+    await telemetry.get_store().close()
     await state.nlp_client.aclose()
     await state.jwks_cache.aclose()
     await state.queue_producer.aclose()

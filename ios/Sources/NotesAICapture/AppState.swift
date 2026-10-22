@@ -113,6 +113,8 @@ final class AppState: ObservableObject {
     }
 
     let api: APIClient
+    /// Telemetry: client events for the recording's processing run (fail-open, offline queue).
+    let telemetry: TelemetryReporter
     private(set) lazy var capture = CaptureViewModel(app: self)
     private var templateCache: [TemplateSummary]?
 
@@ -124,6 +126,15 @@ final class AppState: ObservableObject {
         // saved password is deliberately left alone during `dual` (`SessionMigration`).
         self.signedOutNotice = SessionMigration.run()
         self.api = APIClient(settings: stored)
+        let client = self.api
+        self.telemetry = TelemetryReporter(
+            client: "ios",
+            version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev",
+            file: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+                .appending(path: "Notes AI Capture", directoryHint: .isDirectory)
+                .appending(path: "telemetry-queue.json"),
+            send: { body in try await client.postClientEvents(body) }
+        )
         // Recents load only once `restoreSession` knows the identity and workspace.
         self.themePref = ThemePref(rawValue: UserDefaults.standard.string(forKey: Keys.theme) ?? "") ?? .system
         Task { [weak self] in
@@ -1393,12 +1404,6 @@ final class AppState: ObservableObject {
     private static func load<T: Decodable>(_ type: T.Type, key: String) -> T? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(type, from: data)
-    }
-
-    private func persist<T: Encodable>(_ value: T, key: String) {
-        if let data = try? JSONEncoder().encode(value) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
     }
 }
 
