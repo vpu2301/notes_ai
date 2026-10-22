@@ -20,6 +20,7 @@ reason in ``excluded`` and left out of every aggregate.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shlex
 import subprocess
@@ -34,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bench  # noqa: E402
 
 DEFAULT_RESTART = "docker compose restart asr-worker"
+PG_CONTAINER = os.environ.get("ASR_BENCH_PG_CONTAINER", "notes-ai-postgres-1")
 TERMINAL = {"complete", "failed", "cancelled"}
 POLL_S = 1.0
 
@@ -58,16 +60,26 @@ def host_mem_free_pct() -> float | None:
     return float(m.group(1)) if m else None
 
 
+def open_runs() -> int:
+    """Runs open on the whole stack, every workspace (the API shows only the caller's jobs).
+    A cold restart while another job runs would kill it."""
+    out = subprocess.run(
+        ["docker", "exec", PG_CONTAINER, "psql", "-U", "postgres", "-d", "notes", "-Atc",
+         "SELECT telemetry_open_runs()"],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    return int(out.stdout.strip() or 0)
+
+
 def wait_idle(asr: httpx.Client, timeout_s: float) -> None:
-    """Until none of the caller's jobs is queued or running (other tenants' jobs show up as
-    ``concurrent_runs_at_start`` > 0 afterwards and exclude the run)."""
+    """Until no job of the caller is queued or running and no run is open on the stack."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         jobs = asr.get("/asr/jobs").raise_for_status().json()
-        if not any(j["status"] in ("queued", "running") for j in jobs):
+        if not any(j["status"] in ("queued", "running") for j in jobs) and open_runs() == 0:
             return
-        time.sleep(5)
-    raise SystemExit("the queue did not drain")
+        time.sleep(15)
+    raise SystemExit("the stack did not become idle")
 
 
 def wait_run(note: httpx.Client, run_id: str, notes: bool, timeout_s: float) -> dict[str, Any]:

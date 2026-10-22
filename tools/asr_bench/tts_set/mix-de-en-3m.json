@@ -1,0 +1,125 @@
+{
+ "language": "de",
+ "voices": {
+  "A": {
+   "de": "Flo (German (Germany))",
+   "en": "Flo (English (US))"
+  },
+  "B": {
+   "de": "Rocko (German (Germany))",
+   "en": "Rocko (English (UK))"
+  }
+ },
+ "turns": [
+  [
+   "A",
+   "de",
+   "Hallo, schön dass du Zeit hast. Wir müssen heute die Präsentation für den Partner aus London vorbereiten."
+  ],
+  [
+   "B",
+   "de",
+   "Ja, genau. Die haben uns letzte Woche ihre Anforderungen geschickt. Ich lese dir mal den wichtigsten Satz vor."
+  ],
+  [
+   "B",
+   "en",
+   "We expect a working prototype by the end of November, including a short report on data protection."
+  ],
+  [
+   "A",
+   "de",
+   "Okay, das ist sportlich, aber machbar. Der Prototyp ist fast fertig, nur der Bericht fehlt noch komplett."
+  ],
+  [
+   "B",
+   "de",
+   "Den Bericht kann ich schreiben. Ich brauche nur von dir eine Liste, welche Daten wir wo speichern."
+  ],
+  [
+   "A",
+   "de",
+   "Die schicke ich dir morgen. Wie sollen wir die Präsentation eröffnen? Auf Deutsch oder gleich auf Englisch?"
+  ],
+  [
+   "B",
+   "de",
+   "Auf Englisch, die Hälfte des Teams spricht kein Deutsch. Ich hatte mir ungefähr so einen Einstieg überlegt."
+  ],
+  [
+   "B",
+   "en",
+   "Thank you all for being here. Today we want to show you what we have built so far and where we are heading next."
+  ],
+  [
+   "A",
+   "de",
+   "Klingt gut, nicht zu lang. Danach würde ich direkt die Demo zeigen, ohne viele Folien."
+  ],
+  [
+   "B",
+   "de",
+   "Einverstanden. Und am Ende fragen wir nach Feedback. Ich würde es so formulieren."
+  ],
+  [
+   "B",
+   "en",
+   "What would make this tool really useful for your team, and what is still missing for you?"
+  ],
+  [
+   "A",
+   "de",
+   "Perfekt, kurz und offen. Dann bleibt mehr Zeit für Fragen. Wer moderiert den Termin?"
+  ],
+  [
+   "B",
+   "de",
+   "Ich mache die Moderation, du machst die Demo. Passt das für dich?"
+  ],
+  [
+   "A",
+   "en",
+   "Sounds good."
+  ],
+  [
+   "A",
+   "de",
+   "Noch eine Frage zum Bericht. Sollen wir die Datenschutzfolgenabschätzung als Anhang mitschicken oder nur zusammenfassen?"
+  ],
+  [
+   "B",
+   "de",
+   "Ich würde nur eine Zusammenfassung von zwei Seiten schreiben. Das vollständige Dokument können wir auf Nachfrage nachreichen, sonst wird es zu umfangreich."
+  ],
+  [
+   "A",
+   "de",
+   "Einverstanden. Und wer kümmert sich um die Testdaten für die Demo? Wir dürfen auf keinen Fall echte Kundendaten zeigen."
+  ],
+  [
+   "B",
+   "de",
+   "Das mache ich. Ich erstelle bis Mittwoch einen Datensatz mit erfundenen Firmen und Personen, der realistisch aussieht, aber nichts Echtes enthält."
+  ],
+  [
+   "A",
+   "de",
+   "Sehr gut. Dann sollten wir auch klären, wie lange die Demo dauern darf. Ich würde sagen, höchstens fünfzehn Minuten, damit genug Zeit für die Diskussion bleibt."
+  ],
+  [
+   "B",
+   "de",
+   "Fünfzehn Minuten sind gut. Ich schreibe die Agenda und schicke sie dir heute Abend, dann kannst du sie noch ergänzen."
+  ],
+  [
+   "A",
+   "de",
+   "Dann treffen wir uns Donnerstag um zehn Uhr für einen Probelauf. Ich buche einen Raum."
+  ],
+  [
+   "B",
+   "de",
+   "Super, danke. Bis Donnerstag."
+  ]
+ ]
+}

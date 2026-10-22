@@ -1,0 +1,19 @@
+{
+  "language": "de",
+  "voices": {"A": "Anna", "B": "Reed (German (Germany))"},
+  "turns": [
+    ["A", "de", "Guten Morgen zusammen. Ich möchte heute kurz über den Stand der Lieferkette sprechen, weil wir in den letzten zwei Wochen einige Verzögerungen hatten."],
+    ["B", "de", "Ja, gerne. Bei uns im Lager sind die Bestellungen aus Hamburg erst am Donnerstag angekommen, also drei Tage später als geplant."],
+    ["A", "de", "Wissen wir schon, woran das lag? War es der Spediteur oder hat der Lieferant zu spät verschickt?"],
+    ["B", "de", "Soweit ich weiß, hatte der Lieferant ein Problem mit der Verpackung. Ein Teil der Ware musste noch einmal kontrolliert werden, bevor sie raus durfte."],
+    ["A", "de", "Verstehe. Das bedeutet aber, dass wir für den Kunden in München jetzt knapp werden. Die Auslieferung war für Montag zugesagt."],
+    ["B", "de", "Das stimmt. Ich würde vorschlagen, dass wir heute noch beim Kunden anrufen und ehrlich sagen, dass es Mittwoch wird. Dann können sie selbst planen."],
+    ["A", "de", "Einverstanden. Kannst du das übernehmen? Du kennst die Ansprechpartnerin dort besser als ich."],
+    ["B", "de", "Ja, mache ich direkt nach diesem Termin. Außerdem sollten wir mit dem Lieferanten über eine Vertragsstrafe reden, wenn das noch einmal passiert."],
+    ["A", "de", "Das sehe ich auch so. Ich schreibe ihm bis Freitag eine E-Mail und schlage ein kurzes Gespräch für nächste Woche vor."],
+    ["B", "de", "Gut. Und wir sollten im Lager einen zweiten Lieferanten für die Kartons prüfen. Wir sind im Moment zu abhängig von einer einzigen Firma."],
+    ["A", "de", "Guter Punkt. Ich nehme das als Aufgabe für das nächste Quartal auf. Gibt es sonst noch etwas, das wir heute klären müssen?"],
+    ["B", "de", "Nein, von meiner Seite ist das alles. Danke dir."],
+    ["A", "de", "Danke, bis morgen."]
+  ]
+}

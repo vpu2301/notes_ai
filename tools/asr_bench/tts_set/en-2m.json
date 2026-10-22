@@ -1,0 +1,84 @@
+{
+ "language": "en",
+ "voices": {
+  "A": "Samantha",
+  "B": "Daniel"
+ },
+ "turns": [
+  [
+   "A",
+   "en",
+   "Thanks for joining. I wanted to go through the hiring plan for the support team before we send it to finance on Friday."
+  ],
+  [
+   "B",
+   "en",
+   "Sure. Last time we talked about two new positions, one in Berlin and one fully remote. Is that still the idea?"
+  ],
+  [
+   "A",
+   "en",
+   "Mostly, yes. The remote role is approved, but the Berlin position depends on whether we open the new office in the spring."
+  ],
+  [
+   "B",
+   "en",
+   "That makes sense. What does the budget look like for the remote role? I remember the first estimate was a bit low."
+  ],
+  [
+   "A",
+   "en",
+   "We raised it by about ten percent after looking at the market data. It should be enough for someone with three to five years of experience."
+  ],
+  [
+   "B",
+   "en",
+   "Good. I think we also need a clear onboarding plan this time. The last two hires took almost two months before they were really productive."
+  ],
+  [
+   "A",
+   "en",
+   "Agreed. Could you draft a simple checklist for the first four weeks? Nothing fancy, just the tools, the people they should meet, and the first tickets."
+  ],
+  [
+   "B",
+   "en",
+   "I can do that by Wednesday. Should I include the shadowing sessions with the senior agents?"
+  ],
+  [
+   "A",
+   "en",
+   "Yes, please. Those were the most useful part according to the feedback we collected in August."
+  ],
+  [
+   "B",
+   "en",
+   "Okay. One more thing. Do we want to post the job ad before or after the finance review?"
+  ],
+  [
+   "A",
+   "en",
+   "After. I would rather not publish something we might have to change. Let's aim for the week after next."
+  ],
+  [
+   "B",
+   "en",
+   "Also, should we involve the team leads in the interviews this time? Last round it was only the two of us, and some candidates asked very technical questions we could not really answer."
+  ],
+  [
+   "A",
+   "en",
+   "Good idea. Let's ask Tom and Priya to join the second round. They both have experience with the ticket system and can judge the practical skills much better."
+  ],
+  [
+   "B",
+   "en",
+   "Fine with me. I will send you the checklist on Wednesday and we can review it together."
+  ],
+  [
+   "A",
+   "en",
+   "Perfect. Thanks, talk soon."
+  ]
+ ]
+}

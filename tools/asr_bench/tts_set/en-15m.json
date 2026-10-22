@@ -1,0 +1,441 @@
+{
+ "language": "en",
+ "voices": {
+  "A": "Samantha",
+  "B": "Daniel",
+  "C": "Reed (English (US))",
+  "D": "Shelley (English (UK))"
+ },
+ "turns": [
+  [
+   "A",
+   "en",
+   "Good afternoon, everyone. Let's get started, we have a lot to cover today. This is our quarterly planning session, so I would like to go through the results of the last three months first, then the customer feedback, and finally agree on the priorities for the next quarter."
+  ],
+  [
+   "B",
+   "en",
+   "Sounds good. Before we start, should we also talk about the budget for the conference in March? Finance asked for a number by the end of the month."
+  ],
+  [
+   "A",
+   "en",
+   "Yes, let's add that at the end. Maria, could you start with the numbers?"
+  ],
+  [
+   "D",
+   "en",
+   "Of course. Overall it was a good quarter. Revenue grew by about eleven percent compared to the previous quarter, which is slightly above our target of nine percent. Most of the growth came from existing customers upgrading to the larger plan."
+  ],
+  [
+   "C",
+   "en",
+   "That is great to hear. How many new customers did we sign in total?"
+  ],
+  [
+   "D",
+   "en",
+   "Forty two new customers, compared to thirty eight in the quarter before. So new business is growing, but more slowly than upgrades. The average deal size for new customers actually went down a little."
+  ],
+  [
+   "B",
+   "en",
+   "Do we know why the deal size went down? Is it because we sold more to small companies, or because of the discount campaign in September?"
+  ],
+  [
+   "D",
+   "en",
+   "It is mostly the campaign. About a third of the new customers came in with the twenty percent discount. Without them the average would be roughly the same as before."
+  ],
+  [
+   "A",
+   "en",
+   "Okay, so the campaign brought volume but not value. That is something we should discuss when we plan the next campaign. What about churn?"
+  ],
+  [
+   "D",
+   "en",
+   "Churn was stable at around two percent per month. We lost three larger accounts, and in two of those cases the reason was a merger. The customer was bought by a company that already uses a competitor."
+  ],
+  [
+   "C",
+   "en",
+   "There is not much we can do about mergers. What about the third one?"
+  ],
+  [
+   "D",
+   "en",
+   "The third one left because of performance problems with the reporting module. They had very large data sets, and the reports took several minutes to load. We tried to fix it, but it took too long."
+  ],
+  [
+   "B",
+   "en",
+   "That one hurts, because we knew about the reporting problem since the summer. I think it should be high on the list for next quarter."
+  ],
+  [
+   "A",
+   "en",
+   "Agreed, let's keep that in mind. Daniel, you wanted to present the customer feedback. Go ahead."
+  ],
+  [
+   "B",
+   "en",
+   "Thanks. We collected feedback from three sources this quarter: the support tickets, the survey we sent in October, and fourteen interviews with customers that my team did over video calls."
+  ],
+  [
+   "B",
+   "en",
+   "The survey had about three hundred responses, which is a much better response rate than last time. The overall satisfaction score was eight point one out of ten, up from seven point six."
+  ],
+  [
+   "C",
+   "en",
+   "That is a nice improvement. Do we know which changes made the biggest difference?"
+  ],
+  [
+   "B",
+   "en",
+   "Customers mentioned two things again and again. First, the new onboarding flow. People said it is much easier to set up a new workspace now. Second, the faster response times in support. We reduced the average first response from nine hours to under four hours."
+  ],
+  [
+   "D",
+   "en",
+   "The support numbers are impressive. Did that require more people, or was it mostly the new routing system?"
+  ],
+  [
+   "B",
+   "en",
+   "Mostly the routing. Tickets now go directly to the person who knows the topic best, instead of sitting in a general queue. We only added one person to the team."
+  ],
+  [
+   "A",
+   "en",
+   "Very good. And what are the main complaints?"
+  ],
+  [
+   "B",
+   "en",
+   "The reporting performance, as we already said, is number one. Number two is the mobile app. Many customers use it on the road, and they say it is slow and missing features that exist on the web version."
+  ],
+  [
+   "B",
+   "en",
+   "Number three is integrations. Several larger customers asked for a better connection to their accounting software. Right now they export a file and import it manually, which takes time and causes mistakes."
+  ],
+  [
+   "C",
+   "en",
+   "From the engineering side I can say that the reporting problem is well understood. The queries were designed for small data sets. For large customers we need to precompute some of the results at night instead of calculating everything when the user opens the report."
+  ],
+  [
+   "A",
+   "en",
+   "How long would that take?"
+  ],
+  [
+   "C",
+   "en",
+   "My estimate is about six weeks for two engineers, including testing. We could release it gradually, first to the customers with the largest data sets, and then to everyone else."
+  ],
+  [
+   "D",
+   "en",
+   "Six weeks sounds reasonable. Would that also help the mobile app, or is that a separate problem?"
+  ],
+  [
+   "C",
+   "en",
+   "Partly. The mobile app loads the same reports, so it would get faster as well. But the missing features are a separate project. The app was built by an external agency two years ago, and it shares very little code with the web version."
+  ],
+  [
+   "B",
+   "en",
+   "That has been a problem for a while. Every time we add a feature on the web, someone has to build it again for the app, and usually that never happens."
+  ],
+  [
+   "C",
+   "en",
+   "Exactly. In the long run I would recommend rebuilding the app on the same foundation as the web version. That is a bigger project, probably four to five months, but it would solve the problem for good."
+  ],
+  [
+   "A",
+   "en",
+   "Four to five months is a lot. We cannot do that and the reporting work and the integrations at the same time. We need to choose."
+  ],
+  [
+   "D",
+   "en",
+   "Can I suggest a way to look at it? The reporting work protects revenue we already have, because it stops larger customers from leaving. The integrations help us win new large customers. The mobile app is important, but it affects satisfaction more than revenue."
+  ],
+  [
+   "B",
+   "en",
+   "I mostly agree, but I would not underestimate the app. In the interviews, several customers said they would recommend us to others if the app were better. That affects growth too, just more slowly."
+  ],
+  [
+   "A",
+   "en",
+   "Fair point. What if we start the reporting work now, because it is the most urgent, and use the same six weeks to plan the app rebuild properly? Then we can start the app in the second half of the quarter."
+  ],
+  [
+   "C",
+   "en",
+   "That could work. While two engineers work on reporting, I could spend part of my time on the technical design for the app. We would also need someone from design to look at the main screens."
+  ],
+  [
+   "B",
+   "en",
+   "I can ask Lena from the design team. She worked on the onboarding flow, and customers really liked it."
+  ],
+  [
+   "A",
+   "en",
+   "Great. And the integrations?"
+  ],
+  [
+   "D",
+   "en",
+   "For the integrations, we could start with just one accounting system, the one most of our customers use. That would cover maybe sixty percent of the requests. A small first version could take three or four weeks."
+  ],
+  [
+   "C",
+   "en",
+   "If it is only one system and we use their official interface, three or four weeks is realistic. But we would need one more engineer for that, because the reporting work already takes two people."
+  ],
+  [
+   "A",
+   "en",
+   "We have one open position in engineering that was approved last quarter. If we hire quickly, that person could start in about six weeks. Until then, could someone from the platform team help?"
+  ],
+  [
+   "C",
+   "en",
+   "Possibly. I will ask the platform lead tomorrow. They finished their migration project last week, so they might have some time."
+  ],
+  [
+   "A",
+   "en",
+   "Good. Then let me summarize the priorities so far. First, the reporting performance, starting now, with two engineers for about six weeks. Second, the accounting integration for one system, starting as soon as we have an engineer. Third, the design and planning for the new mobile app, with the actual building starting in the second half of the quarter."
+  ],
+  [
+   "B",
+   "en",
+   "That sounds right to me. Should we tell the customers who complained about reporting that a fix is coming?"
+  ],
+  [
+   "D",
+   "en",
+   "I would wait until we have a date we are confident about. If we promise something and then miss it, it is worse than saying nothing."
+  ],
+  [
+   "A",
+   "en",
+   "I agree with Maria. Let's communicate when the first customers have the new version. Daniel, could you prepare a short message for the account managers in the meantime, so they know what to say if a customer asks?"
+  ],
+  [
+   "B",
+   "en",
+   "Yes, I will write something this week and share it with you before it goes out."
+  ],
+  [
+   "A",
+   "en",
+   "Thank you. Now, the conference budget. Daniel, you mentioned that finance needs a number."
+  ],
+  [
+   "B",
+   "en",
+   "Right. The conference is in Lisbon at the end of March. Last year we had a small booth and sent four people. The total cost was around twenty eight thousand euros, including travel and hotels."
+  ],
+  [
+   "D",
+   "en",
+   "Did we get anything measurable out of it last year?"
+  ],
+  [
+   "B",
+   "en",
+   "We collected about one hundred and twenty contacts, and eleven of them became customers within six months. Two of those are now among our larger accounts. So in my view it paid for itself."
+  ],
+  [
+   "C",
+   "en",
+   "From the engineering side, it would be good to send one developer this time. The technical talks are useful, and customers often ask questions at the booth that sales cannot answer."
+  ],
+  [
+   "A",
+   "en",
+   "That makes sense. So five people instead of four. What would the total be?"
+  ],
+  [
+   "B",
+   "en",
+   "With prices going up, I would estimate thirty three to thirty five thousand euros. I would ask finance for thirty five thousand to be safe."
+  ],
+  [
+   "D",
+   "en",
+   "That is fine from my side, as long as we track the results again, the same way as last year."
+  ],
+  [
+   "A",
+   "en",
+   "Agreed. Daniel, please send the request to finance with thirty five thousand euros, and include last year's results as justification."
+  ],
+  [
+   "B",
+   "en",
+   "Will do. I will send it by Thursday."
+  ],
+  [
+   "A",
+   "en",
+   "Is there anything else we need to discuss today?"
+  ],
+  [
+   "C",
+   "en",
+   "One small thing. We plan a maintenance window on the second Saturday of next month, from six to eight in the morning. The database needs an upgrade. Customers will get an email one week in advance."
+  ],
+  [
+   "D",
+   "en",
+   "Good to know. Please make sure the support team gets the information as well, so they are not surprised by questions."
+  ],
+  [
+   "C",
+   "en",
+   "Yes, I will add them to the announcement."
+  ],
+  [
+   "A",
+   "en",
+   "Before we wrap up, there is one more topic I would like to cover. The security audit is due at the end of January. Peter, where are we with the preparation?"
+  ],
+  [
+   "C",
+   "en",
+   "We started last month. The external auditors sent us a questionnaire with about two hundred questions. We have answered roughly half of them. The open ones are mostly about access management and how we handle backups."
+  ],
+  [
+   "D",
+   "en",
+   "Is there anything in there that worries you? Last year we had two findings about password policies, if I remember correctly."
+  ],
+  [
+   "C",
+   "en",
+   "Those two are fixed. We introduced single sign on for all internal tools, and every employee now uses a second factor. The backup question is more interesting. We do daily backups, but we have never tested a full restore under realistic conditions."
+  ],
+  [
+   "B",
+   "en",
+   "That sounds like something the auditors will definitely ask about. Can we do a restore test before January?"
+  ],
+  [
+   "C",
+   "en",
+   "Yes, I would like to do it in early December. We would restore a copy of the production database into a separate environment and measure how long it takes until everything works again. Then we have real numbers to show."
+  ],
+  [
+   "A",
+   "en",
+   "Please do that, and write down the result in a short report. If it takes too long, we need to know now and not during the audit."
+  ],
+  [
+   "D",
+   "en",
+   "From the finance side, I need to know whether the audit costs are the same as last year. The budget I have is eighteen thousand euros."
+  ],
+  [
+   "C",
+   "en",
+   "The offer is slightly higher, nineteen thousand five hundred, because they added a penetration test of the mobile app. I think it is worth it, given that we want to rebuild the app anyway. Their findings can go straight into the new design."
+  ],
+  [
+   "A",
+   "en",
+   "I agree, that is a good use of the money. Maria, can you cover the difference from the contingency budget?"
+  ],
+  [
+   "D",
+   "en",
+   "Yes, that should be possible. I will move one thousand five hundred euros and note it in the monthly report."
+  ],
+  [
+   "B",
+   "en",
+   "Speaking of the app, should the support team prepare anything for the penetration test? Sometimes they need test accounts with realistic data."
+  ],
+  [
+   "C",
+   "en",
+   "Good point. We will need three test accounts with different permission levels. I will send you the details next week, and we can create them together so that nothing real is exposed."
+  ],
+  [
+   "A",
+   "en",
+   "Great. Then let's also put the audit on the agenda for our next check-in, so we see the progress on the questionnaire and the restore test."
+  ],
+  [
+   "B",
+   "en",
+   "One last question from me. The office move in February, is that still happening? Several people in my team have asked, because it affects their commute."
+  ],
+  [
+   "A",
+   "en",
+   "As far as I know, yes. The contract for the new office is signed, and the move is planned for the second week of February. Facilities will send a detailed plan before Christmas, including where each team will sit."
+  ],
+  [
+   "D",
+   "en",
+   "Will there be a day when nobody can work from the office? People should plan to work from home that day."
+  ],
+  [
+   "A",
+   "en",
+   "Yes, the Friday of the move week the old office will already be closed and the new one not ready yet. Everyone works from home that day. I will make sure that is in the announcement."
+  ],
+  [
+   "C",
+   "en",
+   "For engineering that is fine, as long as the network in the new office is tested before people arrive. Last time the wireless network did not work for the first two days."
+  ],
+  [
+   "A",
+   "en",
+   "I will pass that on to facilities and ask them to have the network tested on the Thursday before. Thank you for bringing it up."
+  ],
+  [
+   "A",
+   "en",
+   "Perfect. Then let me go through the action items once more. Peter will ask the platform team for help with the integration and start the reporting work. Daniel will talk to Lena about the app design, write the message for the account managers, and send the conference budget to finance by Thursday."
+  ],
+  [
+   "A",
+   "en",
+   "Maria will prepare a monthly view of churn and upgrades, so we can see quickly if the reporting fix makes a difference. And I will start the hiring process for the open engineering position this week."
+  ],
+  [
+   "D",
+   "en",
+   "Sounds good. Should we schedule a short check-in in three weeks to see where we are?"
+  ],
+  [
+   "A",
+   "en",
+   "Yes, good idea. I will send an invitation for thirty minutes. Thank you all, this was a very productive meeting."
+  ],
+  [
+   "B",
+   "en",
+   "Thanks, everyone."
+  ],
+  [
+   "C",
+   "en",
+   "Thank you, see you next week."
+  ]
+ ]
+}

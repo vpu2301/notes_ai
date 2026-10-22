@@ -8,6 +8,9 @@
 - 2026-10-22: Owner decision: no hand-corrected references. Quality = drift against a frozen `baseline-cpu` transcript (`quality.py ref`), plus switch timestamps for the mixed file.
 - 2026-10-22: Built `tools/asr_bench/` (`bench.py`, `run_matrix.py`, `quality.py`, `compare.py`), reusing the normalisation and WER from `scripts/eval/asr_scoring.py`. Wrote `tests/unit/test_asr_bench.py` (10 tests) with a trimmed `f2e27fc8` record as the fixture. Live smoke: a transcript scored against itself gives WER 0, and two CPU runs of the same file are identical.
 - 2026-10-22: Fixed a WER mismatch in `quality.py`: the reference side used segment text, the hypothesis side word text. A run scored against itself gave 0.6 % until both sides used word text.
+- 2026-10-22: No owner audio; the owner asked for the set to be found and made. Built it synthetically with macOS TTS (`make_tts_set.py`, scripts in `tts_set/`): de-2m, en-2m, uk-2m (≈ 114 s each), mix-de-en-3m (178 s, 3 English passages ≥ 3 s plus 1 of 1.4 s), en-15m (892 s, 4 speakers). Ground-truth text and spans go to `~/asr-perf-audio/refs/*.truth.json`.
+- 2026-10-22: `run_matrix.py` now waits until the whole stack is idle (`telemetry_open_runs()` = 0), not just the caller's jobs. Another session was submitting 900 s jobs, and a cold restart would have killed its running job.
+- 2026-10-22: Fixed a launch mistake: in zsh an unquoted `$R` does not split into words, so the first launch passed all ids as one name and exited at once.
 
 ## Observed, out of scope (not fixed here)
 
