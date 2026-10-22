@@ -58,10 +58,5 @@ def series_key(
     return None, None
 
 
-def manual_key(note_id: str) -> str:
-    """The key for a hand-linked series, derived from the FIRST note of the chain."""
-    return _hash("manual", note_id)
-
-
 def _hash(prefix: str, value: str) -> str:
     return hashlib.sha256(f"{prefix}:{value}".encode()).hexdigest()[:32]

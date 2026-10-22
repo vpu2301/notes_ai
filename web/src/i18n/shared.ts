@@ -1,5 +1,4 @@
 /** The shared page's own strings. The backend sends `lang`. */
-export type SharedLang = "en" | "de" | "uk";
 
 const EN = {
   agreed: "What we agreed",

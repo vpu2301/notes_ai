@@ -68,8 +68,6 @@ export function labelFromEmail(email: string): string {
   return domain ? `${local} @ ${domain}` : email.trim();
 }
 
-export { publicLinkUrl };
-
 const ROLE_OPTIONS: { value: CollaboratorRole; label: string }[] = [
   { value: "view", label: "Can view" },
   { value: "comment", label: "Can comment" },

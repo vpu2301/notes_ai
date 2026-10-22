@@ -20,6 +20,11 @@ import { formatElapsed, formatOffset } from "../lib/time";
 import { useCaptures } from "../lib/useCaptures";
 import { useMeetingNote } from "../lib/useMeetingNote";
 import { useRecorder, type RecordedAudio } from "../lib/useRecorder";
+import {
+  attachRecording,
+  discardBeforeRecording,
+  reportBeforeRecording,
+} from "../lib/telemetry";
 
 type Phase = "idle" | "uploading" | "processing";
 
@@ -156,6 +161,7 @@ export function MeetingPage() {
       const s = settings.current;
       const twoChannel = audio.channelLayout === "mic_system";
       setPhase("uploading");
+      reportBeforeRecording("upload_started", { bytes: audio.blob.size });
       try {
         // A 2-channel capture the server rejects is re-posted once as mono.
         const { job, fellBackToMono } = await submitWithLayoutFallback(submitJob, {
@@ -178,6 +184,11 @@ export function MeetingPage() {
         if (fellBackToMono) {
           toast.info("Recorded as a single channel — the tab audio could not be separated.");
         }
+        reportBeforeRecording("upload_finished", {
+          bytes: audio.blob.size,
+          retries: fellBackToMono ? 1 : 0,
+        });
+        attachRecording(job.id);
         rememberTitle(job.id, s.title);
         markMine(job.id);
         setJobId(job.id);
@@ -186,6 +197,7 @@ export function MeetingPage() {
         await note.attachJob(job.id);
         void refresh();
       } catch (err) {
+        discardBeforeRecording();
         toast.error(messageFor(err));
         setPhase("idle");
       }
@@ -222,6 +234,7 @@ export function MeetingPage() {
   };
 
   const onStop = () => {
+    reportBeforeRecording("recording_stopped");
     void note.save();
     rec.stop();
   };
@@ -238,6 +251,7 @@ export function MeetingPage() {
 
   const onFile = (file: File | undefined | null) => {
     if (!file) return;
+    reportBeforeRecording("import_submitted", { bytes: file.size });
     // An uploaded file declares no channel layout.
     void submit({ blob: file, filename: file.name, channelLayout: "mono" }, "upload");
   };

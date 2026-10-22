@@ -1,0 +1,1901 @@
+{
+ "telemetry_schema_version": 1,
+ "processing_run": {
+  "null_reasons": {
+   "user_wait_seconds": "not_measured",
+   "time_to_notes_seconds": "not_measured",
+   "time_to_transcript_seconds": "not_measured",
+   "time_to_speaker_labels_seconds": "not_measured"
+  },
+  "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+  "tenant_id": "00000000-0000-0000-0000-00000000000b",
+  "recording_id": "7a06a6e4-9a36-427c-8f34-5ec0e7d92b95",
+  "note_id": null,
+  "note_generation_id": null,
+  "kind": "initial",
+  "reprocess_scope": null,
+  "trigger": "user",
+  "telemetry_schema_version": 1,
+  "attempts": 1,
+  "status": "succeeded",
+  "error_category": null,
+  "submitted_at": "2026-10-22T14:06:03.013422Z",
+  "started_at": "2026-10-22T14:06:03.042051Z",
+  "finished_at": "2026-10-22T14:10:45.387320Z",
+  "processing_wall_seconds": 324.2368,
+  "user_wait_seconds": null,
+  "user_wait_cross_device": null,
+  "time_to_transcript_seconds": null,
+  "time_to_speaker_labels_seconds": null,
+  "time_to_notes_seconds": null,
+  "rtf": 2.7019733333333336,
+  "speedup": 0.3700998776203071,
+  "audio_duration_seconds": 120.0,
+  "asr_audio_processed_seconds": 115.718,
+  "created_by": "0c000000-0000-0000-0000-00000000000b",
+  "concurrent_runs_at_start": 0,
+  "other_model_activity": [],
+  "telemetry_overhead_seconds": 0.023027,
+  "telemetry_buffer_peak_bytes": 1561,
+  "retention_until": "2027-01-20T14:06:03.013422Z",
+  "trace_id": "28e6e922c55851f3b460138e61cb1a0e"
+ },
+ "run_context": {
+  "null_reasons": {
+   "app_build": "unavailable",
+   "chip_model": "not_supported",
+   "device_llm": "not_applicable",
+   "container_mem_limit": "unavailable"
+  },
+  "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+  "tenant_id": "00000000-0000-0000-0000-00000000000b",
+  "telemetry_schema_version": 1,
+  "app_commit": "ce7f25a",
+  "app_build": null,
+  "os_name": "Linux",
+  "os_version": "7.0.14-linuxkit",
+  "arch": "aarch64",
+  "chip_model": null,
+  "memory_total_bytes": 14636097536,
+  "execution_mode": "container",
+  "effective_config": {
+   "asr_model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+   "asr_device": "cpu",
+   "asr_engine": "faster_whisper",
+   "asr_backend": "inproc_cpu_asr",
+   "diar_device": "cpu",
+   "diar_engine": "legacy",
+   "diar_v2_pins": "",
+   "asr_beam_size": 5,
+   "asr_lid_model": "/opt/models/whisper-tiny",
+   "diar_v2_batch": 0,
+   "asr_jobs_group": "asr-workers",
+   "asr_model_repo": "Systran/faster-whisper-large-v3",
+   "asr_vad_pad_ms": 0,
+   "diar_model_dir": "/opt/models/ecapa",
+   "asr_jobs_stream": "asr:jobs",
+   "asr_shadow_rate": 0.2,
+   "diar_model_repo": "speechbrain/spkrec-ecapa-voxceleb",
+   "asr_compute_type": "int8",
+   "asr_gate_logprob": -1.0,
+   "asr_model_sha256": "69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1",
+   "asr_gates_enabled": true,
+   "diar_http_backend": "",
+   "diar_model_sha256": "0575cb64845e6b9a10db9bcb74d5ac32b326b8dc90352671d345e2ee3d0126a2",
+   "diar_v2_model_dir": "/opt/models/pyannote-community-1",
+   "asr_condition_prev": true,
+   "asr_gate_no_speech": 0.6,
+   "asr_model_revision": "edaa852ec7e145841d8ffdb056a99866b5f0a478",
+   "asr_shadow_backend": "",
+   "diar_shadow_engine": "",
+   "diar_v2_model_repo": "pyannote/speaker-diarization-community-1",
+   "asr_jobs_dlq_stream": "asr:jobs:dlq",
+   "asr_vocabulary_mode": "prompt",
+   "diar_meanvar_sha256": "cd70225b05b37be64fc5a95e24395d804231d43f74b2e1e5a513db7b69b34c33",
+   "diar_model_revision": "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286",
+   "asr_gate_compression": 2.4,
+   "asr_jobs_max_retries": 3,
+   "asr_loop_fuzzy_ratio": 0.8,
+   "asr_chunk_language_id": true,
+   "asr_gate_loop_repeats": 4,
+   "asr_gate_speech_share": 0.3,
+   "asr_vad_floor_enabled": true,
+   "asr_http_group_seconds": 300.0,
+   "asr_segment_lid_min_ms": 3000,
+   "diar_min_speaker_share": 0.03,
+   "diar_v2_model_revision": "",
+   "asr_gate_low_confidence": 0.25,
+   "asr_jobs_before_recycle": 100,
+   "asr_second_pass_enabled": true,
+   "asr_segment_lid_enabled": true,
+   "asr_shadow_budget_hours": 4.0,
+   "asr_vad_floor_threshold": 0.35,
+   "asr_jobs_idle_reclaim_ms": 60000,
+   "asr_streaming_vad_filter": true,
+   "diar_min_speaker_speech_ms": 8000,
+   "asr_gate_artefact_no_speech": 0.5,
+   "asr_shadow_max_wait_seconds": 120.0,
+   "asr_segment_lid_foreign_share": 0.6,
+   "asr_gate_low_confidence_max_ms": 1500,
+   "asr_vad_floor_max_speech_share": 0.2,
+   "asr_streaming_vad_min_silence_ms": 300,
+   "diar_http_seconds_per_audio_second": 0.5,
+   "asr_max_inference_seconds_multiplier": 52.0
+  },
+  "device_asr": {
+   "value": "cpu",
+   "observation": "observed"
+  },
+  "device_diarization": {
+   "value": "cpu",
+   "observation": "configured"
+  },
+  "device_llm": null,
+  "memory_pressure_start": "some_avg10=0.00",
+  "memory_pressure_end": "some_avg10=0.12",
+  "process_rss_start": 2371727360,
+  "process_rss_end": 3219263488,
+  "swap_used_start": 1262321664,
+  "swap_used_end": 1260498944,
+  "container_mem_limit": null
+ },
+ "spans": [
+  {
+   "span_id": "48601921-f660-4d53-b7a8-336e7cc14ffd",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": null,
+   "stage": "upload",
+   "name": "asr.submit.upload",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": null,
+   "end_monotonic_ns": null,
+   "start_wall_utc": "2026-10-22T14:06:02.680857Z",
+   "end_wall_utc": "2026-10-22T14:06:02.998512Z",
+   "clock_source": "wall",
+   "process_id": 1,
+   "host": "0e58136e0ac3",
+   "attributes": {
+    "bytes": 3562393,
+    "chunks": 1,
+    "resumed": false,
+    "retries": 0
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "df318456-b3b0-4f57-8c7f-73d506b2b964",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": null,
+   "stage": "capture_input",
+   "name": "asr.submit.probe",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": null,
+   "end_monotonic_ns": null,
+   "start_wall_utc": "2026-10-22T14:06:02.752478Z",
+   "end_wall_utc": "2026-10-22T14:06:02.896191Z",
+   "clock_source": "wall",
+   "process_id": 1,
+   "host": "0e58136e0ac3",
+   "attributes": {
+    "client": null,
+    "format": "flac",
+    "_reasons": {
+     "client": "unavailable"
+    },
+    "channels": 1,
+    "mime_type": "audio/flac",
+    "capture_mode": "upload:mono",
+    "sample_rate_hz": 16000,
+    "file_size_bytes": 3562393,
+    "audio_duration_seconds": 120.0
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "416cbcec-1ac5-426f-8286-3e5d74c765b8",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "0553a340-219d-4f14-b8f0-cc43d71d11f7",
+   "stage": "queue",
+   "name": "asr.queue_wait",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": null,
+   "end_monotonic_ns": null,
+   "start_wall_utc": "2026-10-22T14:06:03.025000Z",
+   "end_wall_utc": "2026-10-22T14:10:45.411762Z",
+   "clock_source": "wall",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "queue_name": "asr:jobs",
+    "redelivery": true,
+    "started_at": "2026-10-22T14:10:45.411762+00:00",
+    "enqueued_at": "2026-10-22T14:06:03.025000+00:00",
+    "queue_wait_seconds": 282.3868,
+    "queue_depth_at_enqueue": 0
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "758daae4-88fc-4110-be35-114a48838812",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "b6749ffa-96bc-4978-9829-ebdaad410ab9",
+   "stage": "queue",
+   "name": "asr.queue_wait",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": null,
+   "end_monotonic_ns": null,
+   "start_wall_utc": "2026-10-22T14:06:03.025000Z",
+   "end_wall_utc": "2026-10-22T14:10:45.416579Z",
+   "clock_source": "wall",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "queue_name": "asr:jobs",
+    "redelivery": true,
+    "started_at": "2026-10-22T14:10:45.416579+00:00",
+    "enqueued_at": "2026-10-22T14:06:03.025000+00:00",
+    "queue_wait_seconds": 282.3916,
+    "queue_depth_at_enqueue": 0
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "8e4735b1-e1f0-415d-9ee2-ca62c7714560",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "cacdcaed-c356-4b99-8616-edac1a0dd56f",
+   "stage": "queue",
+   "name": "asr.queue_wait",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": null,
+   "end_monotonic_ns": null,
+   "start_wall_utc": "2026-10-22T14:06:03.025000Z",
+   "end_wall_utc": "2026-10-22T14:10:45.406654Z",
+   "clock_source": "wall",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "queue_name": "asr:jobs",
+    "redelivery": true,
+    "started_at": "2026-10-22T14:10:45.406654+00:00",
+    "enqueued_at": "2026-10-22T14:06:03.025000+00:00",
+    "queue_wait_seconds": 282.3817,
+    "queue_depth_at_enqueue": 0
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "dedf3bbc-5a12-4af9-b663-ba544056f2b5",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "queue",
+   "name": "asr.queue_wait",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": null,
+   "end_monotonic_ns": null,
+   "start_wall_utc": "2026-10-22T14:06:03.025000Z",
+   "end_wall_utc": "2026-10-22T14:06:03.056772Z",
+   "clock_source": "wall",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "queue_name": "asr:jobs",
+    "redelivery": false,
+    "started_at": "2026-10-22T14:06:03.056772+00:00",
+    "enqueued_at": "2026-10-22T14:06:03.025000+00:00",
+    "queue_wait_seconds": 0.0318,
+    "queue_depth_at_enqueue": 0
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "f5a61074-bd47-47d1-9e53-c3b0be7f1c7a",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "5dc32053-7e5b-41b5-8090-90ff0abcaf9c",
+   "stage": "queue",
+   "name": "asr.queue_wait",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": null,
+   "end_monotonic_ns": null,
+   "start_wall_utc": "2026-10-22T14:06:03.025000Z",
+   "end_wall_utc": "2026-10-22T14:10:45.399564Z",
+   "clock_source": "wall",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "queue_name": "asr:jobs",
+    "redelivery": true,
+    "started_at": "2026-10-22T14:10:45.399564+00:00",
+    "enqueued_at": "2026-10-22T14:06:03.025000+00:00",
+    "queue_wait_seconds": 282.3746,
+    "queue_depth_at_enqueue": 0
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": null,
+   "stage": "other",
+   "name": "worker_job",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9200417187769,
+   "end_monotonic_ns": 9482737361981,
+   "start_wall_utc": "2026-10-22T14:06:03.056261Z",
+   "end_wall_utc": "2026-10-22T14:10:45.378662Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "job_status": "complete"
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "1df3d9a4-ca4f-4f04-8d99-953656ae0ebb",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "audio_prep",
+   "name": "asr.audio_prep",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9200433121685,
+   "end_monotonic_ns": 9200685771352,
+   "start_wall_utc": "2026-10-22T14:06:03.072175Z",
+   "end_wall_utc": "2026-10-22T14:06:03.324903Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "bytes": 3562393,
+    "_reasons": {
+     "decrypt_seconds": "not_supported",
+     "resample_seconds": "not_supported",
+     "source_sample_rate_hz": "unavailable"
+    },
+    "channel_layout": "mono",
+    "decode_seconds": 0.1926,
+    "decrypt_seconds": null,
+    "resample_seconds": null,
+    "retrieve_seconds": 0.0599,
+    "source_sample_rate_hz": null,
+    "target_sample_rate_hz": 16000
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "e990ee47-ece2-4d19-bdc3-e81420665ff3",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "model_init",
+   "name": "asr.model",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9200688401227,
+   "end_monotonic_ns": 9200688599894,
+   "start_wall_utc": "2026-10-22T14:06:03.327453Z",
+   "end_wall_utc": "2026-10-22T14:06:03.327709Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "state": "warm",
+    "device": {
+     "value": "cpu",
+     "observation": "observed"
+    },
+    "backend": "inproc_cpu_asr",
+    "_reasons": {
+     "warmup_seconds": "not_applicable"
+    },
+    "model_kind": "asr",
+    "model_name": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "compute_type": "int8",
+    "load_seconds": 2.3e-05,
+    "quantization": "int8",
+    "model_revision": "edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "warmup_seconds": null,
+    "startup_load_seconds": 30.048
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "fbfef327-5189-478d-8915-9b2ecf2e0806",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "model_init",
+   "name": "vad.model",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9200688775894,
+   "end_monotonic_ns": 9200690430936,
+   "start_wall_utc": "2026-10-22T14:06:03.327827Z",
+   "end_wall_utc": "2026-10-22T14:06:03.329522Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "state": "warm",
+    "device": {
+     "value": "cpu",
+     "observation": "observed"
+    },
+    "_reasons": {
+     "compute_type": "not_applicable",
+     "quantization": "not_applicable",
+     "model_revision": "unavailable",
+     "warmup_seconds": "not_applicable"
+    },
+    "model_kind": "vad",
+    "model_name": "silero-vad",
+    "compute_type": null,
+    "load_seconds": 5e-06,
+    "quantization": null,
+    "model_revision": null,
+    "warmup_seconds": null
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "a4e69410-3adb-481a-bce1-554cdccd4e8a",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "vad",
+   "name": "vad.speech_runs",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9200690570352,
+   "end_monotonic_ns": 9205516750480,
+   "start_wall_utc": "2026-10-22T14:06:03.329622Z",
+   "end_wall_utc": "2026-10-22T14:06:08.155934Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "backend": "silero",
+    "run_count": 7,
+    "threshold": 0.5,
+    "truncated": false,
+    "floor_used": false,
+    "speech_seconds": 115.718,
+    "duration_seconds": 4.8261,
+    "run_lengths_seconds": [
+     23.068,
+     5.084,
+     14.364,
+     29.98,
+     19.676,
+     18.812,
+     4.734
+    ]
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "ba7c67d7-dcc6-45e4-8dc3-636dfea60aba",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "language_detection",
+   "name": "lid.run",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9205520294646,
+   "end_monotonic_ns": 9216862775151,
+   "start_wall_utc": "2026-10-22T14:06:08.159347Z",
+   "end_wall_utc": "2026-10-22T14:06:19.499833Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "detected": [
+     {
+      "lang": "en",
+      "confidence": 0.9925
+     },
+     {
+      "lang": "cy",
+      "confidence": 0.0019
+     },
+     {
+      "lang": "pt",
+      "confidence": 0.0009
+     }
+    ],
+    "call_count": 1,
+    "audio_seconds": 23.068,
+    "decided_language": "en",
+    "duration_seconds": 11.3423
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "52993d04-f81f-4630-9d30-4af2eeddadb1",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "language_detection",
+   "name": "lid.run",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9216868644901,
+   "end_monotonic_ns": 9228642528865,
+   "start_wall_utc": "2026-10-22T14:06:19.505363Z",
+   "end_wall_utc": "2026-10-22T14:06:31.280148Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "detected": [
+     {
+      "lang": "en",
+      "confidence": 0.986
+     },
+     {
+      "lang": "cy",
+      "confidence": 0.004
+     },
+     {
+      "lang": "la",
+      "confidence": 0.0013
+     }
+    ],
+    "call_count": 1,
+    "audio_seconds": 5.084,
+    "decided_language": "en",
+    "duration_seconds": 11.7731
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "9ea325e2-4896-430c-9750-56bbdadc90e4",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "language_detection",
+   "name": "lid.run",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9228657090656,
+   "end_monotonic_ns": 9239281698578,
+   "start_wall_utc": "2026-10-22T14:06:31.293814Z",
+   "end_wall_utc": "2026-10-22T14:06:41.918532Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "detected": [
+     {
+      "lang": "en",
+      "confidence": 0.98
+     },
+     {
+      "lang": "cy",
+      "confidence": 0.0083
+     },
+     {
+      "lang": "es",
+      "confidence": 0.0013
+     }
+    ],
+    "call_count": 1,
+    "audio_seconds": 14.364,
+    "decided_language": "en",
+    "duration_seconds": 10.6245
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "53a145bf-9759-4fa6-bb29-fbfc5cdc9acf",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "language_detection",
+   "name": "lid.run",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9239285591578,
+   "end_monotonic_ns": 9249275100041,
+   "start_wall_utc": "2026-10-22T14:06:41.922311Z",
+   "end_wall_utc": "2026-10-22T14:06:51.914002Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "detected": [
+     {
+      "lang": "en",
+      "confidence": 0.9941
+     },
+     {
+      "lang": "cy",
+      "confidence": 0.0036
+     },
+     {
+      "lang": "fr",
+      "confidence": 0.0003
+     }
+    ],
+    "call_count": 1,
+    "audio_seconds": 29.98,
+    "decided_language": "en",
+    "duration_seconds": 9.9894
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "0dd2e4af-b8ff-4d81-b844-a579458d6eb1",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "language_detection",
+   "name": "lid.run",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9249279393832,
+   "end_monotonic_ns": 9259730926879,
+   "start_wall_utc": "2026-10-22T14:06:51.918171Z",
+   "end_wall_utc": "2026-10-22T14:07:02.370242Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "detected": [
+     {
+      "lang": "en",
+      "confidence": 0.9935
+     },
+     {
+      "lang": "cy",
+      "confidence": 0.0022
+     },
+     {
+      "lang": "nn",
+      "confidence": 0.0008
+     }
+    ],
+    "call_count": 1,
+    "audio_seconds": 19.676,
+    "decided_language": "en",
+    "duration_seconds": 10.4513
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "0afceee6-a7de-460c-a5d1-c85892590890",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "language_detection",
+   "name": "lid.run",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9259741740587,
+   "end_monotonic_ns": 9270339449384,
+   "start_wall_utc": "2026-10-22T14:07:02.380518Z",
+   "end_wall_utc": "2026-10-22T14:07:12.978418Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "detected": [
+     {
+      "lang": "en",
+      "confidence": 0.9659
+     },
+     {
+      "lang": "cy",
+      "confidence": 0.0188
+     },
+     {
+      "lang": "nn",
+      "confidence": 0.0037
+     }
+    ],
+    "call_count": 1,
+    "audio_seconds": 18.812,
+    "decided_language": "en",
+    "duration_seconds": 10.5975
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "caf1ffa1-74a2-4241-9f31-1e604cffdd58",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "language_detection",
+   "name": "lid.run",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9270345606967,
+   "end_monotonic_ns": 9280923528013,
+   "start_wall_utc": "2026-10-22T14:07:12.984385Z",
+   "end_wall_utc": "2026-10-22T14:07:23.553581Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "detected": [
+     {
+      "lang": "en",
+      "confidence": 0.9333
+     },
+     {
+      "lang": "nn",
+      "confidence": 0.0198
+     },
+     {
+      "lang": "la",
+      "confidence": 0.0118
+     }
+    ],
+    "call_count": 1,
+    "audio_seconds": 4.734,
+    "decided_language": "en",
+    "duration_seconds": 10.5777
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "dcfc5298-2a10-4a0d-942f-1a91663b3c79",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "asr_primary",
+   "name": "asr.transcribe_runs",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9280925973096,
+   "end_monotonic_ns": 9466170294557,
+   "start_wall_utc": "2026-10-22T14:07:23.555676Z",
+   "end_wall_utc": "2026-10-22T14:10:28.807863Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "device": {
+     "value": "cpu",
+     "observation": "observed"
+    },
+    "backend": "inproc_cpu_asr",
+    "beam_size": 5,
+    "truncated": false,
+    "word_count": 328,
+    "chunk_count": 7,
+    "compute_type": "int8",
+    "wall_seconds": 185.2441,
+    "chunk_seconds": [
+     23.068,
+     5.084,
+     14.364,
+     29.98,
+     19.676,
+     18.812,
+     4.734
+    ],
+    "segment_count": 29,
+    "audio_processed_seconds": 115.718
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "737e7c8e-a9c7-4f57-814d-5848eb815dda",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "dcfc5298-2a10-4a0d-942f-1a91663b3c79",
+   "stage": "asr_primary",
+   "name": "asr.chunk",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9280931699513,
+   "end_monotonic_ns": 9308838973318,
+   "start_wall_utc": "2026-10-22T14:07:23.561402Z",
+   "end_wall_utc": "2026-10-22T14:07:51.479215Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "device": {
+     "value": "cpu",
+     "observation": "observed"
+    },
+    "backend": "faster_whisper",
+    "beam_size": 5,
+    "word_count": 60,
+    "chunk_count": 1,
+    "compute_type": "int8",
+    "wall_seconds": 27.9052,
+    "chunk_seconds": [
+     23.068
+    ],
+    "segment_count": 4,
+    "audio_processed_seconds": 23.068
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "52925355-27b8-4180-bc22-d5251db3d0d8",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "dcfc5298-2a10-4a0d-942f-1a91663b3c79",
+   "stage": "asr_primary",
+   "name": "asr.chunk",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9308861483234,
+   "end_monotonic_ns": 9326721946909,
+   "start_wall_utc": "2026-10-22T14:07:51.498663Z",
+   "end_wall_utc": "2026-10-22T14:08:09.360107Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "device": {
+     "value": "cpu",
+     "observation": "observed"
+    },
+    "backend": "faster_whisper",
+    "beam_size": 5,
+    "word_count": 15,
+    "chunk_count": 1,
+    "compute_type": "int8",
+    "wall_seconds": 17.8594,
+    "chunk_seconds": [
+     5.084
+    ],
+    "segment_count": 1,
+    "audio_processed_seconds": 5.084
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "4b37453d-85fc-4a8d-8f50-bcc9753eed6b",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "dcfc5298-2a10-4a0d-942f-1a91663b3c79",
+   "stage": "asr_primary",
+   "name": "asr.chunk",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9326735989868,
+   "end_monotonic_ns": 9349065066795,
+   "start_wall_utc": "2026-10-22T14:08:09.373167Z",
+   "end_wall_utc": "2026-10-22T14:08:31.704387Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "device": {
+     "value": "cpu",
+     "observation": "observed"
+    },
+    "backend": "faster_whisper",
+    "beam_size": 5,
+    "word_count": 42,
+    "chunk_count": 1,
+    "compute_type": "int8",
+    "wall_seconds": 22.3283,
+    "chunk_seconds": [
+     14.364
+    ],
+    "segment_count": 6,
+    "audio_processed_seconds": 14.364
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "b55628a0-899e-44b3-8221-3ccc8a689dff",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "dcfc5298-2a10-4a0d-942f-1a91663b3c79",
+   "stage": "asr_primary",
+   "name": "asr.chunk",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9349075366503,
+   "end_monotonic_ns": 9398169135526,
+   "start_wall_utc": "2026-10-22T14:08:31.714047Z",
+   "end_wall_utc": "2026-10-22T14:09:20.804062Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "device": {
+     "value": "cpu",
+     "observation": "observed"
+    },
+    "backend": "faster_whisper",
+    "beam_size": 5,
+    "word_count": 91,
+    "chunk_count": 1,
+    "compute_type": "int8",
+    "wall_seconds": 49.093,
+    "chunk_seconds": [
+     29.98
+    ],
+    "segment_count": 6,
+    "audio_processed_seconds": 29.98
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "d81b7bf9-9b4a-49b2-ae71-f0360a4b30b8",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "dcfc5298-2a10-4a0d-942f-1a91663b3c79",
+   "stage": "asr_primary",
+   "name": "asr.chunk",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9398180994067,
+   "end_monotonic_ns": 9427743034414,
+   "start_wall_utc": "2026-10-22T14:09:20.815183Z",
+   "end_wall_utc": "2026-10-22T14:09:50.384402Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "device": {
+     "value": "cpu",
+     "observation": "observed"
+    },
+    "backend": "faster_whisper",
+    "beam_size": 5,
+    "word_count": 58,
+    "chunk_count": 1,
+    "compute_type": "int8",
+    "wall_seconds": 29.561,
+    "chunk_seconds": [
+     19.676
+    ],
+    "segment_count": 8,
+    "audio_processed_seconds": 19.676
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "f589bc75-93fe-4420-bac2-fbc9bdb5fd34",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "dcfc5298-2a10-4a0d-942f-1a91663b3c79",
+   "stage": "asr_primary",
+   "name": "asr.chunk",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9427756811122,
+   "end_monotonic_ns": 9450365243841,
+   "start_wall_utc": "2026-10-22T14:09:50.397320Z",
+   "end_wall_utc": "2026-10-22T14:10:13.006221Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "device": {
+     "value": "cpu",
+     "observation": "observed"
+    },
+    "backend": "faster_whisper",
+    "beam_size": 5,
+    "word_count": 44,
+    "chunk_count": 1,
+    "compute_type": "int8",
+    "wall_seconds": 22.6079,
+    "chunk_seconds": [
+     18.812
+    ],
+    "segment_count": 3,
+    "audio_processed_seconds": 18.812
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "74cbcdeb-afe8-4758-a7de-47a0eef7c557",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "dcfc5298-2a10-4a0d-942f-1a91663b3c79",
+   "stage": "asr_primary",
+   "name": "asr.chunk",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9450373726508,
+   "end_monotonic_ns": 9466166412307,
+   "start_wall_utc": "2026-10-22T14:10:13.014234Z",
+   "end_wall_utc": "2026-10-22T14:10:28.804212Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "device": {
+     "value": "cpu",
+     "observation": "observed"
+    },
+    "backend": "faster_whisper",
+    "beam_size": 5,
+    "word_count": 18,
+    "chunk_count": 1,
+    "compute_type": "int8",
+    "wall_seconds": 15.7922,
+    "chunk_seconds": [
+     4.734
+    ],
+    "segment_count": 1,
+    "audio_processed_seconds": 4.734
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "02f6913f-a966-4247-a0e7-c698c9b8b6cc",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "postprocess_cleanup",
+   "name": "asr.guards",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9466170997182,
+   "end_monotonic_ns": 9466176049182,
+   "start_wall_utc": "2026-10-22T14:10:28.808443Z",
+   "end_wall_utc": "2026-10-22T14:10:28.813545Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "items": 0,
+    "segments_in": 29,
+    "duration_seconds": 0.0051
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "d24b8054-2e43-49be-b7e7-4b4bc21b19b8",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "postprocess_cleanup",
+   "name": "asr.prompt_echo",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9466176261557,
+   "end_monotonic_ns": 9466176314765,
+   "start_wall_utc": "2026-10-22T14:10:28.813707Z",
+   "end_wall_utc": "2026-10-22T14:10:28.813788Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "items": 0,
+    "segments_in": 29,
+    "duration_seconds": 0.0001
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "f4921fe3-0230-45c3-9fca-cc2f918b6388",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "postprocess_cleanup",
+   "name": "asr.noise_markers",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9466181217182,
+   "end_monotonic_ns": 9466181281515,
+   "start_wall_utc": "2026-10-22T14:10:28.818663Z",
+   "end_wall_utc": "2026-10-22T14:10:28.818757Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "items": 0,
+    "segments_in": 29,
+    "duration_seconds": 0.0001
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "ecb22dd0-f377-4871-9f48-b7b0cfa72788",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "diarization_load",
+   "name": "diarization.load",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9466181922098,
+   "end_monotonic_ns": 9466182206890,
+   "start_wall_utc": "2026-10-22T14:10:28.819368Z",
+   "end_wall_utc": "2026-10-22T14:10:28.819731Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "spkrec-ecapa-voxceleb@0f99f2d",
+    "state": "warm",
+    "device": {
+     "value": "cpu",
+     "observation": "configured"
+    },
+    "backend": "legacy-ecapa-ahc",
+    "_reasons": {
+     "speakers_detected": "not_applicable",
+     "unknown_speaker_share": "not_applicable"
+    },
+    "load_seconds": 0.0002,
+    "audio_seconds": 120.0,
+    "speakers_detected": null,
+    "unknown_speaker_share": null
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "52e32956-5249-416b-b083-2bda8c5f4ff8",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "diarization_infer",
+   "name": "diarization.infer",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9466182399140,
+   "end_monotonic_ns": 9482643773189,
+   "start_wall_utc": "2026-10-22T14:10:28.819845Z",
+   "end_wall_utc": "2026-10-22T14:10:45.285266Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "model": "spkrec-ecapa-voxceleb@0f99f2d",
+    "device": {
+     "value": "cpu",
+     "observation": "configured"
+    },
+    "layout": "mono",
+    "backend": "legacy-ecapa-ahc",
+    "audio_seconds": 120.0,
+    "infer_seconds": 16.4611,
+    "speakers_detected": 3,
+    "unknown_speaker_share": 0.0915
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "15c6a5e7-6ecf-4d92-b9ba-69360dc2426b",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "postprocess_attribute",
+   "name": "asr.speaker_attribution",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9482644993273,
+   "end_monotonic_ns": 9482651310231,
+   "start_wall_utc": "2026-10-22T14:10:45.286261Z",
+   "end_wall_utc": "2026-10-22T14:10:45.292602Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "items": 29,
+    "duration_seconds": 0.0063
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "9938c744-3902-44c7-abc3-175393a4cfb3",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "postprocess_align",
+   "name": "asr.align",
+   "attempt": 1,
+   "status": "skipped",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9482651990898,
+   "end_monotonic_ns": 9482652021481,
+   "start_wall_utc": "2026-10-22T14:10:45.293258Z",
+   "end_wall_utc": "2026-10-22T14:10:45.293312Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "items": null,
+    "_reasons": {
+     "items": "not_applicable",
+     "duration_seconds": "not_applicable"
+    },
+    "skip_reason": "decoder_word_timestamps",
+    "duration_seconds": null
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "42f98116-357a-4830-ad8d-d9cd8cfcc0cc",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "4d4109c9-1a89-4f16-a9bf-48efac5f545f",
+   "stage": "persist",
+   "name": "asr.persist",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9482654819106,
+   "end_monotonic_ns": 9482728914648,
+   "start_wall_utc": "2026-10-22T14:10:45.296087Z",
+   "end_wall_utc": "2026-10-22T14:10:45.370215Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "bytes": 40040,
+    "items": 29,
+    "duration_seconds": 0.0741
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "5dc32053-7e5b-41b5-8090-90ff0abcaf9c",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": null,
+   "stage": "other",
+   "name": "worker_job",
+   "attempt": 1,
+   "status": "skipped",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9482758202856,
+   "end_monotonic_ns": 9482762136189,
+   "start_wall_utc": "2026-10-22T14:10:45.399472Z",
+   "end_wall_utc": "2026-10-22T14:10:45.403433Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "job_status": "complete",
+    "redelivered_after_finish": true
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "cacdcaed-c356-4b99-8616-edac1a0dd56f",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": null,
+   "stage": "other",
+   "name": "worker_job",
+   "attempt": 1,
+   "status": "skipped",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9482765335731,
+   "end_monotonic_ns": 9482767912981,
+   "start_wall_utc": "2026-10-22T14:10:45.406603Z",
+   "end_wall_utc": "2026-10-22T14:10:45.409201Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "job_status": "complete",
+    "redelivered_after_finish": true
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "0553a340-219d-4f14-b8f0-cc43d71d11f7",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": null,
+   "stage": "other",
+   "name": "worker_job",
+   "attempt": 1,
+   "status": "skipped",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9482770431814,
+   "end_monotonic_ns": 9482772874064,
+   "start_wall_utc": "2026-10-22T14:10:45.411699Z",
+   "end_wall_utc": "2026-10-22T14:10:45.414167Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "job_status": "complete",
+    "redelivered_after_finish": true
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "b6749ffa-96bc-4978-9829-ebdaad410ab9",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": null,
+   "stage": "other",
+   "name": "worker_job",
+   "attempt": 1,
+   "status": "skipped",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9482775270023,
+   "end_monotonic_ns": 9482777629481,
+   "start_wall_utc": "2026-10-22T14:10:45.416537Z",
+   "end_wall_utc": "2026-10-22T14:10:45.418918Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "29df8d9aad26",
+   "attributes": {
+    "job_status": "complete",
+    "redelivered_after_finish": true
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "61257f34-924f-4223-a2d6-9b096fce1aef",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": null,
+   "stage": "llm_call",
+   "name": "llm.provider_probe",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": null,
+   "end_monotonic_ns": null,
+   "start_wall_utc": "2026-10-22T14:11:07.589044Z",
+   "end_wall_utc": "2026-10-22T14:11:15.807192Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "3b3970c28d12",
+   "attributes": {
+    "backend": "mistral_eu",
+    "purpose": "provider_probe",
+    "_reasons": {
+     "http_status": "unavailable",
+     "error_subtype": "unavailable"
+    },
+    "provider": "openai_compat",
+    "http_status": null,
+    "llm_attempt": 1,
+    "error_subtype": null,
+    "finish_reason": "stop",
+    "structured_mode": "json_schema"
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "1e503aff-f21b-487f-a27c-9863260c5e65",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": null,
+   "stage": "other",
+   "name": "notes.generate",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 9513169597161,
+   "end_monotonic_ns": 9524608063375,
+   "start_wall_utc": "2026-10-22T14:11:15.811713Z",
+   "end_wall_utc": "2026-10-22T14:11:27.250222Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "3b3970c28d12",
+   "attributes": {
+    "job_attempt": 1
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "41166d8d-eeb6-4618-9710-1b8a14f8dba5",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "1e503aff-f21b-487f-a27c-9863260c5e65",
+   "stage": "llm_call",
+   "name": "llm.note_write",
+   "attempt": 1,
+   "status": "error",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": null,
+   "end_monotonic_ns": null,
+   "start_wall_utc": "2026-10-22T14:11:16.216809Z",
+   "end_wall_utc": "2026-10-22T14:11:16.216838Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "3b3970c28d12",
+   "attributes": {
+    "backend": "mistral_eu",
+    "purpose": "note_write",
+    "_reasons": {
+     "finish_reason": "unavailable"
+    },
+    "provider": "openai_compat",
+    "http_status": 503,
+    "llm_attempt": 1,
+    "error_subtype": "unavailable",
+    "finish_reason": null,
+    "structured_mode": "json_schema"
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "95a0abfa-a046-4b75-b57a-11a22fe4855a",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "1e503aff-f21b-487f-a27c-9863260c5e65",
+   "stage": "llm_call",
+   "name": "llm.note_write",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": null,
+   "end_monotonic_ns": null,
+   "start_wall_utc": "2026-10-22T14:11:17.218752Z",
+   "end_wall_utc": "2026-10-22T14:11:27.156670Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "3b3970c28d12",
+   "attributes": {
+    "backend": "mistral_eu",
+    "purpose": "note_write",
+    "_reasons": {
+     "http_status": "unavailable",
+     "error_subtype": "unavailable"
+    },
+    "provider": "openai_compat",
+    "http_status": null,
+    "llm_attempt": 2,
+    "error_subtype": null,
+    "finish_reason": "stop",
+    "structured_mode": "json_schema"
+   },
+   "is_parallel_with": null
+  }
+ ],
+ "llm_calls": [
+  {
+   "null_reasons": {
+    "model_load_seconds": "not_applicable",
+    "time_to_first_token_seconds": "not_applicable",
+    "generation_tokens_per_second": "not_supported"
+   },
+   "llm_call_id": "80df2d80-fd64-4333-a5c3-f18191340f33",
+   "span_id": "61257f34-924f-4223-a2d6-9b096fce1aef",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "purpose": "provider_probe",
+   "provider": "openai_compat",
+   "model": "mistral-large-2512",
+   "backend": "mistral_eu",
+   "execution_mode": "remote",
+   "streaming": false,
+   "attempt": 1,
+   "status": "ok",
+   "queue_wait_seconds": 0.0,
+   "model_load_seconds": null,
+   "time_to_first_token_seconds": null,
+   "total_latency_seconds": 8.217,
+   "input_tokens": 12,
+   "output_tokens": 6,
+   "cached_input_tokens": 0,
+   "reasoning_tokens": 0,
+   "token_source": "provider",
+   "token_accounting_note": "OpenAI-compatible usage: prompt_tokens includes prompt_tokens_details.cached_tokens and completion_tokens includes completion_tokens_details.reasoning_tokens; all stored as reported, subsets never added again",
+   "generation_tokens_per_second": null,
+   "prompt_chars": 29,
+   "completion_chars": 12,
+   "error_category": null
+  },
+  {
+   "null_reasons": {
+    "output_tokens": "unavailable",
+    "completion_chars": "unavailable",
+    "reasoning_tokens": "unavailable",
+    "model_load_seconds": "not_applicable",
+    "cached_input_tokens": "unavailable",
+    "time_to_first_token_seconds": "not_applicable",
+    "generation_tokens_per_second": "not_supported"
+   },
+   "llm_call_id": "92cd29ed-b2da-40e8-a717-c927bc51aa7e",
+   "span_id": "41166d8d-eeb6-4618-9710-1b8a14f8dba5",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "purpose": "note_write",
+   "provider": "openai_compat",
+   "model": "mistral-large-2512",
+   "backend": "mistral_eu",
+   "execution_mode": "remote",
+   "streaming": false,
+   "attempt": 1,
+   "status": "error",
+   "queue_wait_seconds": 0.0,
+   "model_load_seconds": null,
+   "time_to_first_token_seconds": null,
+   "total_latency_seconds": 0.0,
+   "input_tokens": 1205,
+   "output_tokens": null,
+   "cached_input_tokens": null,
+   "reasoning_tokens": null,
+   "token_source": "estimated",
+   "token_accounting_note": "estimated: characters / 4 (the provider sent no usage object)",
+   "generation_tokens_per_second": null,
+   "prompt_chars": 4821,
+   "completion_chars": null,
+   "error_category": "llm"
+  },
+  {
+   "null_reasons": {
+    "model_load_seconds": "unavailable",
+    "time_to_first_token_seconds": "not_applicable",
+    "generation_tokens_per_second": "not_supported"
+   },
+   "llm_call_id": "b12e0806-8ea6-49c5-854e-e0a3cb7b4a86",
+   "span_id": "95a0abfa-a046-4b75-b57a-11a22fe4855a",
+   "processing_run_id": "17846383-6dcd-4ba8-90aa-51cdcb3e844e",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "purpose": "note_write",
+   "provider": "openai_compat",
+   "model": "mistral-large-2512",
+   "backend": "mistral_eu",
+   "execution_mode": "remote",
+   "streaming": false,
+   "attempt": 2,
+   "status": "ok",
+   "queue_wait_seconds": 1.0,
+   "model_load_seconds": null,
+   "time_to_first_token_seconds": null,
+   "total_latency_seconds": 9.937,
+   "input_tokens": 1085,
+   "output_tokens": 335,
+   "cached_input_tokens": 0,
+   "reasoning_tokens": 0,
+   "token_source": "provider",
+   "token_accounting_note": "OpenAI-compatible usage: prompt_tokens includes prompt_tokens_details.cached_tokens and completion_tokens includes completion_tokens_details.reasoning_tokens; all stored as reported, subsets never added again",
+   "generation_tokens_per_second": null,
+   "prompt_chars": 4821,
+   "completion_chars": 1286,
+   "error_category": null
+  }
+ ],
+ "client_events": [],
+ "missing_measurements": [
+  {
+   "group": "audio_prep",
+   "item": "asr.audio_prep",
+   "field": "decrypt_seconds",
+   "reason": "not_supported"
+  },
+  {
+   "group": "audio_prep",
+   "item": "asr.audio_prep",
+   "field": "resample_seconds",
+   "reason": "not_supported"
+  },
+  {
+   "group": "audio_prep",
+   "item": "asr.audio_prep",
+   "field": "source_sample_rate_hz",
+   "reason": "unavailable"
+  },
+  {
+   "group": "capture_input",
+   "item": "asr.submit.probe",
+   "field": "client",
+   "reason": "unavailable"
+  },
+  {
+   "group": "context",
+   "item": "context",
+   "field": "app_build",
+   "reason": "unavailable"
+  },
+  {
+   "group": "context",
+   "item": "context",
+   "field": "chip_model",
+   "reason": "not_supported"
+  },
+  {
+   "group": "context",
+   "item": "context",
+   "field": "container_mem_limit",
+   "reason": "unavailable"
+  },
+  {
+   "group": "context",
+   "item": "context",
+   "field": "device_llm",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "diarization_load",
+   "item": "diarization.load",
+   "field": "speakers_detected",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "diarization_load",
+   "item": "diarization.load",
+   "field": "unknown_speaker_share",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "llm_call",
+   "item": "llm.note_write",
+   "field": "error_subtype",
+   "reason": "unavailable"
+  },
+  {
+   "group": "llm_call",
+   "item": "llm.note_write",
+   "field": "finish_reason",
+   "reason": "unavailable"
+  },
+  {
+   "group": "llm_call",
+   "item": "llm.note_write",
+   "field": "http_status",
+   "reason": "unavailable"
+  },
+  {
+   "group": "llm_call",
+   "item": "llm.provider_probe",
+   "field": "error_subtype",
+   "reason": "unavailable"
+  },
+  {
+   "group": "llm_call",
+   "item": "llm.provider_probe",
+   "field": "http_status",
+   "reason": "unavailable"
+  },
+  {
+   "group": "llm_call",
+   "item": "note_write (attempt 1)",
+   "field": "cached_input_tokens",
+   "reason": "unavailable"
+  },
+  {
+   "group": "llm_call",
+   "item": "note_write (attempt 1)",
+   "field": "completion_chars",
+   "reason": "unavailable"
+  },
+  {
+   "group": "llm_call",
+   "item": "note_write (attempt 1)",
+   "field": "generation_tokens_per_second",
+   "reason": "not_supported"
+  },
+  {
+   "group": "llm_call",
+   "item": "note_write (attempt 1)",
+   "field": "model_load_seconds",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "llm_call",
+   "item": "note_write (attempt 1)",
+   "field": "output_tokens",
+   "reason": "unavailable"
+  },
+  {
+   "group": "llm_call",
+   "item": "note_write (attempt 1)",
+   "field": "reasoning_tokens",
+   "reason": "unavailable"
+  },
+  {
+   "group": "llm_call",
+   "item": "note_write (attempt 1)",
+   "field": "time_to_first_token_seconds",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "llm_call",
+   "item": "note_write (attempt 2)",
+   "field": "generation_tokens_per_second",
+   "reason": "not_supported"
+  },
+  {
+   "group": "llm_call",
+   "item": "note_write (attempt 2)",
+   "field": "model_load_seconds",
+   "reason": "unavailable"
+  },
+  {
+   "group": "llm_call",
+   "item": "note_write (attempt 2)",
+   "field": "time_to_first_token_seconds",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "llm_call",
+   "item": "provider_probe (attempt 1)",
+   "field": "generation_tokens_per_second",
+   "reason": "not_supported"
+  },
+  {
+   "group": "llm_call",
+   "item": "provider_probe (attempt 1)",
+   "field": "model_load_seconds",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "llm_call",
+   "item": "provider_probe (attempt 1)",
+   "field": "time_to_first_token_seconds",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "model_init",
+   "item": "asr.model",
+   "field": "warmup_seconds",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "model_init",
+   "item": "vad.model",
+   "field": "compute_type",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "model_init",
+   "item": "vad.model",
+   "field": "model_revision",
+   "reason": "unavailable"
+  },
+  {
+   "group": "model_init",
+   "item": "vad.model",
+   "field": "quantization",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "model_init",
+   "item": "vad.model",
+   "field": "warmup_seconds",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "postprocess_align",
+   "item": "asr.align",
+   "field": "duration_seconds",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "postprocess_align",
+   "item": "asr.align",
+   "field": "items",
+   "reason": "not_applicable"
+  },
+  {
+   "group": "run",
+   "item": "run",
+   "field": "time_to_notes_seconds",
+   "reason": "not_measured"
+  },
+  {
+   "group": "run",
+   "item": "run",
+   "field": "time_to_speaker_labels_seconds",
+   "reason": "not_measured"
+  },
+  {
+   "group": "run",
+   "item": "run",
+   "field": "time_to_transcript_seconds",
+   "reason": "not_measured"
+  },
+  {
+   "group": "run",
+   "item": "run",
+   "field": "user_wait_seconds",
+   "reason": "not_measured"
+  }
+ ]
+}

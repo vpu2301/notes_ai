@@ -40,7 +40,6 @@ enum DS {
 
     // Accent family (moss)
     static let accent       = Color.ds("4f7a5e", "8fbf9c")
-    static let accent2      = Color.ds("3f6650", "a9d3b4")
     static let accentSoft   = Color.ds("4f7a5e", "8fbf9c", lightAlpha: 0.11, darkAlpha: 0.14)
     static let accentText   = Color.ds("3f6650", "a9d3b4")
     static let accentFill   = Color.ds("4f7a5e", "8fbf9c")
@@ -132,11 +131,8 @@ extension Font {
         .system(size: UIFontMetrics.default.scaledValue(for: size), weight: weight)
     }
 
-    static let dsTitle   = Font.dsDisplay(26)
     static let dsDoc     = Font.dsDisplay(27)
-    static let dsH2      = Font.dsDisplay(19)
     static let dsBody    = Font.ds(16)
-    static let dsUI      = Font.ds(15, .medium)
     static let dsMeta    = Font.ds(13)
     static let dsLabel   = Font.ds(11, .semibold)
 }

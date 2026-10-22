@@ -6,10 +6,11 @@ the row is inserted (an orphan ciphertext is reaped by the bucket lifecycle poli
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Any, Final, Literal
 from uuid import UUID, uuid4
 
@@ -29,6 +30,7 @@ from fastapi import (
 from opentelemetry import metrics
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+import telemetry
 from asr_models import (
     LANGUAGE_REQUEST_PATTERN,
     SPEAKER_LABEL_PATTERN,
@@ -68,6 +70,7 @@ from ..domain.speaker_edits import (
     roster_after,
     speaker_stats,
 )
+from ..middleware import request_received_at
 from ..validators import ValidationCode, run_all
 from ..validators.quota import validate_quota
 
@@ -265,7 +268,9 @@ async def submit_job(
     payload = await audio.read()
     mime_type = audio.content_type or "application/octet-stream"
 
+    probe_started = datetime.now(UTC)
     result, facts = await run_all(mime_type=mime_type, payload=payload)
+    probe_finished = datetime.now(UTC)
     if not result.ok:
         raise _reject(result.code, result.detail, title="audio rejected by validation")
     if channel_layout == "mic_system" and facts.channels != 2:
@@ -307,6 +312,7 @@ async def submit_job(
         tenant_id=claims.tid,
         aad=audio_id.bytes,
     )
+    stored_at = datetime.now(UTC)
 
     async with tenant_connection(state.app_pool, claims.tid) as conn:
         qr = await validate_quota(
@@ -369,6 +375,27 @@ async def submit_job(
         severity=Severity.INFO,
     )
 
+    # Telemetry: the processing run this upload starts (fail-open; recording_id = the job).
+    run = await telemetry.start_run(
+        tenant_id=claims.tid,
+        recording_id=job_id,
+        kind="initial",
+        trigger="user",
+        created_by=claims.sub,
+        audio_duration_seconds=facts.duration_ms / 1000 if facts.duration_ms else None,
+    )
+
+    if run is not None:
+        _record_submission_spans(
+            run,
+            facts=facts,
+            capture_context=capture_context,
+            received_at=request_received_at.get(),
+            probe=(probe_started, probe_finished),
+            stored_at=stored_at,
+        )
+    queue_depth = await _queue_depth(state) if run is not None else None
+
     queue_payload = JobEnqueuePayload(
         job_id=job_id,
         tenant_id=claims.tid,
@@ -383,6 +410,8 @@ async def submit_job(
         language=language,
         model="large-v3",
         requester_sub=claims.sub,
+        queue_depth_at_enqueue=queue_depth,
+        **telemetry.inject(run),
     )
     try:
         await state.queue_producer.send(
@@ -413,6 +442,14 @@ async def submit_job(
             )
         _uploads_counter.add(1, {"status": "rejected"})
         _jobs_counter.add(1, {"status": "failed"})
+        if run is not None:
+            await telemetry.finish_run(
+                run,
+                result_stored=False,
+                status="failed",
+                error_category="queue",
+                record_context_end=False,
+            )
         http_exc = HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
@@ -1786,6 +1823,19 @@ async def rediarize(
         code = 429 if claim.refused == "rediarize_limit" else 409
         raise _problem(code, claim.refused, _REDIARIZE_REFUSALS[claim.refused])
 
+    # Telemetry (sprint 5): a re-labelling is a `reprocess` run of the recording, scope
+    # diarization; its id is the request's, so a redelivery reuses it.
+    duration_ms = await _audio_duration_ms(state, claims.tid, claim.audio_id)
+    run = await telemetry.start_run(
+        tenant_id=claims.tid,
+        recording_id=job_id,
+        kind="reprocess",
+        reprocess_scope="diarization",
+        trigger="user",
+        created_by=claims.sub,
+        audio_duration_seconds=duration_ms / 1000 if duration_ms else None,
+        run_id=claim.request_id,
+    )
     queue_payload = JobEnqueuePayload(
         job_id=job_id,
         tenant_id=claims.tid,
@@ -1798,6 +1848,7 @@ async def rediarize(
         target_rev=claim.target_rev,
         rediarize_id=claim.request_id,
         requester_sub=claims.sub,
+        **telemetry.inject(run),
     )
     try:
         await state.queue_producer.send(
@@ -1818,6 +1869,11 @@ async def rediarize(
         async with tenant_connection(state.app_pool, claims.tid) as conn:
             await repository.release_rediarize_claim(conn, job_id=job_id, claim=claim)
         _rediarize_requests_counter.add(1, {"outcome": "enqueue_failed"})
+        if run is not None:
+            await telemetry.finish_run(
+                run, result_stored=False, status="failed", error_category="queue",
+                record_context_end=False,
+            )  # fmt: skip
         raise _problem(
             503, "enqueue_failed", "speaker re-labelling could not be queued; try again"
         ) from exc
@@ -1998,3 +2054,82 @@ def _header_to_json(header: object) -> dict[str, str | int]:
     from storage.object_store import header_metadata_for_row
 
     return header_metadata_for_row(header)  # type: ignore[arg-type]
+
+
+async def _audio_duration_ms(state: Any, tenant_id: UUID, audio_id: UUID | None) -> int | None:
+    """The recording's length for a re-run's telemetry; ``None`` when it cannot be read
+    (telemetry never fails the request)."""
+    try:
+        async with tenant_connection(state.app_pool, tenant_id) as conn:
+            value = await conn.fetchval(
+                "SELECT duration_ms FROM audio_files WHERE id = $1", audio_id
+            )
+    except Exception:  # noqa: BLE001
+        return None
+    return int(value) if value else None
+
+
+# ── Telemetry (telemetry sprint 2): what the server knew at submission ─────
+
+
+def _record_submission_spans(
+    run: telemetry.RunRef,
+    *,
+    facts: Any,
+    capture_context: dict[str, Any],
+    received_at: datetime | None,
+    probe: tuple[datetime, datetime],
+    stored_at: datetime,
+) -> None:
+    """``capture_input`` (the server's probe of the file) and ``upload`` (request arrival →
+    ciphertext stored). One multipart request: one chunk, nothing resumable, no re-sent chunks."""
+    duration = facts.duration_ms / 1000 if facts.duration_ms else None
+    attrs: dict[str, Any] = {
+        "audio_duration_seconds": duration,
+        "format": facts.codec or facts.mime_type,
+        "sample_rate_hz": facts.sample_rate_hz,
+        "channels": facts.channels,
+        "file_size_bytes": facts.size_bytes,
+        "capture_mode": f"{capture_context.get('source') or 'unknown'}:"
+        f"{capture_context.get('channel_layout') or 'mono'}",
+        "client": capture_context.get("client"),
+        "mime_type": facts.mime_type,
+    }
+    telemetry.record_span(
+        "capture_input",
+        "asr.submit.probe",
+        start_wall=probe[0],
+        end_wall=probe[1],
+        attributes={k: v for k, v in attrs.items() if v is not None},
+        reasons={k: "unavailable" for k, v in attrs.items() if v is None},
+        clock_source="wall",
+        run=run,
+        attempt=1,
+    )
+    telemetry.record_span(
+        "upload",
+        "asr.submit.upload",
+        start_wall=received_at,
+        end_wall=stored_at,
+        attributes={"bytes": facts.size_bytes, "chunks": 1, "retries": 0, "resumed": False},
+        reasons={} if received_at else {"request_received_at": "unavailable"},
+        clock_source="wall",
+        run=run,
+        attempt=1,
+    )
+
+
+async def _queue_depth(state: Any) -> int | None:
+    """Entries the worker group has not been handed yet (XINFO GROUPS ``lag``); None when the
+    broker does not say (Redis < 7) or the call fails. Never delays the submission by > 0.2 s."""
+    try:
+        groups = await asyncio.wait_for(state.redis.xinfo_groups(settings.asr_jobs_stream), 0.2)
+    except Exception:  # noqa: BLE001 — telemetry is best-effort
+        return None
+    for group in groups or []:
+        name = group.get("name")
+        name = name.decode() if isinstance(name, bytes) else name
+        if name == settings.asr_jobs_group:
+            lag = group.get("lag")
+            return int(lag) if isinstance(lag, int) and lag >= 0 else None
+    return None

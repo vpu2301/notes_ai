@@ -235,10 +235,6 @@ def information_tokens(text: str, language: str) -> list[str]:
     return out
 
 
-def information_score(text: str, language: str) -> int:
-    return len(information_tokens(text, language))
-
-
 def carries_information(
     text: str, language: str, *, short_ok: bool = False, has_date: bool = False
 ) -> bool:

@@ -96,14 +96,6 @@ _FAMILY_OF_RECORDING: Final[dict[str, str]] = {
     "voice_memo": "memo",
     "presentation_demo": "broadcast",
 }
-_RECORDING_OF_MEETING: Final[dict[str, str]] = {
-    "auto": "meeting",
-    "team": "meeting",
-    "client": "client_call",
-    "sales": "sales_call",
-    "one_on_one": "one_on_one",
-    "interview": "interview",
-}
 
 _BY_TYPE: Final[dict[str, Family]] = {f.meeting_type: f for f in FAMILIES}
 FALLBACK: Final[Family] = _BY_TYPE["auto"]
@@ -125,11 +117,6 @@ def family_for_template(template_code: str | None) -> Family:
 def family_for_recording_type(recording_type: str | None) -> Family:
     """The family of a recording of this type."""
     return _BY_TYPE.get(_FAMILY_OF_RECORDING.get(recording_type or "", "auto"), FALLBACK)
-
-
-def recording_type_for_meeting_type(meeting_type: str | None) -> str:
-    """The author's meeting type as a recording type (`team` is a meeting)."""
-    return _RECORDING_OF_MEETING.get(meeting_type or "auto", "meeting")
 
 
 def detected_value(recording_type: str) -> str:

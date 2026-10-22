@@ -40,7 +40,6 @@ enum DS {
 
     // Accent family (moss)
     static let accent       = Color.ds("4f7a5e", "8fbf9c")
-    static let accent2      = Color.ds("3f6650", "a9d3b4")
     static let accentSoft   = Color.ds("4f7a5e", "8fbf9c", lightAlpha: 0.11, darkAlpha: 0.14)
     static let accentText   = Color.ds("3f6650", "a9d3b4")
     static let accentFill   = Color.ds("4f7a5e", "8fbf9c")
@@ -155,17 +154,13 @@ extension Font {
     static func dsIcon(_ size: CGFloat, _ weight: Font.Weight = .medium) -> Font {
         .system(size: size, weight: weight)
     }
-    static let dsIconSm = Font.dsIcon(11)
     static let dsIconMd = Font.dsIcon(12)
     static let dsIconLg = Font.dsIcon(13)
 
-    static let dsTitle   = Font.dsDisplay(24)
     static let dsDoc     = Font.dsDisplay(27)
-    static let dsH2      = Font.dsDisplay(17)
     static let dsBody    = Font.ds(13.5)
     /// The note document's body — see `DS.docText`.
     static let dsDocBody = Font.ds(DS.docText)
-    static let dsUI      = Font.ds(13, .medium)
     static let dsMeta    = Font.ds(11.5)
     static let dsLabel   = Font.ds(10.5, .semibold)
 }
@@ -200,14 +195,6 @@ enum ThemePref: String, CaseIterable, Identifiable {
     case light, system, dark
 
     var id: String { rawValue }
-
-    var colorScheme: ColorScheme? {
-        switch self {
-        case .light: return .light
-        case .dark: return .dark
-        case .system: return nil
-        }
-    }
 
     var symbol: String {
         switch self {
@@ -292,48 +279,6 @@ struct DSDots: View {
         )
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-    }
-}
-
-/// The search box (`.search`): magnifier, hairline, clear button.
-struct DSSearchField: View {
-    @Binding var text: String
-    var placeholder = "Search"
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(DS.muted)
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.plain)
-                .font(.ds(12.5))
-                .foregroundStyle(DS.text1)
-                .focused($focused)
-            if !text.isEmpty {
-                Button {
-                    text = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.dsIcon(11, .regular))
-                        .foregroundStyle(DS.muted)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, 9)
-        .frame(height: 30)
-        .background(
-            RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
-                .fill(focused ? DS.surface : DS.surface.opacity(0.7))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: DS.radius, style: .continuous)
-                .strokeBorder(focused ? DS.text3 : DS.line, lineWidth: focused ? 1 : DS.hairline)
-        )
-        .animation(.easeOut(duration: 0.12), value: focused)
     }
 }
 
@@ -670,29 +615,6 @@ struct DSSectionLabel: View {
     }
 }
 
-/// Keyboard hint (`kbd`).
-struct DSKbd: View {
-    let text: String
-
-    init(_ text: String) { self.text = text }
-
-    var body: some View {
-        Text(text)
-            .font(.dsMono(10.5))
-            .foregroundStyle(DS.text2)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(
-                RoundedRectangle(cornerRadius: DS.radiusXs, style: .continuous)
-                    .fill(DS.surface2)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.radiusXs, style: .continuous)
-                    .strokeBorder(DS.line, lineWidth: DS.hairline)
-            )
-    }
-}
-
 /// Soft-tinted status pill (`.chip`).
 struct DSChip: View {
     let text: String
@@ -800,28 +722,6 @@ extension NoteStatus {
         case .draft: return DS.surface2
         case .finalized: return DS.okSoft
         case .amended: return DS.indigoSoft
-        case .cancelled: return DS.warnSoft
-        }
-    }
-}
-
-extension JobStatus {
-    var tint: Color {
-        switch self {
-        case .queued: return DS.muted
-        case .running: return DS.info
-        case .complete: return DS.ok
-        case .failed: return DS.rec
-        case .cancelled: return DS.warn
-        }
-    }
-
-    var soft: Color {
-        switch self {
-        case .queued: return DS.surface2
-        case .running: return DS.infoSoft
-        case .complete: return DS.okSoft
-        case .failed: return DS.recSoft
         case .cancelled: return DS.warnSoft
         }
     }

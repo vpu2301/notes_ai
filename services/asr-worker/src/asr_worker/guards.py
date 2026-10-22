@@ -44,19 +44,36 @@ _artefact_total = _meter.create_counter(
 LOOP_MIN_N = 2
 LOOP_MAX_N = 6
 KEEP_REPETITIONS = 2
-# A3 T2 — the decoder's stock outro lines ("Thank you for watching!"), per language: cut when
-# the decoder itself doubts the speech (no_speech_prob) OR a gap of at least this long
-# precedes the segment — a real "thanks for watching" spoken mid-speech, with no gap and a
-# confident decoder, stays. A segment is an outro when its normalised text is one of these
-# or starts with one and has at most OUTRO_MAX_TOKENS tokens.
-STOCK_OUTROS: dict[str, tuple[str, ...]] = {
-    "en": ("thank you for watching", "thanks for watching", "subscribe"),
-    "de": ("danke fürs zuschauen", "untertitel von", "untertitelung"),
-    "uk": ("дякую за перегляд", "підпишіться"),
+# A3 T2 / S1 — the decoder's stock credit and outro lines ("Untertitelung des ZDF für funk,
+# 2017", "Thank you for watching!"), per language, as normalised prefixes. A segment starting
+# with one is cut when it has at most STOCK_MAX_TOKENS tokens, the decoder doubts the speech
+# (no_speech_prob) or a gap of at least STOCK_GAP_MS precedes it; a longer segment loses only
+# the credit span. A real sentence that merely starts this way, long, confident and without a
+# gap, stays.
+STOCK_LINES: dict[str, tuple[str, ...]] = {
+    "de": (
+        "untertitelung des zdf",
+        "untertitel im auftrag des zdf",
+        "untertitelung",
+        "untertitel von",
+        "copyright wdr",
+        "danke fürs zuschauen",
+        "vielen dank fürs zuschauen",
+        "abonniert",
+    ),
+    "en": (
+        "thank you for watching",
+        "thanks for watching",
+        "subscribe to",
+        "subtitles by",
+        "captions by",
+        "transcribed by",
+    ),
+    "uk": ("дякую за перегляд", "підпишіться", "субтитри"),
 }
-OUTRO_GAP_MS = 3_000
-OUTRO_NO_SPEECH = 0.5
-OUTRO_MAX_TOKENS = 6
+STOCK_GAP_MS = 3_000
+STOCK_NO_SPEECH = 0.5
+STOCK_MAX_TOKENS = 12
 # Dropped before grams are compared (B3 T3): a drifting loop swaps these ("das" / "der").
 _ARTICLES = frozenset(
     [
@@ -165,18 +182,27 @@ def loop_cut(
     return None
 
 
-def is_stock_outro(text: str, language: str | None) -> bool:
-    """True when ``text`` is a stock outro line of ``language`` (every language when None)."""
-    norm = _norm(text)
-    if not norm:
-        return False
-    tables = [STOCK_OUTROS[language]] if language in STOCK_OUTROS else list(STOCK_OUTROS.values())
-    for phrases in tables:
-        for phrase in phrases:
-            key = _norm(phrase)
-            if norm == key or (norm.startswith(key) and len(norm.split()) <= OUTRO_MAX_TOKENS):
-                return True
-    return False
+def stock_line(tokens: Sequence[str], language: str | None) -> tuple[str, int | None] | None:
+    """The stock line ``tokens`` start with (every language when None), as
+    ``<language>:<index>`` into STOCK_LINES, and how many leading tokens are the credit:
+    the prefix, run on to the first token ending a sentence or a year ("… für funk, 2017")
+    within STOCK_MAX_TOKENS; None when no such end shows ("Thank you for watching this
+    highly anticipated world debut …" is a sentence, not a credit)."""
+    norm = [_norm(t) for t in tokens]
+    languages = [language] if language in STOCK_LINES else list(STOCK_LINES)
+    candidates = [(f"{lang}:{k}", p) for lang in languages for k, p in enumerate(STOCK_LINES[lang])]
+    # Longest first, so "untertitelung des zdf" is reported rather than "untertitelung".
+    for ident, prefix in sorted(candidates, key=lambda c: len(c[1]), reverse=True):
+        words = prefix.split()
+        if norm[: len(words)] != words:
+            continue
+        for k in range(len(words) - 1, min(len(tokens), STOCK_MAX_TOKENS)):
+            if tokens[k].rstrip().endswith((".", "!", "?")) or (
+                k >= len(words) and len(norm[k]) == 4 and norm[k].isdigit()
+            ):
+                return ident, k + 1
+        return ident, None
+    return None
 
 
 def _artefact_id(phrase: object) -> str:
@@ -219,7 +245,7 @@ def apply(output: TranscriptionOutput, speech: Sequence[SpeechSegment]) -> GateR
     previous_norm: str | None = None
     same_run = 0
     previous_end: int | None = None
-    for seg in output.segments:
+    for index, seg in enumerate(output.segments):
         d = _diag_for(seg, diags)
         share = speech_share(seg.start_ms, seg.end_ms, speech)
         nonspeech = share < settings.asr_gate_speech_share
@@ -234,17 +260,50 @@ def apply(output: TranscriptionOutput, speech: Sequence[SpeechSegment]) -> GateR
             if value is None:
                 unavailable[name] = unavailable.get(name, 0) + 1
 
-        # A3 T2 — a stock outro the decoder writes over the credits: cut when the decoder
-        # doubts the speech or a gap of OUTRO_GAP_MS precedes it; spoken mid-speech it stays.
+        # A3 T2 / S1 — a stock credit line the decoder writes over silence or music.
         gap_before = seg.start_ms - previous_end if previous_end is not None else seg.start_ms
         previous_end = max(seg.end_ms, seg.start_ms)
-        if is_stock_outro(seg.text, seg.language or output.language) and (
-            (no_speech is not None and no_speech >= OUTRO_NO_SPEECH) or gap_before >= OUTRO_GAP_MS
+        tokens = [w.text for w in seg.words] if seg.words else seg.text.split()
+        stock = stock_line(tokens, seg.language or output.language)
+        whole = stock is not None and len(tokens) <= STOCK_MAX_TOKENS
+        if stock is not None and (
+            whole
+            or (
+                stock[1] is not None
+                and (
+                    (no_speech is not None and no_speech >= STOCK_NO_SPEECH)
+                    or gap_before >= STOCK_GAP_MS
+                )
+            )
         ):
-            record(seg, "artefact_outro", d, share)
-            if not enabled:
-                out_segments.append(seg)
-            continue
+            ident, span = stock
+            if whole or span is None or span >= len(tokens):
+                record(seg, "artefact_stock_line", d, share, segment_index=index, artefact=ident)
+                if not enabled:
+                    out_segments.append(seg)
+                continue
+            # Real speech follows the credit: only the credit's tokens go, timings unchanged.
+            if seg.words:
+                credit_end = seg.words[span - 1].end_ms
+                trimmed = seg.model_copy(
+                    update={
+                        "words": seg.words[span:],
+                        "text": " ".join(w.text for w in seg.words[span:]),
+                    }
+                )
+            else:
+                credit_end = seg.start_ms
+                trimmed = seg.model_copy(update={"text": " ".join(tokens[span:])})
+            record(
+                seg.model_copy(update={"end_ms": credit_end}),
+                "artefact_stock_line",
+                d,
+                share,
+                segment_index=index,
+                artefact=ident,
+            )
+            if enabled:
+                seg = trimmed
 
         # T3
         phrase = match_artefact(seg.text)
@@ -297,7 +356,7 @@ def apply(output: TranscriptionOutput, speech: Sequence[SpeechSegment]) -> GateR
         same_run = same_run + 1 if norm and norm == previous_norm else 1
         previous_norm = norm
         if same_run > KEEP_REPETITIONS and _repeats_ahead(
-            output.segments, seg, settings.asr_gate_loop_repeats
+            output.segments, output.segments[index], settings.asr_gate_loop_repeats
         ):
             record(seg, "loop", d, share)
             loop_ranges.append((seg.start_ms, seg.end_ms))

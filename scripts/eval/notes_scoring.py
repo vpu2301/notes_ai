@@ -126,8 +126,6 @@ def best_match(
 
 # ── Support: does what a line says rest on what it cites? ───────────
 
-# The engine's own per-language threshold.
-SUPPORT_THRESHOLD = text_rules.LINE_SUPPORT_DEFAULT
 REDUNDANT_JACCARD = 0.6
 # Lines the metrics look at (headings and the transcript note are structure).
 _NOT_CONTENT = frozenset({"heading", "note"})
@@ -639,37 +637,6 @@ def score_sq2(meeting: dict[str, Any], produced: dict[str, Any]) -> dict[str, An
         "one_bullet_sections": sum(1 for n in points.values() if n < MIN_SECTION_BULLETS),
         "near_empty": (int(cited_lines < NEAR_EMPTY_LINES) if span >= NEAR_EMPTY_FROM_MS else None),
     }
-
-
-def sq2_gates(
-    summary: dict[str, Any],
-    *,
-    baseline_unsupported: float | None = None,
-    staging: bool = False,
-) -> dict[str, bool]:
-    """Coverage acceptance on a corpus: recall >= 0.70, worst / best third >= 0.80, sections
-    in band on >= 90 %, near-empty <= 10 %, unsupported no higher than the baseline arm;
-    time (<= 300 s per meeting-hour p95) only on staging.
-    """
-    out: dict[str, bool] = {}
-    checks = (
-        ("sq2_key_fact_recall_70pct", "key_fact_recall", lambda v: v >= 0.70),
-        ("sq2_by_third_ratio_80pct", "by_third_ratio", lambda v: v >= 0.80),
-        ("sq2_sections_count_ok_90pct", "sections_count_ok", lambda v: v >= 0.90),
-        ("sq2_near_empty_10pct", "near_empty_rate", lambda v: v <= 0.10),
-        ("sq2_no_one_bullet_section", "one_bullet_sections", lambda v: v == 0),
-    )
-    for name, key, ok in checks:
-        value = summary.get(key)
-        if value is not None:
-            out[name] = bool(ok(value))
-    unsupported = summary.get("unsupported_rate")
-    if baseline_unsupported is not None and unsupported is not None:
-        out["sq2_unsupported_not_above_sq1"] = unsupported <= baseline_unsupported + 1e-9
-    p95 = summary.get("seconds_per_meeting_hour_p95")
-    if staging and p95 is not None:
-        out["sq2_p95_seconds_per_meeting_hour_300"] = p95 <= 300
-    return out
 
 
 # ── Statements, not quotes ──────────────────────────────────────

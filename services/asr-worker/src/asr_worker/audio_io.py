@@ -68,8 +68,7 @@ async def decode_to_pcm(
         # Read-only view over ffmpeg's buffer; no second copy.
         stereo = np.frombuffer(stdout, dtype=np.int16)
         return stereo[: len(stereo) // 2 * 2].reshape(-1, 2)
-    pcm = np.frombuffer(stdout, dtype=np.float32).copy()
-    return pcm
+    return np.frombuffer(stdout, dtype=np.float32).copy()
 
 
 _MIX_BLOCK = 16_000 * 60  # one minute at a time: no full-length temporaries

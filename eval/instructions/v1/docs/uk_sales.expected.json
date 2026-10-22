@@ -1,9 +1,0 @@
-{
- "quote_children": false,
- "terminology": [
-  {
-   "use": "клієнт",
-   "instead_of": "замовник"
-  }
- ]
-}

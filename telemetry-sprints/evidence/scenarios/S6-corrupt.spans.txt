@@ -1,0 +1,11 @@
+upload · asr.submit.upload · ok · 2026-10-22T13:51:59.998281Z → 2026-10-22T13:52:00.523924Z
+capture_input · asr.submit.probe · ok · 2026-10-22T13:52:00.053261Z → 2026-10-22T13:52:00.392403Z
+other · worker_job · error · 2026-10-22T13:52:21.545203Z → 2026-10-22T13:52:25.727940Z
+  queue · asr.queue_wait · ok · 2026-10-22T13:52:00.550000Z → 2026-10-22T13:52:21.545932Z
+  audio_prep · asr.audio_prep · ok · 2026-10-22T13:52:21.561369Z → 2026-10-22T13:52:22.513610Z
+  model_init · asr.model · ok · 2026-10-22T13:52:22.517816Z → 2026-10-22T13:52:22.518213Z
+  model_init · vad.model · ok · 2026-10-22T13:52:22.518382Z → 2026-10-22T13:52:25.622333Z
+  vad · vad.speech_runs · ok · 2026-10-22T13:52:25.622758Z → 2026-10-22T13:52:25.715492Z
+  postprocess_cleanup · asr.guards · ok · 2026-10-22T13:52:25.716087Z → 2026-10-22T13:52:25.716163Z
+  postprocess_cleanup · asr.prompt_echo · ok · 2026-10-22T13:52:25.716266Z → 2026-10-22T13:52:25.716313Z
+  postprocess_cleanup · asr.noise_markers · ok · 2026-10-22T13:52:25.716833Z → 2026-10-22T13:52:25.716879Z

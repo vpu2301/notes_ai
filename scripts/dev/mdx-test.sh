@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # mdx-test.sh: exercise the backend end to end against the local dev stack.
 #   bash scripts/dev/mdx-test.sh <command> [args] | help
-# Env overrides: KEYCLOAK_URL AUTH_URL ASR_URL DICTATION_URL NLP_URL NOTE_URL
-#   AUTOCOMPLETE_URL NOTIFICATION_URL GENERATION_URL USERNAME PASSWORD REALM CLIENT_ID
+# Env overrides: KEYCLOAK_URL AUTH_URL ASR_URL NLP_URL NOTE_URL
+#   NOTIFICATION_URL GENERATION_URL USERNAME PASSWORD REALM CLIENT_ID
 set -uo pipefail
 
 # ── Config (override via env) ─────────────────────────────────────────────
@@ -14,11 +14,9 @@ PASSWORD="${PASSWORD:-dev-password}"
 
 AUTH_URL="${AUTH_URL:-http://localhost:8000}"          # make run-auth-service
 ASR_URL="${ASR_URL:-http://localhost:8001}"            # compose dev overlay
-DICTATION_URL="${DICTATION_URL:-http://localhost:8002}"
 NOTIFICATION_URL="${NOTIFICATION_URL:-http://localhost:8004}"
 NLP_URL="${NLP_URL:-http://localhost:8005}"
 NOTE_URL="${NOTE_URL:-http://localhost:8006}"
-AUTOCOMPLETE_URL="${AUTOCOMPLETE_URL:-http://localhost:8007}"
 GENERATION_URL="${GENERATION_URL:-http://localhost:8009}"
 
 JAEGER_URL="${JAEGER_URL:-http://localhost:16686}"
@@ -104,9 +102,9 @@ cmd_infra() {
 cmd_health() {
   info "Service liveness / readiness (skipped = not started)"
   for pair in \
-    "auth-service|$AUTH_URL" "asr-service|$ASR_URL" "dictation-service|$DICTATION_URL" \
+    "auth-service|$AUTH_URL" "asr-service|$ASR_URL" \
     "nlp-service|$NLP_URL" "note-service|$NOTE_URL" \
-    "notification-service|$NOTIFICATION_URL" "autocomplete-service|$AUTOCOMPLETE_URL" \
+    "notification-service|$NOTIFICATION_URL" \
     "generation-service|$GENERATION_URL"; do
     local name=${pair%%|*} url=${pair##*|}
     check_get "$name /healthz" "$url/healthz" '"status":"ok"'
@@ -170,19 +168,6 @@ cmd_nlp() {
   printf '%s\n' "$resp" | python3 -m json.tool 2>/dev/null && pass "pipeline returned" || fail "pipeline error: $resp"
 }
 
-cmd_autocomplete() {
-  need python3
-  info "autocomplete-service suggest"
-  local t code resp
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 "$AUTOCOMPLETE_URL/healthz" 2>/dev/null)
-  [[ "$code" == "000" ]] && { skip "autocomplete-service not reachable ($AUTOCOMPLETE_URL)"; return; }
-  t=$(get_token) || return 1
-  resp=$(curl -s --max-time 8 -X POST "$AUTOCOMPLETE_URL/autocomplete/suggest" \
-    -H "Authorization: Bearer $t" -H "Content-Type: application/json" \
-    -d '{"prefix":"meet","language":"en","limit":5}')
-  printf '%s\n' "$resp" | python3 -m json.tool 2>/dev/null && pass "suggest returned" || fail "suggest error: $resp"
-}
-
 cmd_all() {
   info "── Infrastructure ──"; cmd_infra
   echo; info "── Service health ──"; cmd_health
@@ -216,10 +201,9 @@ ${B}Auth:${X}
 ${B}Per-service flows:${X}
   asr           Batch ASR smoke (needs ffmpeg)
   nlp           Run the NLP pipeline on one segment
-  autocomplete  Autocomplete suggest
 
 ${B}Env overrides:${X} KEYCLOAK_URL AUTH_URL ASR_URL NLP_URL NOTE_URL
-  AUTOCOMPLETE_URL NOTIFICATION_URL GENERATION_URL
+  NOTIFICATION_URL GENERATION_URL
   USERNAME PASSWORD REALM CLIENT_ID
 EOF
 }
@@ -237,7 +221,6 @@ main() {
     auth)         cmd_auth; summary ;;
     asr)          cmd_asr ;;
     nlp)          cmd_nlp; summary ;;
-    autocomplete) cmd_autocomplete; summary ;;
     help|-h|--help) usage ;;
     *)            echo "${R}unknown command: $cmd${X}"; echo; usage; exit 2 ;;
   esac

@@ -26,7 +26,6 @@ CODE: Final = "code"
 
 MONTHLY: Final = "monthly"
 YEARLY: Final = "yearly"
-INTERVALS: Final = (MONTHLY, YEARLY)
 
 
 @dataclass(frozen=True)

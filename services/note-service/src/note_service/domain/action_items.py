@@ -312,12 +312,6 @@ class RulesExtractor:
         return parse_action_lines(text, anchor=anchor)
 
 
-def build_extractor(kind: str) -> ActionItemExtractor:
-    if kind != "rules":
-        raise ValueError(f"unknown action item extractor {kind!r}")
-    return RulesExtractor()
-
-
 # ── materialisation ──────────────────────────────────────────────────
 
 

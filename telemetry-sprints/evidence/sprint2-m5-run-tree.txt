@@ -1,0 +1,57 @@
+run 2b11588e-1d32-4fdb-9f28-24f09719780f  status=succeeded  attempts=1  audio=90.0s
+  processing_wall_seconds=169.66  rtf=1.885  speedup=0.53  asr_audio_processed_seconds(Σ)=86.08  overhead=0.393353s
+  context: Linux aarch64 None mem=14636097536 mode=container asr={"value": "cpu", "observation": "observed"} diar={"value": "cpu", "observation": "configured"} commit=None
+  - upload                 asr.submit.upload          +  -1.08s    1.058s  [ok] bytes=1721950, chunks=1, resumed=False, retries=0
+  - capture_input          asr.submit.probe           +  -1.02s    0.583s  [ok] client=macos, format=flac, channels=1, mime_type=audio/flac, capture_mode=upload:mono, sample_rate_hz=16000, file_size_bytes=1721950
+  - other                  worker_job                 +   0.06s  169.599s  [ok] job_status=complete
+    - queue                  asr.queue_wait             +   0.01s    0.048s  [ok] queue_name=asr:jobs, started_at=2026-10-22T11:37:29.457229+00:00, enqueued_at=2026-10-22T11:37:29.409000+00:00, queue_wait_seconds=0.0482, queue_depth_at_enqueue=0
+    - audio_prep             asr.audio_prep             +   0.08s    1.184s  [ok] bytes=1721950, channel_layout=mono, decode_seconds=0.7803, decrypt_seconds=None, resample_seconds=None, retrieve_seconds=0.4024, source_sample_rate_hz=None
+    - model_init             asr.model                  +   1.27s    0.002s  [ok] state=warm, backend=inproc_cpu_asr, model_kind=asr, model_name=/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478, compute_type=int8, load_seconds=3.5e-05, quantization=int8
+    - model_init             vad.model                  +   1.27s    3.108s  [ok] state=cold, model_kind=vad, model_name=silero-vad, compute_type=None, load_seconds=3.107836, quantization=None, model_revision=None
+    - vad                    vad.speech_runs            +   4.38s    3.153s  [ok] backend=silero, run_count=5, threshold=0.5, truncated=False, floor_used=False, speech_seconds=86.08, duration_seconds=3.154
+    - language_detection     lid.recording              +   7.53s   10.018s  [ok] model=/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478, call_count=1, audio_seconds=86.08, decided_language=de, duration_seconds=10.0166
+    - language_detection     lid.run                    +  17.56s    9.418s  [ok] model=/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478, call_count=1, audio_seconds=9.406, decided_language=de, duration_seconds=9.4174
+    - language_detection     lid.run                    +  26.99s    9.315s  [ok] model=/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478, call_count=1, audio_seconds=19.196, decided_language=de, duration_seconds=9.3128
+    - language_detection     lid.run                    +  36.31s    8.536s  [ok] model=/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478, call_count=1, audio_seconds=19.196, decided_language=de, duration_seconds=8.5358
+    - language_detection     lid.run                    +  44.85s    8.339s  [ok] model=/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478, call_count=1, audio_seconds=19.196, decided_language=de, duration_seconds=8.3389
+    - language_detection     lid.run                    +  53.19s    8.371s  [ok] model=/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478, call_count=1, audio_seconds=19.086, decided_language=de, duration_seconds=8.3703
+    - asr_primary            asr.transcribe_runs        +  61.57s   93.311s  [ok] model=/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478, backend=inproc_cpu_asr, beam_size=5, truncated=False, word_count=205, chunk_count=5, compute_type=int8
+      - asr_primary            asr.chunk                  +  61.58s   14.434s  [ok] model=/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478, backend=faster_whisper, beam_size=5, word_count=25, chunk_count=1, compute_type=int8, wall_seconds=14.4332
+      - asr_primary            asr.chunk                  +  76.01s   19.214s  [ok] model=/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478, backend=faster_whisper, beam_size=5, word_count=45, chunk_count=1, compute_type=int8, wall_seconds=19.2126
+      - asr_primary            asr.chunk                  +  95.23s   19.719s  [ok] model=/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478, backend=faster_whisper, beam_size=5, word_count=45, chunk_count=1, compute_type=int8, wall_seconds=19.7193
+      - asr_primary            asr.chunk                  + 114.95s   19.399s  [ok] model=/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478, backend=faster_whisper, beam_size=5, word_count=45, chunk_count=1, compute_type=int8, wall_seconds=19.3971
+      - asr_primary            asr.chunk                  + 134.36s   20.512s  [ok] model=/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478, backend=faster_whisper, beam_size=5, word_count=45, chunk_count=1, compute_type=int8, wall_seconds=20.5109
+    - postprocess_cleanup    asr.guards                 + 154.88s    0.032s  [ok] items=0, segments_in=18, duration_seconds=0.0319
+    - postprocess_cleanup    asr.prompt_echo            + 154.92s    0.001s  [ok] items=0, segments_in=18, duration_seconds=0.0009
+    - postprocess_cleanup    asr.noise_markers          + 154.93s    0.000s  [ok] items=0, segments_in=18, duration_seconds=0.0004
+    - diarization_load       diarization.load           + 154.93s    3.525s  [ok] model=spkrec-ecapa-voxceleb@0f99f2d, state=cold, backend=legacy-ecapa-ahc, load_seconds=3.5249, audio_seconds=90.0, speakers_detected=None, unknown_speaker_share=None
+    - diarization_infer      diarization.infer          + 158.45s   11.143s  [ok] model=spkrec-ecapa-voxceleb@0f99f2d, layout=mono, backend=legacy-ecapa-ahc, audio_seconds=90.0, infer_seconds=11.1425, speakers_detected=1, unknown_speaker_share=0.0
+    - postprocess_attribute  asr.speaker_attribution    + 169.60s    0.003s  [ok] items=18, duration_seconds=0.0033
+    - postprocess_align      asr.align                  + 169.60s    0.000s  [skipped] items=None, skip_reason=decoder_word_timestamps, duration_seconds=None
+    - persist                asr.persist                + 169.60s    0.048s  [ok] bytes=25727, items=18, duration_seconds=0.0479
+  - other                  worker_job                 + 169.67s    0.003s  [ok] job_status=complete
+    - queue                  asr.queue_wait             +   0.01s  169.662s  [ok] queue_name=asr:jobs, started_at=2026-10-22T11:40:19.070773+00:00, enqueued_at=2026-10-22T11:37:29.409000+00:00, queue_wait_seconds=169.6618, queue_depth_at_enqueue=0
+  - other                  worker_job                 + 169.69s    0.003s  [ok] job_status=complete
+    - queue                  asr.queue_wait             +   0.01s  169.676s  [ok] queue_name=asr:jobs, started_at=2026-10-22T11:40:19.085407+00:00, enqueued_at=2026-10-22T11:37:29.409000+00:00, queue_wait_seconds=169.6764, queue_depth_at_enqueue=0
+
+null attributes (stage.name.key → reason):
+  audio_prep.decrypt_seconds: not_supported
+  audio_prep.resample_seconds: not_supported
+  audio_prep.source_sample_rate_hz: unavailable
+  diarization_load.speakers_detected: not_applicable
+  diarization_load.unknown_speaker_share: not_applicable
+  model_init.compute_type: not_applicable
+  model_init.model_revision: unavailable
+  model_init.quantization: not_applicable
+  model_init.warmup_seconds: not_applicable
+  postprocess_align.duration_seconds: not_applicable
+  postprocess_align.items: not_applicable
+  run.time_to_notes_seconds: not_measured
+  run.time_to_speaker_labels_seconds: not_measured
+  run.time_to_transcript_seconds: not_measured
+  run.user_wait_seconds: not_measured
+  run_context.app_build: unavailable
+  run_context.app_commit: unavailable
+  run_context.chip_model: not_supported
+  run_context.container_mem_limit: unavailable
+  run_context.device_llm: not_applicable

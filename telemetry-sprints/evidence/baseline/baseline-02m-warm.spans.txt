@@ -1,0 +1,38 @@
+upload · asr.submit.upload · ok · 2026-10-22T14:57:55.060549Z → 2026-10-22T14:57:55.732688Z
+capture_input · asr.submit.probe · ok · 2026-10-22T14:57:55.244509Z → 2026-10-22T14:57:55.566633Z
+other · worker_job · ok · 2026-10-22T15:02:36.265288Z → 2026-10-22T15:06:37.744218Z
+  queue · asr.queue_wait · ok · 2026-10-22T14:57:55.763000Z → 2026-10-22T15:02:36.265330Z
+  audio_prep · asr.audio_prep · ok · 2026-10-22T15:02:36.269313Z → 2026-10-22T15:02:36.546103Z
+  model_init · asr.model · ok · 2026-10-22T15:02:36.548011Z → 2026-10-22T15:02:36.548202Z
+  model_init · vad.model · ok · 2026-10-22T15:02:36.548303Z → 2026-10-22T15:02:36.549155Z
+  vad · vad.speech_runs · ok · 2026-10-22T15:02:36.549233Z → 2026-10-22T15:02:39.889519Z
+  language_detection · lid.run · ok · 2026-10-22T15:02:39.892285Z → 2026-10-22T15:02:49.515251Z
+  language_detection · lid.run · ok · 2026-10-22T15:02:49.520899Z → 2026-10-22T15:02:58.961105Z
+  language_detection · lid.run · ok · 2026-10-22T15:02:58.965224Z → 2026-10-22T15:03:08.731760Z
+  language_detection · lid.run · ok · 2026-10-22T15:03:08.739841Z → 2026-10-22T15:03:18.446296Z
+  language_detection · lid.run · ok · 2026-10-22T15:03:18.449543Z → 2026-10-22T15:03:27.965114Z
+  language_detection · lid.run · ok · 2026-10-22T15:03:27.968263Z → 2026-10-22T15:03:37.538083Z
+  language_detection · lid.run · ok · 2026-10-22T15:03:37.543390Z → 2026-10-22T15:03:47.229874Z
+  asr_primary · asr.transcribe_runs · ok · 2026-10-22T15:03:47.230804Z → 2026-10-22T15:06:20.726210Z
+    asr_primary · asr.chunk · ok · 2026-10-22T15:03:47.233849Z → 2026-10-22T15:04:07.480741Z
+    asr_primary · asr.chunk · ok · 2026-10-22T15:04:07.484065Z → 2026-10-22T15:04:21.092771Z
+    asr_primary · asr.chunk · ok · 2026-10-22T15:04:21.097543Z → 2026-10-22T15:04:38.833564Z
+    asr_primary · asr.chunk · ok · 2026-10-22T15:04:38.836247Z → 2026-10-22T15:05:15.829561Z
+    asr_primary · asr.chunk · ok · 2026-10-22T15:05:15.835064Z → 2026-10-22T15:05:43.397270Z
+    asr_primary · asr.chunk · ok · 2026-10-22T15:05:43.406083Z → 2026-10-22T15:06:06.757395Z
+    asr_primary · asr.chunk · ok · 2026-10-22T15:06:06.775111Z → 2026-10-22T15:06:20.723888Z
+  postprocess_cleanup · asr.guards · ok · 2026-10-22T15:06:20.726742Z → 2026-10-22T15:06:20.730487Z
+  postprocess_cleanup · asr.prompt_echo · ok · 2026-10-22T15:06:20.730606Z → 2026-10-22T15:06:20.730665Z
+  postprocess_cleanup · asr.noise_markers · ok · 2026-10-22T15:06:20.734723Z → 2026-10-22T15:06:20.734809Z
+  diarization_load · diarization.load · ok · 2026-10-22T15:06:20.735302Z → 2026-10-22T15:06:20.735581Z
+  diarization_infer · diarization.infer · ok · 2026-10-22T15:06:20.735671Z → 2026-10-22T15:06:37.645155Z
+  postprocess_attribute · asr.speaker_attribution · ok · 2026-10-22T15:06:37.646692Z → 2026-10-22T15:06:37.654107Z
+  postprocess_align · asr.align · skipped · 2026-10-22T15:06:37.656558Z → 2026-10-22T15:06:37.656765Z
+  persist · asr.persist · ok · 2026-10-22T15:06:37.665387Z → 2026-10-22T15:06:37.733329Z
+other · worker_job · skipped · 2026-10-22T15:06:37.773067Z → 2026-10-22T15:06:37.779078Z
+  queue · asr.queue_wait · ok · 2026-10-22T14:57:55.763000Z → 2026-10-22T15:06:37.773169Z
+other · worker_job · skipped · 2026-10-22T15:06:37.782134Z → 2026-10-22T15:06:37.785411Z
+  queue · asr.queue_wait · ok · 2026-10-22T14:57:55.763000Z → 2026-10-22T15:06:37.782182Z
+llm_call · llm.provider_probe · ok · 2026-10-22T15:06:45.068055Z → 2026-10-22T15:06:47.083437Z
+other · notes.generate · ok · 2026-10-22T15:06:47.088697Z → 2026-10-22T15:06:53.601512Z
+  llm_call · llm.note_write · ok · 2026-10-22T15:06:47.159150Z → 2026-10-22T15:06:53.551344Z

@@ -367,6 +367,27 @@ def test_a_code_fence_around_the_note_is_structure_not_a_title() -> None:
     assert [i.text for _s, i in note.items] == ["a"]
 
 
+@pytest.mark.parametrize(
+    ("line", "heading"),
+    [
+        ("**ÜBERBLICK**", "ÜBERBLICK"),
+        ("**Überblick:**", "Überblick"),
+        ("**Überblick**:", "Überblick"),
+        ("__Mitwirkende__", "Mitwirkende"),
+    ],
+)
+def test_a_bold_only_line_is_a_level_2_heading(line: str, heading: str) -> None:
+    note = note_markdown.parse(f"# T\n\n{line}\n- a bullet\n", [])
+    assert [(s.heading, s.level) for s in note.sections] == [(heading, 2)]
+    assert [(i.kind, i.text) for _s, i in note.items] == [("bullet", "a bullet")]
+
+
+def test_bold_inside_a_line_and_hash_headings_are_unchanged() -> None:
+    note = note_markdown.parse("# T\n\n## Überblick\nDas ist **wichtig** hier\n", [])
+    assert [(s.heading, s.level) for s in note.sections] == [("Überblick", 2)]
+    assert [(i.kind, i.text) for _s, i in note.items] == [("paragraph", "Das ist **wichtig** hier")]
+
+
 def test_a_note_without_headings_is_one_section_called_note() -> None:
     note = note_markdown.parse("Just a title\n\nA paragraph the model wrote.\n\n- and a bullet", [])
     assert note.title == "Just a title" and note.unstructured is True

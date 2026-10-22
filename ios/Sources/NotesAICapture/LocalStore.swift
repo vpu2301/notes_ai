@@ -53,12 +53,6 @@ enum ScopedDefaults {
         return found
     }
 
-    /// Everything stored for one identity, across its workspaces.
-    static func scopes(ofIdentity identityId: String,
-                       in defaults: UserDefaults = .standard) -> Set<StateScope> {
-        allScopes(in: defaults).filter { $0.identityId == identityId }
-    }
-
     static func removeAll(for scope: StateScope, from defaults: UserDefaults = .standard) {
         for base in scopedKeys { defaults.removeObject(forKey: scope.key(base)) }
     }

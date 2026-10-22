@@ -9,6 +9,7 @@ from typing import Any
 import asyncpg
 import redis.asyncio as aioredis
 
+import telemetry
 from audit import AuditWriter
 from crypto import Envelope, TenantKekRepository, build_master_key_provider
 from db import create_pool
@@ -211,6 +212,13 @@ async def build_state() -> WorkerState:
         },
     )
 
+    telemetry.configure(
+        app_pool,
+        enabled=settings.telemetry_enabled,
+        retention_days=settings.telemetry_retention_days,
+        app_commit=settings.build_sha or None,
+    )
+
     return WorkerState(
         app_pool=app_pool,
         audit_writer_pool=audit_writer_pool,
@@ -231,6 +239,7 @@ async def build_state() -> WorkerState:
 
 
 async def teardown_state(state: WorkerState) -> None:
+    await telemetry.get_store().close()
     closer = getattr(state.diarizer, "close", None)
     if closer is not None:
         closer()  # the remote engine holds a connection pool

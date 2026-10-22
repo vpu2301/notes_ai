@@ -23,12 +23,7 @@ def real_name(name: str | None) -> str | None:
     return name
 
 
-_SPEAKER_WORD: Final[dict[str, str]] = {"en": "Speaker", "de": "Sprecher/in", "uk": "Спікер"}
 _SPEAKER_NUMBER: Final = re.compile(r"(?i)^(?:speaker[ _]?|sprecher(?:in)? |SPEAKER_)?(\d+)$")
-
-
-# A label as a note shows it, in any of the three languages.
-_SPEAKER_DISPLAY: Final = re.compile(r"(?i)^(?:speaker|sprecher/in|спікер) \d+$")
 
 
 def speaker_label(raw: str | None) -> str | None:
@@ -39,26 +34,6 @@ def speaker_label(raw: str | None) -> str | None:
         return None
     number = _SPEAKER_NUMBER.match(raw)
     return f"Speaker {int(number.group(1))}" if number else None
-
-
-def is_speaker_label(actor: str | None) -> bool:
-    """A canonical or localized label (``Speaker 3``, ``Sprecher/in 3``, ``Спікер 3``)."""
-    return bool(actor) and (
-        _SPEAKER_DISPLAY.match(actor.strip()) is not None
-        or _DEFAULT_SPEAKER.match(actor.strip()) is not None
-    )
-
-
-def display_actor(actor: str | None, language: str) -> str | None:
-    """The holder as written after "laut"/"according to": a real name whole (never cut
-    to its last word), a numbered label localized ("Sprecher/in 1"), else None."""
-    name = real_name(actor)
-    if name:
-        return name
-    number = _SPEAKER_NUMBER.match((actor or "").strip())
-    if number:
-        return f"{_SPEAKER_WORD.get(language, _SPEAKER_WORD['en'])} {number.group(1)}"
-    return None
 
 
 _TITLE_WORDS: Final = (

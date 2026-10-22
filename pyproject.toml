@@ -42,7 +42,6 @@ known-first-party = [
     "auth_service",
     "asr_service",
     "asr_worker",
-    "dictation_service",
     "nlp_service",
     "note_service",
     "notification_service",
@@ -61,6 +60,7 @@ known-first-party = [
     "diarization",
     "models",
     "jobs",
+    "telemetry",
     "ratelimit",
 ]
 
@@ -81,7 +81,6 @@ root_packages = [
     "auth_service",
     "asr_service",
     "asr_worker",
-    "dictation_service",
     "nlp_service",
     "note_service",
     "observability",
@@ -101,6 +100,7 @@ root_packages = [
     "diarization",
     "models",
     "jobs",
+    "telemetry",
     "ratelimit",
 ]
 
@@ -128,20 +128,6 @@ layers = [
     "asr_service.routers",
     "asr_service.domain",
     "asr_service.adapters",
-]
-
-[[tool.importlinter.contracts]]
-name = "dictation-service: routers / ws → session / inference / audio → adapters"
-type = "layers"
-layers = [
-    "dictation_service.routers",
-    "dictation_service.ws",
-    "dictation_service.session",
-    "dictation_service.diarization",
-    "dictation_service.inference",
-    "dictation_service.audio",
-    "dictation_service.protocol",
-    "dictation_service.adapters",
 ]
 
 # `pipeline.base` (the kernel) is split out below `stages`; the orchestrator
@@ -250,21 +236,19 @@ source_modules = [
     "diarization",
     "models",
     "jobs",
+    "telemetry",
     "ratelimit",
 ]
 forbidden_modules = [
     "template_service",
     "asr_service",
     "asr_worker",
-    "dictation_service",
     "nlp_service",
     "note_service",
     "notification_service",
 ]
 
 # Services are mutually independent; shared concerns live in libs/*.
-# One recorded exception: dictation-service reuses asr-worker's `WhisperEngine`
-# (coupling debt; should become a `libs/asr_inference` package).
 [[tool.importlinter.contracts]]
 name = "Services may not import other services"
 type = "independence"
@@ -272,13 +256,9 @@ modules = [
     "template_service",
     "asr_service",
     "asr_worker",
-    "dictation_service",
     "nlp_service",
     "note_service",
     "notification_service",
-]
-ignore_imports = [
-    "dictation_service.main_deps -> asr_worker.inference",
 ]
 
 # libs/models is the ONLY package allowed to know a model vendor.

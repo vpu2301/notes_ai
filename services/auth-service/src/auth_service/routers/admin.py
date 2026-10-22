@@ -31,6 +31,9 @@ from ..notifications import emit_mfa_reminder
 from .native_common import as_problem
 
 logger = logging.getLogger(__name__)
+# `platform_admin` lives on identities.platform_role, never in a workspace's role set.
+ASSIGNABLE_ROLES: frozenset[str] = KNOWN_ROLES - {"platform_admin"}
+
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 _ROLE_VALUES: frozenset[str] = frozenset({"tenant_admin", "member", "viewer", "auditor"})
@@ -537,11 +540,11 @@ async def set_user_roles(
     claims: Annotated[Claims, Depends(requires("user.manage_roles", "user"))],
 ) -> RolesResponse:
     desired = sorted(set(body.roles))
-    unknown = [r for r in desired if r not in KNOWN_ROLES]
+    unknown = [r for r in desired if r not in ASSIGNABLE_ROLES]
     if unknown:
         raise HTTPException(
             status_code=422,
-            detail=f"unknown role(s) {unknown}; must be a subset of {sorted(KNOWN_ROLES)}",
+            detail=f"unknown role(s) {unknown}; must be a subset of {sorted(ASSIGNABLE_ROLES)}",
         )
 
     state = get_state()

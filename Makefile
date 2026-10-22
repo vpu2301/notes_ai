@@ -1,4 +1,4 @@
-.PHONY: score-notes score-notes-fixtures write-and-score check-dev-build workspace-smoke meeting-quality-dashboard meeting-quality-backfill check-routing-report smoke-ios eval-asr eval-asr-synthetic eval-asr-assert eval-asr-validate eval-notes eval-notes-assert eval-notes-validate test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-dictation chaos-asr load-dictation nightly-verify weekly-speakers weekly-notes test-integration-db test-isolation run-auth-service run-autocomplete-service run-generation-service run-notification-service web-e2e web-e2e-stack
+.PHONY: score-notes score-notes-fixtures write-and-score check-dev-build workspace-smoke meeting-quality-dashboard meeting-quality-backfill check-routing-report smoke-ios eval-asr eval-asr-synthetic eval-asr-assert eval-asr-validate eval-notes eval-notes-assert eval-notes-validate test-egress check-no-vendor-import eval-smoke measure-turnaround der-eval der-grid sim-overcount check-no-eval-audio dev-model hf-endpoints secret-scan dev-up dev-down dev-nuke dev-restart dev-logs smoke smoke-test lint lint-fix typecheck typecheck-all type-check test test-cov security security-scan ci ci-with-db doctor reset-db help pre-commit-install lint-imports check-no-os-environ check-no-direct-asyncpg dev-up-asr dev-up-gpu check-no-object-storage check-no-crypto check-no-demo-envvars-in-prod check-k8s-rendered k8s-render keycloak-test keycloak-export seed migrate-up migrate-down migrate-status openapi-dump openapi-check check-rls check-identity-grants check-identity-bridge check-auth-issuer-config check-audit-insert check-alert-rules check-metric-names check-notification-pii-free run-notification-digest validate-templates prepare-ecapa prepare-pyannote chaos-asr nightly-verify weekly-speakers weekly-notes test-integration-db test-isolation run-auth-service run-generation-service run-notification-service web-e2e web-e2e-stack
 
 COMPOSE = docker compose
 COMPOSE_FILE = docker-compose.yml
@@ -64,10 +64,6 @@ run-auth-service: ## Run auth-service on :8000 for the SPA (needs dev-up + migra
 	# CORS allows the Vite dev origin (CORS_ALLOWED_ORIGINS); cookie is SameSite=lax.
 	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
 	uv run --project services/auth-service uvicorn auth_service.main:app --host 0.0.0.0 --port 8000
-
-run-autocomplete-service: ## Run autocomplete-service on :8007 (needs dev-up + migrate-up + seed)
-	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
-	uv run --project services/autocomplete-service uvicorn autocomplete_service.main:app --host 0.0.0.0 --port 8007
 
 run-generation-service: ## Run generation-service on :8009 (needs dev-up + a llama-server/Ollama backend, see ADR-0036)
 	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
@@ -178,10 +174,10 @@ lint-fix: ## Run ruff with auto-fix
 	uv run ruff check --fix .
 
 typecheck: ## Run mypy --strict over the CI-gated foundation packages (mirrors .github/workflows/ci.yml)
-	uv run --with "mypy>=1.10" mypy --strict services/_template/src/ libs/observability/src/ libs/secret/src/ libs/auth/src/ libs/db/src/ libs/audit/src/ libs/messaging/src/
+	uv run --with "mypy>=1.10" mypy --strict services/_template/src/ libs/observability/src/ libs/secret/src/ libs/auth/src/ libs/db/src/ libs/audit/src/ libs/messaging/src/ libs/telemetry/src/
 
 typecheck-all: ## Run mypy --strict over ALL packages (non-blocking; tracks feature-service typing debt)
-	uv run --with "mypy>=1.10" mypy --strict services/_template/src/ libs/models/src/ libs/jobs/src/ services/asr-service/src/ services/asr-worker/src/ services/dictation-service/src/ services/nlp-service/src/ services/note-service/src/ libs/observability/src/ libs/secret/src/ libs/auth/src/ libs/db/src/ libs/audit/src/ libs/messaging/src/ libs/crypto/src/ libs/storage/src/ libs/asr_models/src/ libs/diarization/src/ libs/template_models/src/
+	uv run --with "mypy>=1.10" mypy --strict services/_template/src/ libs/models/src/ libs/jobs/src/ services/asr-service/src/ services/asr-worker/src/  services/nlp-service/src/ services/note-service/src/ libs/observability/src/ libs/secret/src/ libs/auth/src/ libs/db/src/ libs/audit/src/ libs/messaging/src/ libs/crypto/src/ libs/storage/src/ libs/asr_models/src/ libs/diarization/src/ libs/template_models/src/
 
 type-check: typecheck ## Legacy alias of `typecheck`
 
@@ -205,18 +201,17 @@ test: ## Run pytest across services and libs
 	uv run --project libs/models pytest libs/models/tests/unit/ -v
 	uv run --project libs/jobs pytest libs/jobs/tests/unit/ -v
 	uv run --project libs/ratelimit pytest libs/ratelimit/tests/unit/ -v
+	uv run --project libs/telemetry --extra dev pytest libs/telemetry/tests/unit/ -v
 	uv run pytest tests/unit/ -v
 	uv run pytest tests/contract/ -v
 	uv run --project services/asr-service pytest services/asr-service/tests/unit/ -v
 	uv run --project services/asr-worker pytest services/asr-worker/tests/unit/ -v
-	uv run --project services/dictation-service pytest services/dictation-service/tests/unit/ -v
 	uv run --project services/nlp-service pytest services/nlp-service/tests/unit/ -v
 	uv run --project libs/template_models pytest libs/template_models/tests/unit/ -v
 	uv run --project libs/note_models pytest libs/note_models/tests/unit/ -v
 	uv run --project services/note-service pytest services/note-service/tests/unit/ -v
 	uv run --project libs/notification_events pytest libs/notification_events/tests/unit/ -v
 	uv run --project services/notification-service pytest services/notification-service/tests/unit/ -v
-	uv run --project services/autocomplete-service pytest services/autocomplete-service/tests/unit/ -v
 	uv run --project services/generation-service pytest services/generation-service/tests/unit/ -v
 
 test-cov: ## Run pytest with coverage report (gate ≥ 80%)
@@ -378,14 +373,8 @@ prepare-ecapa: ## Fetch + checksum-verify the pinned ECAPA speaker-diarization m
 prepare-pyannote: ## Fetch + checksum-verify the pinned pyannote community-1 diarizer (gated: needs HF_TOKEN with the model terms accepted)
 	uv run python scripts/models/prepare_pyannote.py
 
-chaos-dictation: ## Run dictation chaos scenarios (needs dev stack + token)
-	RUN_DICTATION_CHAOS=1 uv run --project services/dictation-service pytest tests/chaos/dictation_chaos.py -v
-
 chaos-asr: ## Run batch-ASR worker chaos (SIGKILL reclaim; needs dev stack + asr-service + CPU model + token)
 	RUN_ASR_CHAOS=1 uv run --project services/asr-service pytest tests/chaos/asr_chaos.py -v
-
-load-dictation: ## Run dictation load test (needs dev stack + token)
-	RUN_DICTATION_LOAD=1 uv run --project services/dictation-service pytest tests/load/ -v
 
 dev-up-asr: ## Start base + dev overlay (no GPU) — useful on laptops
 	$(COMPOSE) -f infra/compose/base.yml -f infra/compose/dev.yml up -d --wait

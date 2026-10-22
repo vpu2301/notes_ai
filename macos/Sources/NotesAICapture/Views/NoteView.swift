@@ -268,6 +268,12 @@ struct NoteView: View {
         if let capture {
             items.append(.item("Copy job ID", symbol: "number") { copy(capture.jobId) })
         }
+        // Hidden while the session is not confirmed online: the report comes from the API.
+        if model.jobId != nil, !app.reconnecting {
+            items.append(.item("Export diagnostics…", symbol: "stethoscope", disabled: model.busy) {
+                Task { await model.exportDiagnostics() }
+            })
+        }
         if model.sharing?.canDelete ?? true {
             items.append(.item("Move to trash", symbol: "trash", danger: true, disabled: model.busy) {
                 confirmDelete = true
@@ -770,6 +776,9 @@ struct NoteView: View {
                 .background(navTop(block.key))
             }
         }
+        // Telemetry: the first view update that shows the written notes (current version).
+        .reportDisplayed(app.telemetry, recordingId: model.jobId, event: .notesDisplayed,
+                         when: model.viewing == nil && !model.generatedRows.isEmpty)
     }
 
     /// What the navigator lists: the headed sections on the notes tab, marks along the
@@ -1027,6 +1036,14 @@ struct NoteView: View {
             }
         }
         .task { await model.loadTranscript() }
+        // Telemetry: the first view update that shows this recording's transcript / speakers.
+        .reportDisplayed(app.telemetry, recordingId: model.jobId, event: .transcriptDisplayed,
+                         when: model.transcriptError == nil && !(model.turns ?? []).isEmpty)
+        .reportDisplayed(app.telemetry, recordingId: model.jobId, event: .speakerLabelsDisplayed,
+                         when: model.transcriptError == nil && model.diarized && !model.speakers.isEmpty
+                             && !(model.turns ?? []).isEmpty)
+        .reportDisplayed(app.telemetry, recordingId: model.jobId, event: .errorShown,
+                         when: model.transcriptError != nil)
         .sheet(isPresented: $reviewingSpellings) {
             EntityReviewSheetView(model: model)
         }

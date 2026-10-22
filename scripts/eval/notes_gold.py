@@ -148,15 +148,6 @@ def fact_text(fact: str | dict | KeyFact) -> str:
     return fact
 
 
-def fact_third(fact: str | dict | KeyFact) -> int | None:
-    """The third a v3 fact names; None for a v1/v2 string (inferred then)."""
-    if isinstance(fact, KeyFact):
-        return fact.third
-    if isinstance(fact, dict) and fact.get("third") in (1, 2, 3):
-        return int(fact["third"])
-    return None
-
-
 class GoldClaim(_Model):
     """B4: a claim the recording relays — who makes it, words of it (any one must
     appear in the claims-table row), and the speaker's verdict words, when there is one."""

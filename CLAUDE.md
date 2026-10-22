@@ -9,6 +9,7 @@
 
 ## Commit Guidelines
 - Never add "Co-Authored-By" lines or AI attribution to commit messages.
+- Never set an agent or Claude as a co-author — not on commits, PRs, or anything else.
 
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 

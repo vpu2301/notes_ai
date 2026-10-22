@@ -16,7 +16,6 @@ from typing import Any, Final
 MAX_WINDOW_CHARS: Final = 6_000
 # Threshold between 32K and 128K so a 32K local model never gets the large window by rounding.
 LARGE_CONTEXT_TOKENS: Final = 65_536
-LARGE_WINDOW_CHARS: Final = 16_000
 # Extraction windows on a long context stop at 8 000 chars: a model reading
 # 16 000 lists only the head, and one failed call cannot cost more than ~8 minutes.
 EXTRACT_WINDOW_CHARS: Final = 8_000
@@ -71,11 +70,6 @@ class Window:
     def end_ms(self) -> int:
         return self.turns[-1].end_ms if self.turns else 0
 
-    @property
-    def turn_numbers(self) -> frozenset[int]:
-        """The line numbers in this window."""
-        return frozenset(t.number for t in self.turns)
-
     def turn(self, number: int) -> Turn | None:
         """The piece with this line number."""
         return next((t for t in self.turns if t.number == number), None)
@@ -100,22 +94,6 @@ class Window:
 def render_line(turn: Turn) -> str:
     """``[7] Anna (12:04): [en] …`` — one line as the model sees it."""
     return f"[{turn.number}] {turn.display_name} ({_mmss(turn.start_ms)}):{_language_tag(turn)} {turn.text}"
-
-
-def dominant_language(turns: list[Turn], recording_language: str | None) -> str | None:
-    """The language most of the speech was in, by duration (``Turn.language``, else
-    the recording's); the recording's on a tie; None when nothing says."""
-    spoken: dict[str, int] = {}
-    for t in turns:
-        code = t.language or recording_language
-        if code:
-            spoken[code] = spoken.get(code, 0) + max(0, t.end_ms - t.start_ms)
-    if not spoken:
-        return None
-    best = max(spoken.values())
-    if recording_language and spoken.get(recording_language) == best:
-        return recording_language
-    return max(spoken, key=lambda code: spoken[code])
 
 
 def _language_tag(turn: Turn) -> str:
@@ -324,14 +302,6 @@ def thirds(windows: list[Window]) -> dict[int, int]:
         share = (middle - start) / span
         out[window.index] = 1 if share < 1 / 3 else (2 if share < 2 / 3 else 3)
     return out
-
-
-def third_of(ms: int, start_ms: int, end_ms: int) -> int:
-    """Which third of the recording a moment is in, by time (``thirds`` places a
-    whole WINDOW by its middle, which says nothing for a one-window recording)."""
-    span = max(1, end_ms - start_ms)
-    share = (ms - start_ms) / span
-    return 1 if share < 1 / 3 else (2 if share < 2 / 3 else 3)
 
 
 # ── The engine's view of the turns: micro-turns merged, adverts cut ──

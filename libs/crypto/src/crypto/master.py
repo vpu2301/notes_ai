@@ -167,7 +167,6 @@ class KmsMasterKeyProvider:
         self._key_name = key_name
         self._owns_client = http_client is None
         self._client: httpx.AsyncClient = http_client or httpx.AsyncClient(timeout=timeout_seconds)
-        self._checked = False
 
     @property
     def master_key_id(self) -> str:
@@ -224,7 +223,6 @@ class KmsMasterKeyProvider:
                 "The transit key may be derived/convergent — use a plain "
                 "aes256-gcm96 key. See docs/runbooks/kms.md."
             )
-        self._checked = True
         logger.info(
             "master_key.kms_ready",
             extra={"master_key_id": self.master_key_id, "vault_addr": self._addr},

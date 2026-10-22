@@ -9,8 +9,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-VERIFIED_ARTIFACTS: tuple[str, ...] = ("embedding_model.ckpt", "mean_var_norm_emb.ckpt")
-
 
 class ModelIntegrityError(Exception):
     """A baked model artifact does not match its pinned digest."""

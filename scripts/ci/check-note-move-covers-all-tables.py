@@ -15,8 +15,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 MIGRATIONS = ROOT / "infra/postgres/migrations"
 
-# Not moved, by decision (0078's header says why).
-LEFT_ALONE: frozenset[str] = frozenset({"note_versions", "workspace_glossary"})
+# Not moved, by decision (0078's header says why). Telemetry (0092) stays in the tenant that
+# did the processing; it is deleted with the recording (ON DELETE CASCADE), never moved.
+LEFT_ALONE: frozenset[str] = frozenset(
+    {"note_versions", "workspace_glossary", "telemetry_runs", "telemetry_client_events"}
+)
 
 _REFERENCE = re.compile(r"(?i)REFERENCES\s+(notes|transcription_jobs)\s*\(\s*id\s*\)")
 _TABLE = re.compile(

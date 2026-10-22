@@ -1,0 +1,6 @@
+# Files allowed to call a model API directly (telemetry sprint 3 call-site guard,
+# tests/unit/test_llm_call_sites.py). Every other LLM call goes through libs/models'
+# chat provider, whose attempts telemetry records (telemetry.llm).
+# <path> | <reason>
+libs/models/src/models/openai_compat.py | the instrumented provider itself: emits one AttemptRecord per HTTP attempt
+services/generation-service/src/generation_service/adapters/inference.py | Layer C inline completion (24 tokens, 600 ms budget); not tied to a recording, no per-run record (Sprint 0 Q8)

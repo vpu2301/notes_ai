@@ -1,0 +1,1232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://notes.ai/schemas/telemetry/v1.json",
+  "title": "Notes AI pipeline telemetry v1",
+  "description": "Telemetry schema v1. Missing measurements are null with a reason in null_reasons (entity) or attributes._reasons (span). See SCHEMA_v1.md.",
+  "$defs": {
+    "reason": {
+      "enum": [
+        "unavailable",
+        "not_supported",
+        "not_measured",
+        "error",
+        "not_applicable"
+      ]
+    },
+    "null_reasons": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/reason"
+      }
+    },
+    "device": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "observation": {
+          "enum": [
+            "observed",
+            "configured"
+          ]
+        }
+      },
+      "required": [
+        "value",
+        "observation"
+      ],
+      "additionalProperties": false
+    },
+    "error_category": {
+      "enum": [
+        "input",
+        "upload",
+        "queue",
+        "model_load",
+        "asr",
+        "diarization",
+        "postprocess",
+        "llm",
+        "storage",
+        "client",
+        "unknown",
+        null
+      ]
+    },
+    "attributes": {
+      "type": "object",
+      "properties": {
+        "_reasons": {
+          "$ref": "#/$defs/null_reasons"
+        },
+        "_truncated": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "processing_run": {
+      "type": "object",
+      "properties": {
+        "processing_run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "recording_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "note_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "note_generation_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "kind": {
+          "enum": [
+            "initial",
+            "reprocess"
+          ]
+        },
+        "reprocess_scope": {
+          "enum": [
+            "diarization",
+            "notes",
+            null
+          ]
+        },
+        "trigger": {
+          "enum": [
+            "auto",
+            "user",
+            "retry",
+            "migration"
+          ]
+        },
+        "telemetry_schema_version": {
+          "const": 1
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "partial"
+          ]
+        },
+        "error_category": {
+          "$ref": "#/$defs/error_category"
+        },
+        "submitted_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "finished_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "processing_wall_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "user_wait_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "time_to_transcript_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "time_to_speaker_labels_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "time_to_notes_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "rtf": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "speedup": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "audio_duration_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "asr_audio_processed_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "telemetry_overhead_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "created_by": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "concurrent_runs_at_start": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "other_model_activity": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "asr",
+                  "diarization",
+                  "llm"
+                ]
+              },
+              "backend": {
+                "type": "string"
+              },
+              "run_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "overlap_seconds": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "backend"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "retention_until": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "trace_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "null_reasons": {
+          "$ref": "#/$defs/null_reasons"
+        },
+        "telemetry_buffer_peak_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "user_wait_cross_device": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "processing_run_id",
+        "tenant_id",
+        "recording_id",
+        "kind",
+        "trigger",
+        "telemetry_schema_version",
+        "status",
+        "submitted_at",
+        "retention_until",
+        "null_reasons"
+      ],
+      "additionalProperties": false
+    },
+    "run_context": {
+      "type": "object",
+      "properties": {
+        "processing_run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "telemetry_schema_version": {
+          "const": 1
+        },
+        "app_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "app_build": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "os_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "os_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "arch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "chip_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memory_pressure_start": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memory_pressure_end": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memory_total_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "process_rss_start": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "process_rss_end": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "swap_used_start": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "swap_used_end": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "container_mem_limit": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "execution_mode": {
+          "enum": [
+            "native",
+            "container",
+            "remote"
+          ]
+        },
+        "effective_config": {
+          "type": "object"
+        },
+        "device_asr": {
+          "$ref": "#/$defs/device"
+        },
+        "device_diarization": {
+          "$ref": "#/$defs/device"
+        },
+        "device_llm": {
+          "$ref": "#/$defs/device"
+        },
+        "null_reasons": {
+          "$ref": "#/$defs/null_reasons"
+        }
+      },
+      "required": [
+        "processing_run_id",
+        "tenant_id",
+        "telemetry_schema_version",
+        "execution_mode",
+        "effective_config",
+        "null_reasons"
+      ],
+      "additionalProperties": false
+    },
+    "span": {
+      "type": "object",
+      "properties": {
+        "span_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "processing_run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "parent_span_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "stage": {
+          "enum": [
+            "capture_input",
+            "upload",
+            "queue",
+            "model_init",
+            "audio_prep",
+            "vad",
+            "language_detection",
+            "asr_primary",
+            "asr_recovery",
+            "diarization_load",
+            "diarization_infer",
+            "postprocess_align",
+            "postprocess_attribute",
+            "postprocess_cleanup",
+            "persist",
+            "llm_call",
+            "ui_delivery",
+            "other"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "error",
+            "cancelled",
+            "skipped",
+            "partial",
+            "started"
+          ]
+        },
+        "error_category": {
+          "$ref": "#/$defs/error_category"
+        },
+        "error_class": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "start_monotonic_ns": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "end_monotonic_ns": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "start_wall_utc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "end_wall_utc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "clock_source": {
+          "enum": [
+            "monotonic",
+            "wall",
+            "client_wall"
+          ]
+        },
+        "process_id": {
+          "type": "integer"
+        },
+        "host": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "attributes": {
+          "$ref": "#/$defs/attributes"
+        },
+        "is_parallel_with": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "required": [
+        "span_id",
+        "processing_run_id",
+        "tenant_id",
+        "stage",
+        "name",
+        "attempt",
+        "status",
+        "clock_source",
+        "process_id",
+        "host",
+        "attributes"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "capture_input"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "audio_duration_seconds",
+                  "format",
+                  "sample_rate_hz",
+                  "channels",
+                  "file_size_bytes",
+                  "capture_mode"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "upload"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "bytes",
+                  "chunks",
+                  "retries",
+                  "resumed"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "queue"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "enqueued_at",
+                  "started_at",
+                  "queue_wait_seconds",
+                  "queue_name",
+                  "queue_depth_at_enqueue"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "model_init"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "model_kind",
+                  "model_name",
+                  "model_revision",
+                  "quantization",
+                  "compute_type",
+                  "device",
+                  "state",
+                  "load_seconds",
+                  "warmup_seconds"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "audio_prep"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "retrieve_seconds",
+                  "decrypt_seconds",
+                  "decode_seconds",
+                  "resample_seconds",
+                  "source_sample_rate_hz",
+                  "target_sample_rate_hz"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "vad"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "backend",
+                  "duration_seconds",
+                  "speech_seconds",
+                  "run_count",
+                  "run_lengths_seconds",
+                  "threshold"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "language_detection"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "model",
+                  "call_count",
+                  "duration_seconds",
+                  "detected",
+                  "decided_language"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "asr_primary"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "backend",
+                  "model",
+                  "device",
+                  "compute_type",
+                  "beam_size",
+                  "wall_seconds",
+                  "audio_processed_seconds",
+                  "chunk_count",
+                  "chunk_seconds",
+                  "word_count",
+                  "segment_count"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "asr_recovery"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "trigger_reason",
+                  "attempt",
+                  "audio_reprocessed_seconds",
+                  "wall_seconds",
+                  "recovered_words",
+                  "backend",
+                  "model",
+                  "device"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "diarization_load"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "backend",
+                  "model",
+                  "device",
+                  "load_seconds",
+                  "speakers_detected",
+                  "unknown_speaker_share",
+                  "audio_seconds"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "diarization_infer"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "backend",
+                  "model",
+                  "device",
+                  "infer_seconds",
+                  "speakers_detected",
+                  "unknown_speaker_share",
+                  "audio_seconds"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "postprocess_align"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "duration_seconds",
+                  "items"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "postprocess_attribute"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "duration_seconds",
+                  "items"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "postprocess_cleanup"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "duration_seconds",
+                  "items"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "persist"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "duration_seconds",
+                  "items"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "ui_delivery"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attributes": {
+                "required": [
+                  "client",
+                  "event",
+                  "seconds_since_submission"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "llm_call": {
+      "type": "object",
+      "properties": {
+        "llm_call_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "span_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "processing_run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "purpose": {
+          "enum": [
+            "note_write",
+            "note_merge",
+            "note_check",
+            "note_ask",
+            "provider_probe",
+            "inline_completion"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "backend": {
+          "type": "string"
+        },
+        "execution_mode": {
+          "enum": [
+            "native",
+            "container",
+            "remote"
+          ]
+        },
+        "streaming": {
+          "type": "boolean"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "error",
+            "cancelled",
+            "skipped",
+            "partial",
+            "started"
+          ]
+        },
+        "queue_wait_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "model_load_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "time_to_first_token_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "total_latency_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "generation_tokens_per_second": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "input_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "output_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cached_input_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reasoning_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "prompt_chars": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "completion_chars": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "token_source": {
+          "enum": [
+            "provider",
+            "estimated"
+          ]
+        },
+        "token_accounting_note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "error_category": {
+          "$ref": "#/$defs/error_category"
+        },
+        "null_reasons": {
+          "$ref": "#/$defs/null_reasons"
+        }
+      },
+      "required": [
+        "llm_call_id",
+        "span_id",
+        "processing_run_id",
+        "tenant_id",
+        "purpose",
+        "provider",
+        "backend",
+        "streaming",
+        "attempt",
+        "status",
+        "token_source",
+        "null_reasons"
+      ],
+      "additionalProperties": false
+    },
+    "client_event": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "processing_run_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "recording_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "client": {
+          "enum": [
+            "web",
+            "macos",
+            "ios"
+          ]
+        },
+        "client_version": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "event": {
+          "enum": [
+            "recording_stopped",
+            "import_submitted",
+            "upload_started",
+            "upload_finished",
+            "transcript_displayed",
+            "speaker_labels_displayed",
+            "notes_displayed",
+            "error_shown"
+          ]
+        },
+        "client_wall_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "client_monotonic_ns": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "server_received_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "estimated_clock_offset_ms": {
+          "type": "integer"
+        },
+        "attributes": {
+          "$ref": "#/$defs/attributes"
+        }
+      },
+      "required": [
+        "event_id",
+        "recording_id",
+        "tenant_id",
+        "client",
+        "client_version",
+        "event",
+        "client_wall_utc",
+        "server_received_utc",
+        "estimated_clock_offset_ms",
+        "attributes"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "properties": {
+    "telemetry_schema_version": {
+      "const": 1
+    },
+    "processing_run": {
+      "$ref": "#/$defs/processing_run"
+    },
+    "run_context": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/run_context"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "spans": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/span"
+      }
+    },
+    "llm_calls": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/llm_call"
+      }
+    },
+    "client_events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/client_event"
+      }
+    }
+  },
+  "required": [
+    "telemetry_schema_version",
+    "processing_run",
+    "spans",
+    "llm_calls",
+    "client_events"
+  ]
+}

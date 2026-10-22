@@ -39,12 +39,6 @@ enum CredentialStore {
         ]
     }
 
-    // MARK: - Biometrics on this device
-
-    // `Biometrics` (SessionStore.swift) is the one reader of `LAContext`; these names are kept for the sign-in screen.
-    static var biometryName: String? { Biometrics.name }
-    static var biometrySymbol: String { Biometrics.symbol }
-
     // MARK: - The saved sign-in
 
     /// Whether a password is saved. Does not prompt ("would need UI" means "exists").

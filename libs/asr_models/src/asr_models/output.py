@@ -123,7 +123,15 @@ class SegmentDiagnostics(BaseModel):
     second_pass: bool = False
 
 
-DropReason = Literal["no_speech", "loop", "low_confidence_nonspeech", "artefact", "artefact_outro"]
+# ``artefact_outro`` is the A3 T2 name, kept so stored results still read.
+DropReason = Literal[
+    "no_speech",
+    "loop",
+    "low_confidence_nonspeech",
+    "artefact",
+    "artefact_outro",
+    "artefact_stock_line",
+]
 
 
 class DroppedSegment(BaseModel):
@@ -138,8 +146,11 @@ class DroppedSegment(BaseModel):
     compression_ratio: float | None = None
     # VAD speech share inside the segment (protects real quiet speech).
     speech_share: float | None = None
-    # ``<language>:<index>`` into asr_models/artefacts.yaml for reason ``artefact``.
+    # ``<language>:<index>`` into asr_models/artefacts.yaml for reason ``artefact``, into
+    # the worker's guards.STOCK_LINES for ``artefact_stock_line``.
     artefact: str | None = Field(default=None, max_length=12)
+    # Reason ``artefact_stock_line``: the segment's index in the decoded transcript.
+    segment_index: NonNegativeInt | None = None
     # MDX_ASR_GATES_ENABLED=false: recorded, not removed.
     dry_run: bool = False
 

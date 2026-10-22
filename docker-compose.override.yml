@@ -1,10 +1,8 @@
 # Full-stack overlay, auto-merged on a plain `docker compose up`
 # (`make dev-up` passes -f docker-compose.yml and stays infra-only).
-# Host ports: auth 8000, asr 8001, dictation 8002, notification 8004,
-# nlp 8005, note 8006, autocomplete 8007, generation 8009, llama 8089.
-# Building asr-worker/dictation-service needs network (whisper-tiny weights).
-# Docker engine needs >= 12 GiB: on 8 GiB dictation-service OOMs loading the
-# diarizer and crash-loops silently (`docker events` shows `die exit=137`).
+# Host ports: auth 8000, asr 8001, notification 8004,
+# nlp 8005, note 8006, generation 8009, llama 8089.
+# Building asr-worker needs network (whisper-tiny weights).
 name: notes-ai
 
 x-postgres-dsns: &postgres-dsns
@@ -181,6 +179,8 @@ services:
     build:
       context: .
       dockerfile: services/asr-service/Dockerfile
+      args:
+        BUILD_SHA: "${BUILD_SHA:-unknown}"
     restart: unless-stopped
     environment:
       <<: [*common-env, *auth-env, *postgres-dsns, *cors-env, *s3-env]
@@ -213,6 +213,8 @@ services:
     build:
       context: .
       dockerfile: services/asr-worker/Dockerfile.cpu
+      args:
+        BUILD_SHA: "${BUILD_SHA:-unknown}"
     restart: unless-stopped
     environment:
       <<: [*common-env, *postgres-dsns, *s3-env]
@@ -246,63 +248,6 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-      minio:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-
-  # dictation-service: same large-v3 weights from the host's HF cache.
-  dictation-service:
-    build:
-      context: .
-      dockerfile: services/dictation-service/Dockerfile.cpu
-    restart: unless-stopped
-    environment:
-      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env, *s3-env]
-      MD_ASR_DEVICE: cpu
-      MD_ASR_MODEL: /opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478
-      MD_ASR_COMPUTE_TYPE: int8
-      MD_ASR_MODEL_REPO: Systran/faster-whisper-large-v3
-      MD_ASR_MODEL_REVISION: edaa852ec7e145841d8ffdb056a99866b5f0a478
-      MD_ASR_MODEL_SHA256: 69f74147e3334731bc3a76048724833325d2ec74642fb52620eda87352e3d4f1
-      # Whisper pads every window to 30 s, so on CPU only a 30 s window / 28 s
-      # hop keeps up (1.18x realtime); partials lag up to one hop. Do NOT copy
-      # these onto a GPU worker (infra/compose/gpu.yml keeps low-latency defaults).
-      MDX_WINDOW_SECONDS: "30.0"
-      MDX_WINDOW_MIN_FOR_PARTIAL_SECONDS: "28.0"
-      # Greedy: beam 5 falls behind realtime on CPU for identical text.
-      MD_ASR_BEAM_SIZE: "1"
-      # Overlap is the commit horizon; widening it delays every commit.
-      MDX_WINDOW_OVERLAP_SECONDS: "2.0"
-      MDX_WORKER_ID: dictation-dev-1
-      DB_CRYPTO_WRITER_DSN: postgresql://crypto_writer:crypto_writer@postgres:5432/notes
-      REDIS_URL: redis://redis:6379/0
-      MDX_MASTER_KEY_PATH: /etc/mdx/master.key
-      MDX_TMPFS_ROOT: /run/dictation
-      # Keep in sync with x-cors-env.
-      MDX_WS_ALLOWED_ORIGINS: '["http://localhost:5173","http://127.0.0.1:5173","http://localhost:4173","http://127.0.0.1:4173","http://localhost:3000","https://vpu2301.github.io"]'
-    volumes:
-      - ./infra/dev/master.key:/etc/mdx/master.key:ro
-      - ${HOME}/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3:/opt/models/whisper-large-v3:ro
-    tmpfs:
-      # RAM-backed so decrypted PCM never hits disk; owned by the nonroot uid.
-      - /run/dictation:size=2g,mode=0700,uid=65532,gid=65532
-    ports:
-      - "127.0.0.1:8002:8000"
-    # Loads large-v3 + warms ECAPA before binding (137-176 s measured), so the
-    # shared 30 s start_period would report a normal start as unhealthy.
-    healthcheck:
-      <<: *svc-healthcheck
-      start_period: 300s
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      keycloak:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
@@ -426,27 +371,6 @@ services:
       minio:
         condition: service_healthy
       minio-init:
-        condition: service_completed_successfully
-
-  autocomplete-service:
-    build:
-      context: .
-      dockerfile: services/autocomplete-service/Dockerfile
-    restart: unless-stopped
-    environment:
-      <<: [*common-env, *auth-env, *postgres-dsns, *cors-env]
-      REDIS_URL: redis://redis:6379/0
-    ports:
-      - "127.0.0.1:8007:8000"
-    healthcheck: *svc-healthcheck
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      keycloak:
-        condition: service_healthy
-      migrate:
         condition: service_completed_successfully
 
   # Layer C backend (ADR-0036): pinned gemma3:1b blob from the host's Ollama

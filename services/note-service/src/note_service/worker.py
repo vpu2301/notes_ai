@@ -11,9 +11,11 @@ import asyncio
 import contextlib
 import logging
 import signal
+from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID
 
+import telemetry
 from jobs import CostTable, HandlerSpec, JobContext, JobQueue, JobRunner, UsageLedger
 from models import Registry, build_chat_provider
 from observability import bootstrap
@@ -131,25 +133,45 @@ async def run() -> None:
     )
 
     async def _run(ctx: JobContext) -> dict[str, Any] | None:
-        return await handle_generate(
-            deps, tenant_id=UUID(str(ctx.job.tenant_id)), payload=dict(ctx.job.payload)
-        )
+        async def generate() -> dict[str, Any] | None:
+            return await handle_generate(
+                deps, tenant_id=UUID(str(ctx.job.tenant_id)), payload=dict(ctx.job.payload)
+            )
+
+        return await _in_note_run(ctx, generate)
 
     def _backend(ctx: JobContext) -> tuple[str, int]:
         return providers.backend_of(str(ctx.job.tenant_id))
 
     async def _probe(ctx: JobContext) -> None:
         await providers.warm(UUID(str(ctx.job.tenant_id)))
-        await providers.probe(str(ctx.job.tenant_id))
+        provider = await providers.get(str(ctx.job.tenant_id))
+        run, token = await _note_run_context(ctx, begin=True)
+        try:
+            # The probe is 1-2 real completions on the critical path: recorded as such.
+            await telemetry.llm.call("provider_probe", provider, provider.probe)
+        finally:
+            if token is not None:
+                telemetry.reset_run(token)
 
     async def _on_dead(ctx: JobContext, error_kind: str) -> None:
         # The probe fails before `_run` starts; without this a dead job stays `queued` forever.
+        # First, so telemetry can never keep the note stuck.
         await mark_dead(
             deps,
             tenant_id=UUID(str(ctx.job.tenant_id)),
             payload=dict(ctx.job.payload),
             error_kind=error_kind,
         )
+        run = _note_run_ref(ctx)
+        if run is not None:
+            # Retries exhausted: the notes for this run will not come.
+            if run.kind == "reprocess":
+                await telemetry.finish_run(
+                    run, result_stored=False, status="failed", error_category="llm"
+                )
+            else:
+                await telemetry.extend_run(run, ok=False, error_category="llm")
 
     # W5: a moved note's audio and transcripts, re-encrypted into the workspace it moved to.
     stores = {"audio": state.audio_store, "transcripts": transcripts}
@@ -208,6 +230,74 @@ async def run() -> None:
         await providers.aclose()
         await teardown_state(state)
         logger.info("note_worker.stopped")
+
+
+# ── Telemetry (sprint 3): the note generation as part of its processing run ──
+
+
+def _note_run_ref(ctx: JobContext) -> telemetry.RunRef | None:
+    """The run a ``note.generate`` job belongs to: the recording's run it continues, or — a
+    regeneration — a ``reprocess`` run whose id is the job's own (retries reuse it)."""
+    payload = ctx.job.payload or {}
+    tenant = UUID(str(ctx.job.tenant_id))
+    recording = payload.get("telemetry_recording_id")
+    if not recording:
+        return None
+    if payload.get("telemetry_kind") == "reprocess":
+        return telemetry.RunRef(
+            processing_run_id=ctx.job.id, tenant_id=tenant, recording_id=UUID(recording),
+            kind="reprocess",
+        )  # fmt: skip
+    run_id = payload.get("processing_run_id")
+    if not run_id:
+        return None
+    return telemetry.RunRef(
+        processing_run_id=UUID(run_id), tenant_id=tenant, recording_id=UUID(recording)
+    )
+
+
+async def _note_run_context(
+    ctx: JobContext, *, begin: bool = False
+) -> tuple[telemetry.RunRef | None, object | None]:
+    """Set the job's run as current. ``begin`` (the probe hook, which runs first on every
+    attempt) also mints a regeneration's run and counts the attempt."""
+    run = _note_run_ref(ctx)
+    if run is None:
+        return None, None
+    if begin and run.kind == "reprocess":
+        await telemetry.start_run(
+            tenant_id=run.tenant_id, recording_id=run.recording_id, kind="reprocess",
+            trigger="user", reprocess_scope="notes", submitted_at=ctx.job.created_at,
+            run_id=run.processing_run_id,
+        )  # fmt: skip
+        await telemetry.begin_run(run, record_context=False)
+    token = telemetry.set_run(run)
+    telemetry.context.set_attempt(max(1, ctx.job.attempts))
+    return run, token
+
+
+async def _in_note_run(
+    ctx: JobContext, generate: Callable[[], Awaitable[dict[str, Any] | None]]
+) -> dict[str, Any] | None:
+    """``generate`` inside a ``notes.generate`` span of its run; the run is closed (a
+    regeneration) or extended (the initial run) when the notes are stored."""
+    run, token = await _note_run_context(ctx)
+    if run is None:
+        return await generate()
+    try:
+        async with telemetry.span("other", "notes.generate") as s:
+            result = await generate()
+            s.update(job_attempt=ctx.job.attempts)
+        if run.kind == "reprocess":
+            await telemetry.finish_run(
+                run, result_stored=True, stage_statuses=[("other", s.status)]
+            )
+        else:
+            await telemetry.extend_run(run, ok=True)
+        return result
+    finally:
+        if token is not None:
+            telemetry.reset_run(token)
 
 
 def main() -> None:  # pragma: no cover — process entry point

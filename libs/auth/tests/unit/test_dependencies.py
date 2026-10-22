@@ -54,9 +54,6 @@ async def test_valid_token_grants_access(
 ) -> None:
     token = mint_token()
     resp = await client.get("/protected", headers={"Authorization": f"Bearer {token}"})
-    if resp.status_code != 200:
-        # surface FastAPI's validation reason for debugging
-        print("DEBUG body:", resp.text)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["tid"] == str(TENANT_A)

@@ -310,22 +310,6 @@ struct MyNotesEditor: View {
     }
 }
 
-/// What kind of meeting the next one is; picks the template family. "Auto" is the default.
-struct MeetingTypePicker: View {
-    @EnvironmentObject private var capture: CaptureViewModel
-    var height: CGFloat = 26
-
-    var body: some View {
-        DSSegmentedPill(
-            options: MeetingType.allCases.map { .init($0, label: $0.label) },
-            selection: $capture.meetingType,
-            height: height)
-            .disabled(capture.isRecording || capture.phase.isBusy)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Kind of meeting")
-    }
-}
-
 /// P2 — the writer's template for the next note, as a compact menu ("Automatic ▾").
 struct NoteTemplateMenu: View {
     @EnvironmentObject private var capture: CaptureViewModel

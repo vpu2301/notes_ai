@@ -11,13 +11,15 @@ from .claims import Claims
 
 # Plain str (not Literal) so the CSV reads straight in; the exhaustive test guards typos.
 
-Role = str  # tenant_admin | member | viewer | auditor | service | device | guest
+Role = str  # tenant_admin | member | viewer | auditor | service | device | guest | platform_admin
 Action = str  # e.g. 'user.invite', 'audit.read'
 TargetKind = str  # e.g. 'user', 'audit', 'tenant'
 
 KNOWN_ROLES: Final[frozenset[str]] = frozenset(
     # `guest` (W1, ADR-0069): reaches only notes it was given; W3 adds its rows (note, notification, tenant read).
-    {"tenant_admin", "member", "viewer", "auditor", "service", "device", "guest"}
+    # `platform_admin` (telemetry sprint 4): platform-wide, outside every workspace; set only on
+    # `identities.platform_role` by auth-service, never assignable through the role APIs.
+    {"tenant_admin", "member", "viewer", "auditor", "service", "device", "guest", "platform_admin"}
 )
 
 KNOWN_TARGET_KINDS: Final[frozenset[str]] = frozenset(
@@ -36,6 +38,8 @@ KNOWN_TARGET_KINDS: Final[frozenset[str]] = frozenset(
         "synonym",
         # Credentials for non-human principals (room devices, service accounts).
         "credential",
+        # Pipeline telemetry: timings, counts and backends; never content.
+        "telemetry",
     }
 )
 
@@ -163,6 +167,14 @@ ALLOW: Final[dict[tuple[Role, Action, TargetKind], bool]] = {
     ("guest", "note.write", "note"): True,
     ("guest", "notification.read", "notification"): True,
     ("guest", "notification.write", "notification"): True,
+    # ── Pipeline telemetry (sprint 4): content-free run records. `telemetry.read` opens the door;
+    # note-service then checks the recording (requester, a note the caller can view, or a
+    # workspace admin). `telemetry.read_all` crosses tenants: the platform admin only.
+    ("tenant_admin", "telemetry.read", "telemetry"): True,
+    ("member", "telemetry.read", "telemetry"): True,
+    ("viewer", "telemetry.read", "telemetry"): True,
+    ("platform_admin", "telemetry.read", "telemetry"): True,
+    ("platform_admin", "telemetry.read_all", "telemetry"): True,
 }
 
 

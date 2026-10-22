@@ -353,12 +353,6 @@ final class NoteViewModel: ObservableObject {
         }
     }
 
-    /// The failure is the processor gate, which an admin can lift on the Data & AI tab.
-    var generationNeedsProcessorAcknowledgement: Bool {
-        generationErrorCode == "processor_unacknowledged"
-            || (generation?.status == "failed" && generation?.errorKind == "processor_unacknowledged")
-    }
-
     // MARK: - Write this note differently (N4)
 
     /// This note's own instructions; nil until asked, or while the server has the feature off.
@@ -1657,6 +1651,26 @@ final class NoteViewModel: ObservableObject {
             lines.append("")
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// "Export diagnostics…" (telemetry sprint 4): the recording's processing report, saved as Markdown.
+    func exportDiagnostics() async {
+        guard let jobId else { return }
+        busy = true
+        actionError = nil
+        defer { busy = false }
+        do {
+            let report = try await api.latestDiagnostics(recordingId: jobId)
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = report.filename
+            panel.canCreateDirectories = true
+            NSApp.activate(ignoringOtherApps: true)
+            if panel.runModal() == .OK, let url = panel.url {
+                try report.data.write(to: url)
+            }
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 
     func exportMarkdown() {

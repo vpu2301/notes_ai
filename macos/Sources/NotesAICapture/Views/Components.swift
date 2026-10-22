@@ -1,18 +1,5 @@
 import SwiftUI
 
-// MARK: - Status chip
-
-struct StatusChip: View {
-    let status: JobStatus?
-
-    var body: some View {
-        DSChip(text: status?.label ?? "Unknown",
-               tint: status?.tint ?? DS.muted,
-               soft: status?.soft ?? DS.surface2,
-               dot: status == .running)
-    }
-}
-
 // MARK: - Pulsing recording dot
 
 struct PulsingDot: View {

@@ -11,14 +11,15 @@ import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 
-from . import throttle
+from . import faults, throttle
 from .errors import PROVIDER_RETRY_KINDS, ErrorKind, ProviderError, register_secret
 from .protocols import JsonSchema, JsonValue, ProviderResult
-from .usage import UsageRecord, emit
+from .usage import AttemptRecord, UsageRecord, emit, emit_attempt
 
 logger = logging.getLogger("models.openai_compat")
 
@@ -126,21 +127,35 @@ class OpenAICompatibleChatProvider:
         attempts = 0
         waited_s = 0.0  # time slept on `warming`; bounded by cold_start_seconds
         throttled_s = 0.0  # time slept on 429; bounded by throttle.CALL_BUDGET_S
+        prompt_chars = sum(len(m["content"]) for m in body["messages"])
+        # Telemetry per attempt: what the attempt waited for before it was sent.
+        queue_wait_s: float | None = None
+        load_wait_s: float | None = None
+        slot_wait = time.monotonic()
         async with self._sem:
+            queue_wait_s = time.monotonic() - slot_wait
             while True:
                 attempts += 1
+                attempt_m, attempt_w = time.monotonic(), datetime.now(UTC)
+                data: dict[str, Any] | None = None
                 try:
                     data = await self._post(body)
                     result = self._parse(
                         data, schema, latency_ms=int((time.monotonic() - started) * 1000)
                     )
                 except ProviderError as exc:
+                    self._emit_attempt(
+                        attempts, attempt_m, attempt_w, data, exc, queue_wait_s, load_wait_s,
+                        prompt_chars,
+                    )  # fmt: skip
+                    queue_wait_s = load_wait_s = None
                     if exc.kind is ErrorKind.RATE_LIMITED:
                         # Task 4: a throttled call waits (Retry-After, else backoff with
                         # jitter) within its budgets; every attempt is a ledger row.
                         delay = throttle.wait_for(exc.retry_after_s, attempts, throttled_s)
                         if delay is not None:
                             throttled_s += delay
+                            queue_wait_s = delay
                             emit(
                                 UsageRecord(
                                     backend=self.backend,
@@ -167,6 +182,10 @@ class OpenAICompatibleChatProvider:
                     elif self._should_retry(exc, attempts, waited_s):
                         delay = self._retry_delay(exc, attempts, waited_s)
                         waited_s += delay
+                        if exc.kind is ErrorKind.WARMING:
+                            load_wait_s = delay
+                        else:
+                            queue_wait_s = delay
                         logger.info(
                             "models.retry",
                             extra={
@@ -192,6 +211,10 @@ class OpenAICompatibleChatProvider:
                         )
                     )
                     raise
+                self._emit_attempt(
+                    attempts, attempt_m, attempt_w, data, None, queue_wait_s, load_wait_s,
+                    prompt_chars,
+                )  # fmt: skip
                 emit(
                     UsageRecord(
                         backend=self.backend,
@@ -207,6 +230,60 @@ class OpenAICompatibleChatProvider:
                     )
                 )
                 return result
+
+    def _emit_attempt(
+        self,
+        attempt: int,
+        started_m: float,
+        started_w: datetime,
+        data: dict[str, Any] | None,
+        exc: ProviderError | None,
+        queue_wait_s: float | None,
+        load_wait_s: float | None,
+        prompt_chars: int,
+    ) -> None:
+        """One telemetry record per HTTP attempt; usage exactly as the response reported it."""
+        usage = (data or {}).get("usage") or {}
+
+        def count(obj: Any, key: str) -> int | None:
+            value = obj.get(key) if isinstance(obj, dict) else None
+            return int(value) if isinstance(value, int | float) else None
+
+        choice = ((data or {}).get("choices") or [{}])[0]
+        content = (choice.get("message") or {}).get("content") if isinstance(choice, dict) else None
+        timings = (data or {}).get("timings")
+        emit_attempt(
+            AttemptRecord(
+                backend=self.backend,
+                model_id=self.model_id,
+                operation="chat.complete",
+                attempt=attempt,
+                ok=exc is None,
+                started_at=started_w,
+                ended_at=datetime.now(UTC),
+                latency_ms=int((time.monotonic() - started_m) * 1000),
+                response_model=str(data["model"]) if data and data.get("model") else None,
+                error_kind=str(exc.kind) if exc else None,
+                http_status=exc.status if exc else None,
+                streaming=False,
+                structured_mode=self._mode,
+                finish_reason=choice.get("finish_reason") if isinstance(choice, dict) else None,
+                queue_wait_ms=int(queue_wait_s * 1000) if queue_wait_s is not None else None,
+                model_load_ms=int(load_wait_s * 1000) if load_wait_s is not None else None,
+                input_tokens=count(usage, "prompt_tokens"),
+                output_tokens=count(usage, "completion_tokens"),
+                total_tokens=count(usage, "total_tokens"),
+                cached_input_tokens=count(usage.get("prompt_tokens_details"), "cached_tokens"),
+                reasoning_tokens=count(usage.get("completion_tokens_details"), "reasoning_tokens"),
+                prompt_chars=prompt_chars,
+                completion_chars=len(content) if isinstance(content, str) else None,
+                provider_timings=(
+                    {k: v for k, v in timings.items() if isinstance(v, int | float)}
+                    if isinstance(timings, dict)
+                    else {}
+                ),
+            )
+        )
 
     async def aclose(self) -> None:
         if self._owns_client:
@@ -250,6 +327,10 @@ class OpenAICompatibleChatProvider:
         return body
 
     async def _post(self, body: dict[str, Any]) -> dict[str, Any]:
+        if faults.take_chat_failure():
+            raise ProviderError(
+                ErrorKind.UNAVAILABLE, "HTTP 503 (dev fault)", backend=self.backend, status=503
+            )
         try:
             resp = await self._client.post("/chat/completions", json=body)
         except httpx.ConnectTimeout as exc:

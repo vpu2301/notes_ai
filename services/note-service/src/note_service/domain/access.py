@@ -23,11 +23,9 @@ from .notes_repository import NoteRow
 
 VISIBILITY_PRIVATE: Final = "private"
 VISIBILITY_WORKSPACE: Final = "workspace"
-VISIBILITIES: Final = (VISIBILITY_PRIVATE, VISIBILITY_WORKSPACE)
 
 # Ordered lowest → highest; the index is the rank.
 LEVELS: Final = ("view", "comment", "edit", "manage")
-COLLABORATOR_ROLES: Final = ("view", "comment", "edit")
 
 # Roles that read across the whole tenant regardless of visibility.
 _OVERSIGHT_ROLES: Final = frozenset({"tenant_admin", "auditor"})
@@ -62,18 +60,6 @@ def is_author_team(note: NoteRow, user_sub: UUID) -> bool:
 def collaborator_role(note: NoteRow, user_sub: UUID) -> str | None:
     """The per-note grant (`note_collaborators`, loaded with the note), or None."""
     return note.collaborators.get(user_sub)
-
-
-def workspace_grant(note: NoteRow, claims: Claims) -> str | None:
-    """What visibility ``workspace`` gives this person: member → edit, viewer → comment, guest → none."""
-    if note.visibility != VISIBILITY_WORKSPACE or is_guest(claims):
-        return None
-    roles = set(claims.roles)
-    if "member" in roles:
-        return "edit"
-    if "viewer" in roles:
-        return "comment"
-    return None
 
 
 def level(note: NoteRow, claims: Claims) -> str | None:

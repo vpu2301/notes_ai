@@ -3177,7 +3177,6 @@ struct UnreadCount: Decodable, Sendable {
 enum ProductLinks {
     /// The public site — what an OAuth registration names as `client_uri`.
     static let site = "https://notes.ai"
-    static let callAudioHelp = "https://notes.ai/help/recording-call-audio"
 }
 
 

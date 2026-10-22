@@ -19,11 +19,6 @@ enum MCPOAuth {
         var refreshToken: String?
         var expiresAt: Date?
         var scope: String?
-
-        var isExpired: Bool {
-            guard let expiresAt else { return false }
-            return expiresAt.timeIntervalSinceNow < 60
-        }
     }
 
     /// What the app keeps per server so refreshes and re-logins work without rediscovery.

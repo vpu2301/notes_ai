@@ -136,8 +136,7 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     existing_notes: dict[UUID, dict] = {}
 
     async def _fetchrow(query, *args):  # noqa: ANN001, ANN002
-        row = existing_notes.get(args[0])
-        return row
+        return existing_notes.get(args[0])
 
     conn.fetchrow = _fetchrow
 

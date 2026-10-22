@@ -1,0 +1,21 @@
+# Sprint 3 — client-event ingest SMOKE (synthetic batch via curl, NOT a real client run), 2026-10-22
+# recording edf28aaa; same batch posted twice → {accepted:6} then {duplicates:6}
+ client |          event           |            attributes            | estimated_clock_offset_ms 
+--------+--------------------------+----------------------------------+---------------------------
+ web    | recording_stopped        | {}                               |                        44
+ web    | upload_started           | {"bytes": 1440000}               |                        44
+ web    | upload_finished          | {"bytes": 1440000, "retries": 0} |                        44
+ web    | transcript_displayed     | {}                               |                        44
+ web    | speaker_labels_displayed | {}                               |                        44
+ web    | notes_displayed          | {}                               |                        44
+(6 rows)
+
+-[ RECORD 1 ]------------------+------------------------------
+submitted_at                   | 2026-10-22 11:37:29.398379+00
+user_wait_seconds              | 186
+time_to_transcript_seconds     | 175.044
+time_to_speaker_labels_seconds | 175.444
+time_to_notes_seconds          | 182.044
+user_wait_cross_device         | f
+null_reasons                   | {}
+

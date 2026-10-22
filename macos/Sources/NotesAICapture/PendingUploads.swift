@@ -148,11 +148,6 @@ final class PendingUploads: ObservableObject {
         reload()
     }
 
-    func deleteAll() {
-        for row in rows { PendingCaptures.remove(row.capture) }
-        reload()
-    }
-
     // MARK: - Helpers
 
     private func contentType(for capture: PendingCapture) -> String {

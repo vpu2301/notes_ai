@@ -866,7 +866,7 @@ function SignOutDialog({ onCancel, onConfirm, busy }: { onCancel: () => void; on
 
 export function AppShell() {
   const navigate = useNavigate();
-  const { activeRole, logout } = useAuth();
+  const { activeRole, logout, me } = useAuth();
   // A guest reaches only notes shared with them: nothing to record, file or set up here.
   const guest = activeRole === "guest";
   const toast = useToast();
@@ -965,6 +965,9 @@ export function AppShell() {
           {(activeRole === "owner" || activeRole === "admin") && (
             /* counts only; the API refuses everyone else */
             <SideLink to="/admin/sharing" icon={<ShareIcon size={16} />} label="Sharing" collapsed={collapsed} />
+          )}
+          {me?.claims.roles.includes("platform_admin") && (
+            <SideLink to="/admin/dashboard" icon={<LayersIcon size={16} />} label="Telemetry" collapsed={collapsed} />
           )}
           {!guest && <SpacesNav collapsed={collapsed} />}
         </nav>

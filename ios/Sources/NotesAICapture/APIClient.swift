@@ -719,6 +719,29 @@ actor APIClient {
         return try decode(SpacesResponse.self, from: data).spaces
     }
 
+    /// Telemetry client events (`POST /v1/telemetry/client-events`); the body is the reporter's batch.
+    func postClientEvents(_ body: Data) async throws {
+        _ = try await send(base: \.noteBaseURL, path: "/v1/telemetry/client-events", method: "POST",
+                           jsonBody: body, authorized: true)
+    }
+
+    /// A recording's telemetry runs, newest first (telemetry sprint 4).
+    func telemetryRuns(recordingId: String) async throws -> [TelemetryRunRef] {
+        let data = try await send(base: \.noteBaseURL, path: "/v1/telemetry/recordings/\(recordingId)/runs",
+                                  method: "GET", authorized: true)
+        return try decode(TelemetryRunsResponse.self, from: data).runs
+    }
+
+    /// The newest run's Markdown report and the file name to keep it under.
+    func latestDiagnostics(recordingId: String) async throws -> (filename: String, data: Data) {
+        guard let run = try await telemetryRuns(recordingId: recordingId).first else {
+            throw DiagnosticsError.noRuns
+        }
+        let data = try await send(base: \.noteBaseURL, path: "/v1/telemetry/runs/\(run.processingRunId)/report.md",
+                                  method: "GET", accept: "text/markdown", authorized: true)
+        return (run.reportFilename, data)
+    }
+
     func createSpace(name: String) async throws -> Space {
         let body = try JSONSerialization.data(withJSONObject: ["name": name])
         let data = try await send(base: \.noteBaseURL, path: "/v1/spaces", method: "POST",

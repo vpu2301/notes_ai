@@ -52,6 +52,8 @@ from .routers import (
     sharing_stats,
     spaces,
     synonyms,
+    telemetry_events,
+    telemetry_runs,
     templates,
 )
 
@@ -184,6 +186,8 @@ def create_app() -> FastAPI:
     app.include_router(notes_search.router)
     app.include_router(notes_from_transcript.router)
     app.include_router(notes_meeting.router)
+    app.include_router(telemetry_events.router)
+    app.include_router(telemetry_runs.router)
     app.include_router(notes_corrections.router)
     app.include_router(notes_series.router)
     app.include_router(notes_generation.router)

@@ -10,17 +10,20 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import json
 import logging
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator, Sequence
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 import numpy as np
 from opentelemetry import metrics
 
+import telemetry
 from asr_models import (
     Diagnostics,
     DiarizationStats,
@@ -49,6 +52,7 @@ from diarization import (
 from messaging import Message, RedisStreamsConsumer
 from models import ProviderError, TranscriptionCancelledError
 from storage import ObjectNotFoundError
+from telemetry import schema as telemetry_schema
 
 from . import audit_kinds, chunks, guards, quality, segment_lid, shadow, vad
 from . import coverage as cov
@@ -197,7 +201,7 @@ async def run_forever(state: WorkerState) -> None:
     async with state.consumer as consumer:
         async for msg in consumer:
             try:
-                await _process_one(state, msg)
+                await _process_one_measured(state, msg)
                 await consumer.ack(msg)
             except _NonRetryableError as exc:
                 # Row already says failed; ack so it is not redelivered.
@@ -263,6 +267,9 @@ async def _fail_or_retry(
             detail=f"dead-lettered after repeated {exc.kind}: {exc.detail}",
             requester_sub=requester_sub,
         )
+    run, _payload = _telemetry_run(msg)
+    if run is not None:
+        await telemetry.finish_run(run, result_stored=False, status="failed")
 
 
 def _identify(msg: Message) -> tuple[UUID, UUID, UUID] | None:
@@ -312,6 +319,164 @@ def _classified(kind: JobErrorKind, detail: str) -> _JobError:
     spec = spec_for(str(kind))
     cls = _RetryableError if spec is not None and spec.retryable else _NonRetryableError
     return cls(str(kind), detail)
+
+
+# Settings the run context records (redacted again at the storage boundary).
+_CONTEXT_PREFIXES = ("asr_", "diar_")
+
+
+def _telemetry_run(msg: Message) -> tuple[telemetry.RunRef | None, JobEnqueuePayload | None]:
+    """The run a message belongs to (a re-labelling is a ``reprocess`` run, sprint 5); ``None``
+    for older senders and bad payloads (those are processed exactly as before)."""
+    try:
+        payload = JobEnqueuePayload.model_validate_json(msg.value.decode("utf-8"))
+    except Exception:  # noqa: BLE001 — _process_one reports the bad payload itself
+        return None, None
+    run = telemetry.extract(
+        payload.processing_run_id, tenant_id=payload.tenant_id, recording_id=payload.job_id
+    )
+    if run is not None and payload.task == "rediarize":
+        run = dataclasses.replace(run, kind="reprocess")
+    return run, payload
+
+
+async def _process_one_measured(state: WorkerState, msg: Message) -> None:
+    """``_process_one`` inside its telemetry run (telemetry sprint 1): the run goes ``running``,
+    one ``other`` span ``worker_job`` covers the job, and the run is closed from the job row's
+    final status. A job left ``running`` for a retry keeps its run open. Fail-open throughout."""
+    run, payload = _telemetry_run(msg)
+    if run is None or payload is None:
+        await _process_one(state, msg)
+        return
+    token = telemetry.set_run(run)
+    job = telemetry.span("other", "worker_job")
+    error: BaseException | None = None
+    try:
+        attempt = await telemetry.begin_run(
+            run,
+            effective_config=settings.model_dump(
+                include={k for k in type(settings).model_fields if k.startswith(_CONTEXT_PREFIXES)}
+            ),
+            device_asr=telemetry.observe_device(
+                getattr(getattr(state.engine, "engine", None), "_model", None), settings.asr_device
+            ),
+            device_diarization=telemetry.Device(
+                value=settings.diar_device, observation="configured"
+            ),
+        )
+        await job.__aenter__()
+        if attempt == 0:
+            # The run already finished: a queue redelivery (reclaim of a long job). Recorded
+            # as evidence, never as a second processing attempt.
+            job.status = "skipped"
+            job.set("redelivered_after_finish", True)
+        _record_queue_wait(msg, payload, redelivery=attempt == 0)
+        try:
+            await _process_one(state, msg)
+        except BaseException as exc:
+            error = exc
+            raise
+    finally:
+        await _finish_telemetry_run(state, run, payload, job, error)
+        telemetry.reset_run(token)
+
+
+def _record_queue_wait(
+    msg: Message, payload: JobEnqueuePayload, *, redelivery: bool = False
+) -> None:
+    """Enqueue → pickup, from the stream entry's own timestamp (XADD id, the broker's clock)
+    to this worker's wall clock: two clocks, so ``clock_source=wall``."""
+    picked = datetime.now(UTC)
+    enqueued = datetime.fromtimestamp(msg.timestamp_ms / 1000, UTC) if msg.timestamp_ms else None
+    attrs: dict[str, Any] = {
+        "queue_name": settings.asr_jobs_stream,
+        "started_at": picked.isoformat(),
+        "enqueued_at": enqueued.isoformat() if enqueued else None,
+        "queue_wait_seconds": round((picked - enqueued).total_seconds(), 4) if enqueued else None,
+        "queue_depth_at_enqueue": payload.queue_depth_at_enqueue,
+        # A redelivered entry keeps its original id: the wait then spans the earlier attempts.
+        "redelivery": redelivery,
+    }
+    reasons: dict[str, Any] = {k: "unavailable" for k, v in attrs.items() if v is None}
+    telemetry.record_span(
+        "queue",
+        "asr.queue_wait",
+        start_wall=enqueued,
+        end_wall=picked,
+        attributes={k: v for k, v in attrs.items() if v is not None},
+        reasons=reasons,
+    )
+
+
+async def _finish_telemetry_run(
+    state: WorkerState,
+    run: telemetry.RunRef,
+    payload: JobEnqueuePayload,
+    job: telemetry.Span,
+    error: BaseException | None,
+) -> None:
+    try:
+        async with tenant_connection(state.app_pool, payload.tenant_id) as conn:
+            row = await conn.fetchrow(
+                "SELECT status, attempts, diarization_status, error_kind"
+                " FROM transcription_jobs WHERE id = $1",
+                payload.job_id,
+            )
+    except Exception:  # noqa: BLE001 — telemetry must not fail the job
+        row = None
+    if row is not None:
+        job.attempt = max(1, int(row["attempts"] or 1))
+    job.update(job_status=row["status"] if row else None)
+    status = row["status"] if row else None
+    if payload.task == "rediarize":
+        # The job stays `complete` through a re-labelling; the re-run's own outcome is
+        # diarization_status.
+        status = {"complete": "complete", "failed": "failed"}.get(
+            row["diarization_status"] if row else "", "running"
+        )
+    if status == "cancelled" and job.status != "skipped":
+        job.status = "cancelled"
+    await job.__aexit__(type(error) if error else None, error, None)
+    if job.status == "skipped":
+        return  # a redelivery of a finished run: nothing to close
+    if status not in ("complete", "failed", "cancelled"):
+        return  # queued/running: a retry follows, the run stays open
+    stages = [("other", job.status)]
+    if (
+        payload.task == "transcribe"
+        and status == "complete"
+        and row is not None
+        and row["diarization_status"] == "failed"
+    ):
+        stages.append(("diarization_infer", "error"))
+    await telemetry.finish_run(
+        run,
+        result_stored=status == "complete",
+        cancelled=status == "cancelled",
+        stage_statuses=stages,
+        error_category="diarization"
+        if len(stages) > 1 or (payload.task == "rediarize" and status == "failed")
+        else (_error_category(row["error_kind"] if row else None) if status == "failed" else None),
+    )
+
+
+# A failed job's error kind → the telemetry error category (sprint 5: a corrupt upload was
+# reported as an ASR failure).
+_ERROR_CATEGORIES: dict[str, telemetry_schema.ErrorCategory] = {
+    "corrupt_audio": "input", "no_speech": "input", "audio_missing": "input",
+    "bad_payload": "input",
+    "enqueue_failed": "queue", "queue_lost": "queue", "retry_exhausted": "queue",
+    "worker_lost": "queue",
+    "decrypt_failed": "storage", "storage_unavailable": "storage",
+    "result_store_failed": "storage", "db_unavailable": "storage", "job_row_missing": "storage",
+    "model_unavailable": "model_load", "diarization_unavailable": "model_load",
+    "gpu_oom": "asr", "timeout": "asr",
+    "diarization_failed": "diarization",
+}  # fmt: skip
+
+
+def _error_category(error_kind: str | None) -> telemetry_schema.ErrorCategory:
+    return _ERROR_CATEGORIES.get(error_kind or "", "unknown")
 
 
 async def _process_one(state: WorkerState, msg: Message) -> None:
@@ -376,23 +541,38 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
     die = _dier(state, tenant_id, job_id, requester_sub=payload.requester_sub)
     try:
         ciphertext_key = f"{tenant_id}/{payload.audio_id}.enc"
-        try:
-            audio_bytes = await state.audio_store.get(
-                key=ciphertext_key,
-                tenant_id=tenant_id,
-                aad=payload.audio_id.bytes,
-            )
-        except ObjectNotFoundError as exc:
-            raise await die(JobErrorKind.AUDIO_MISSING, str(exc)) from exc
-        except CryptoError as exc:
-            raise await die(JobErrorKind.DECRYPT_FAILED, str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001 — S3 transport
-            raise await die(JobErrorKind.STORAGE_UNAVAILABLE, str(exc)) from exc
+        async with telemetry.span("audio_prep", "asr.audio_prep") as prep:
+            # EncryptedObjectStore.get fetches and decrypts in one call; ffmpeg decodes and
+            # resamples in one pass: those halves cannot be timed apart.
+            prep.missing("decrypt_seconds", "not_supported")
+            prep.missing("resample_seconds", "not_supported")
+            prep.missing("source_sample_rate_hz", "unavailable")
+            prep.set("target_sample_rate_hz", 16_000)
+            t_fetch = time.monotonic()
+            try:
+                audio_bytes = await state.audio_store.get(
+                    key=ciphertext_key,
+                    tenant_id=tenant_id,
+                    aad=payload.audio_id.bytes,
+                )
+            except ObjectNotFoundError as exc:
+                raise await die(JobErrorKind.AUDIO_MISSING, str(exc)) from exc
+            except CryptoError as exc:
+                raise await die(JobErrorKind.DECRYPT_FAILED, str(exc)) from exc
+            except Exception as exc:  # noqa: BLE001 — S3 transport
+                raise await die(JobErrorKind.STORAGE_UNAVAILABLE, str(exc)) from exc
+            prep.set("retrieve_seconds", round(time.monotonic() - t_fetch, 4))
 
-        try:
-            stereo, pcm = await _decode_capture(audio_bytes, payload.channel_layout)
-        except AudioDecodeError as exc:
-            raise await die(JobErrorKind.CORRUPT_AUDIO, str(exc)) from exc
+            t_decode = time.monotonic()
+            try:
+                stereo, pcm = await _decode_capture(audio_bytes, payload.channel_layout)
+            except AudioDecodeError as exc:
+                raise await die(JobErrorKind.CORRUPT_AUDIO, str(exc)) from exc
+            prep.update(
+                decode_seconds=round(time.monotonic() - t_decode, 4),
+                bytes=len(audio_bytes),
+                channel_layout=payload.channel_layout,
+            )
 
         audio_seconds = pcm.shape[0] / 16_000.0
         _audio_duration_seconds.record(audio_seconds)
@@ -452,25 +632,30 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
 
         # Shadow ASR runs alongside diarization; bounded, numbers only.
         shadow_task: asyncio.Task[Any] | None = None
+        shadow_span: telemetry.Span | None = None
         if getattr(state, "shadow_asr", None) is not None and output.segments and shadow.sampled():
+            shadow_span = telemetry.span("other", "asr.shadow")
             shadow_task = asyncio.create_task(
-                shadow.run(
-                    state.shadow_asr,
-                    redis=state.redis,
-                    decode=decode_recording,
-                    primary=output,
-                    audio_seconds=audio_seconds,
-                    decode_kwargs={
-                        "pcm": pcm,
-                        "stereo": stereo,
-                        "language": payload.language,
-                        "prompt": payload.vocabulary_hint,
-                        "first_frame_offset_ms": payload.first_frame_offset_ms,
-                        "timeout": max_infer,
-                        "deadline": time.monotonic() + max_infer,
-                        "should_cancel": None,
-                        "job_id": job_id,
-                    },
+                _in_span(
+                    shadow_span,
+                    shadow.run(
+                        state.shadow_asr,
+                        redis=state.redis,
+                        decode=decode_recording,
+                        primary=output,
+                        audio_seconds=audio_seconds,
+                        decode_kwargs={
+                            "pcm": pcm,
+                            "stereo": stereo,
+                            "language": payload.language,
+                            "prompt": payload.vocabulary_hint,
+                            "first_frame_offset_ms": payload.first_frame_offset_ms,
+                            "timeout": max_infer,
+                            "deadline": time.monotonic() + max_infer,
+                            "should_cancel": None,
+                            "job_id": job_id,
+                        },
+                    ),
                 )
             )
 
@@ -490,10 +675,26 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
         diar: OfflineDiarization | None = None
         # Remote diarizer failure: transcript still completes, row carries why.
         diarization_error: str | None = None
+        diar_span = _diarization_span(
+            state, "diarization_infer", "diarization.infer", audio_seconds
+        )
+        if not payload.diarize:
+            diar_span.status = "skipped"
+            diar_span.set("skip_reason", "not_requested")
+            async with diar_span:
+                pass
         if payload.diarize:
             # After the transcript exists, so a diarizer failure classifies as diarization_*.
+            load_span = _diarization_span(
+                state, "diarization_load", "diarization.load", audio_seconds
+            )
+            load_span.set("state", "warm" if _diarizer_loaded(state.diarizer) else "cold")
             try:
-                await state.diarizer.ensure_loaded()
+                t_load = time.monotonic()
+                async with load_span:
+                    await state.diarizer.ensure_loaded()
+                    load_span.set("load_seconds", round(time.monotonic() - t_load, 4))
+                    load_span.set("device", _diarizer_device(state.diarizer))
             except DiarizationUnavailableError as exc:
                 _diarizer_unavailable.add(1, {"engine": state.diarizer.engine})
                 if not _remote(state.diarizer):
@@ -504,11 +705,26 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
             diar_t0 = time.monotonic()
             try:
                 if diarization_error is None:
-                    # Diarization can run for minutes on CPU: a cancel stops the wait.
-                    diar, layout = await _unless_cancelled(
-                        _diarize_capture(state, pcm, stereo, _hints(payload), job_id=job_id),
-                        should_cancel,
-                    )
+                    async with diar_span:
+                        diar_span.set("device", _diarizer_device(state.diarizer))
+                        if shadow_span is not None:
+                            # Shadow ASR runs alongside diarization: siblings that overlap.
+                            diar_span.parallel_with.append(shadow_span.span_id)
+                        if settings.dev_fault_diarization:
+                            raise RuntimeError("dev fault: diarization")
+                        # Diarization can run for minutes on CPU: a cancel stops the wait.
+                        diar, layout = await _unless_cancelled(
+                            _diarize_capture(state, pcm, stereo, _hints(payload), job_id=job_id),
+                            should_cancel,
+                        )
+                        diar_span.set("infer_seconds", round(time.monotonic() - diar_t0, 4))
+                        diar_span.set("layout", layout)
+                        _note_diarization(diar_span, diar)
+                else:
+                    diar_span.status = "skipped"
+                    diar_span.set("skip_reason", "diarizer_unavailable")
+                    async with diar_span:
+                        pass
             except TranscriptionCancelledError:
                 await _mark_cancelled(state, tenant_id, job_id)
                 return
@@ -521,12 +737,19 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
         if diar is not None:
             # Clock stops before word attribution (budget is the diarizer's alone).
             diar_seconds = time.monotonic() - diar_t0
-            output = _apply_diarization(output, diar)
+            async with telemetry.span("postprocess_attribute", "asr.speaker_attribution") as att:
+                t_att = time.monotonic()
+                output = _apply_diarization(output, diar)
+                att.update(
+                    duration_seconds=round(time.monotonic() - t_att, 4), items=len(output.segments)
+                )
             stats = _diarization_stats(output, diar, diar_seconds, channel_layout=layout)
             output = output.model_copy(
                 update={"metadata": output.metadata.model_copy(update={"diarization": stats})}
             )
             _record_diarization_metrics(stats, audio_seconds=audio_seconds)
+
+        _skipped_span("postprocess_align", "asr.align", "decoder_word_timestamps")
 
         # A cancel that landed during the last chunk must not become `complete`.
         if await _is_cancelled(state, tenant_id, job_id):
@@ -544,6 +767,9 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
 
         result_key = f"{tenant_id}/{job_id}.json.enc"
         body = output.model_dump_json().encode("utf-8")
+        persist = telemetry.span("persist", "asr.persist")
+        await persist.__aenter__()
+        t_persist = time.monotonic()
         try:
             await state.transcript_store.put(
                 key=result_key,
@@ -552,6 +778,7 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                 aad=job_id.bytes,
             )
         except Exception as exc:  # noqa: BLE001 — encrypt or transport
+            await persist.__aexit__(type(exc), exc, None)
             # Retryable: redoing inference beats a `complete` row pointing at a missing object.
             raise await die(JobErrorKind.RESULT_STORE_FAILED, str(exc)) from exc
 
@@ -606,8 +833,15 @@ async def _process_one(state: WorkerState, msg: Message) -> None:
                         named[0],
                     )
         except Exception as exc:  # noqa: BLE001 — asyncpg transport / pool
+            await persist.__aexit__(type(exc), exc, None)
             # Transcript stored, bookkeeping failed; a retry overwrites the same key.
             raise await die(JobErrorKind.DB_UNAVAILABLE, str(exc)) from exc
+        persist.update(
+            duration_seconds=round(time.monotonic() - t_persist, 4),
+            items=len(output.segments),
+            bytes=len(body),
+        )
+        await persist.__aexit__(None, None, None)
 
         await state.audit_writer.write_event(
             tenant_id=tenant_id,
@@ -686,35 +920,46 @@ async def decode_recording(
     engine raises; ``deadline`` bounds every decode together.
     """
     provider = state.engine
-    heard = await asyncio.to_thread(
-        vad.speech_runs,
-        pcm,
-        stereo=stereo,
-        pad_ms=settings.asr_vad_pad_ms,
-        floor=settings.asr_vad_floor_enabled,
-        floor_threshold=settings.asr_vad_floor_threshold,
-        floor_max_speech_share=settings.asr_vad_floor_max_speech_share,
-    )
+    _asr_model_init(provider)
+    await _vad_model_init()
+    async with telemetry.span("vad", "vad.speech_runs") as vad_span:
+        t_vad = time.monotonic()
+        heard = await asyncio.to_thread(
+            vad.speech_runs,
+            pcm,
+            stereo=stereo,
+            pad_ms=settings.asr_vad_pad_ms,
+            floor=settings.asr_vad_floor_enabled,
+            floor_threshold=settings.asr_vad_floor_threshold,
+            floor_max_speech_share=settings.asr_vad_floor_max_speech_share,
+        )
+        _note_vad(vad_span, heard, time.monotonic() - t_vad)
 
     async def decode() -> TranscriptionOutput:
         if not hasattr(provider, "transcribe_runs"):
-            out: TranscriptionOutput = await provider.transcribe(
-                pcm, language=language, prompt=prompt, should_cancel=should_cancel
-            )
+            async with _asr_primary_span(provider) as primary:
+                out: TranscriptionOutput = await provider.transcribe(
+                    pcm, language=language, prompt=prompt, should_cancel=should_cancel
+                )
+                _note_asr_primary(primary, out, [len(pcm) / 16_000])
             return out
-        lid = await chunks.identifier_for(provider)
+        lid = await _measured_lid(provider)
         planned = await chunks.plan(
             pcm, heard.runs, language=language, lid=lid, should_cancel=should_cancel
         )
         if planned.runs:
-            out = await provider.transcribe_runs(
-                pcm,
-                planned.runs,
-                language=planned.language,
-                prompt=prompt,
-                should_cancel=should_cancel,
-                group_seconds=settings.asr_http_group_seconds,
-            )
+            async with _asr_primary_span(provider) as primary:
+                out = await provider.transcribe_runs(
+                    pcm,
+                    planned.runs,
+                    language=planned.language,
+                    prompt=prompt,
+                    should_cancel=should_cancel,
+                    group_seconds=settings.asr_http_group_seconds,
+                )
+                _note_asr_primary(
+                    primary, out, [(r.end_ms - r.start_ms) / 1000 for r in planned.runs]
+                )
         else:
             out = TranscriptionOutput(
                 language=planned.language,
@@ -743,10 +988,15 @@ async def decode_recording(
         )
 
     output = await asyncio.wait_for(decode(), timeout=timeout)
-    gated = guards.apply(output, heard.runs)
-    output = gated.output
+    with _cleanup_span("asr.guards", output) as cleanup:
+        gated = guards.apply(output, heard.runs)
+        output = gated.output
+        cleanup.set("items", len(output.diagnostics.dropped_segments))
     # Prompt echo removed for every backend; an all-echo transcript files as `no_speech`.
-    output = _guarded(output, prompt, job_id=job_id)
+    with _cleanup_span("asr.prompt_echo", output) as cleanup:
+        before = len(output.segments)
+        output = _guarded(output, prompt, job_id=job_id)
+        cleanup.set("items", before - len(output.segments))
     # Runs the first decode lost (and loops) are decoded again without the prompt.
     output = await _covered(
         state,
@@ -774,7 +1024,10 @@ async def decode_recording(
             should_cancel=should_cancel,
             job_id=job_id,
         )
-    return output.model_copy(update={"noise": chunks.nonspeech_regions(pcm, heard.runs)})
+    with _cleanup_span("asr.noise_markers", output) as cleanup:
+        noise = chunks.nonspeech_regions(pcm, heard.runs)
+        cleanup.set("items", len(noise))
+    return output.model_copy(update={"noise": noise})
 
 
 def _guarded(
@@ -909,6 +1162,9 @@ async def _covered(
             or output.language
         )
         chunk = pcm[int(slice_start * 16) : int(run.end_ms * 16)]
+        recovery = _recovery_span(state.engine, cause, len(chunk) / 16_000)
+        await recovery.__aenter__()
+        t_rec = time.monotonic()
         try:
             second = await asyncio.wait_for(
                 state.engine.transcribe(
@@ -920,18 +1176,22 @@ async def _covered(
                 ),
                 timeout=remaining,
             )
-        except TimeoutError:
+        except BaseException as exc:
+            # The span closes as error/cancelled; the branches below handle the job as before.
+            await _end_recovery(recovery, t_rec, exc)
+            if not isinstance(exc, (TimeoutError, ProviderError)):
+                raise
+            if isinstance(exc, ProviderError):
+                logger.warning(
+                    "asr.second_pass_failed",
+                    extra={"job_id": str(job_id), "start_ms": run.start_ms, "kind": str(exc.kind)},
+                )
+                _second_pass_total.add(1, {"cause": cause, "outcome": "empty"})
+                loop_outcome("second_pass_failed")
+                continue
             timed_out = True
             by_cause[cov.TIMEOUT_CAUSE] = by_cause.get(cov.TIMEOUT_CAUSE, 0) + 1
             _second_pass_total.add(1, {"cause": cov.TIMEOUT_CAUSE, "outcome": "empty"})
-            loop_outcome("second_pass_failed")
-            continue
-        except ProviderError as exc:
-            logger.warning(
-                "asr.second_pass_failed",
-                extra={"job_id": str(job_id), "start_ms": run.start_ms, "kind": str(exc.kind)},
-            )
-            _second_pass_total.add(1, {"cause": cause, "outcome": "empty"})
             loop_outcome("second_pass_failed")
             continue
         chunks += 1
@@ -977,9 +1237,12 @@ async def _covered(
             recovered += second_words - first_words
             _second_pass_total.add(1, {"cause": cause, "outcome": "recovered"})
             loop_outcome("recovered")
+            recovery.update(recovered_words=second_words - first_words, spliced=True)
         else:
             _second_pass_total.add(1, {"cause": cause, "outcome": "empty"})
             loop_outcome("kept_truncated")
+            recovery.update(recovered_words=0, spliced=False)
+        await _end_recovery(recovery, t_rec, None)
 
     coverage = cov.measure(
         runs,
@@ -1455,6 +1718,13 @@ async def _rediarize_one(state: WorkerState, payload: JobEnqueuePayload) -> None
         raise await fail(JobErrorKind.AUDIO_MISSING, "job has no stored transcript")
     current_key = key_from_uri(str(claimed["result_storage_uri"]))
 
+    prep = telemetry.span("audio_prep", "asr.audio_prep")
+    prep.missing("decrypt_seconds", "not_supported")
+    prep.missing("resample_seconds", "not_supported")
+    prep.missing("source_sample_rate_hz", "unavailable")
+    prep.set("target_sample_rate_hz", 16_000)
+    await prep.__aenter__()
+    t_fetch = time.monotonic()
     try:
         audio_bytes = await state.audio_store.get(
             key=f"{tenant_id}/{payload.audio_id}.enc",
@@ -1479,21 +1749,44 @@ async def _rediarize_one(state: WorkerState, payload: JobEnqueuePayload) -> None
         raise await fail(JobErrorKind.STORAGE_UNAVAILABLE, str(exc)) from exc
     # Layout travels on the job's capture context.
     layout = _parse_names(claimed["capture_context"]).get("channel_layout", "mono")
+    prep.set("retrieve_seconds", round(time.monotonic() - t_fetch, 4))
+    t_decode = time.monotonic()
     try:
         stereo, pcm = await _decode_capture(audio_bytes, layout)
     except AudioDecodeError as exc:
+        await prep.__aexit__(type(exc), exc, None)
         raise await fail(JobErrorKind.CORRUPT_AUDIO, str(exc)) from exc
+    except BaseException as exc:
+        await prep.__aexit__(type(exc), exc, None)
+        raise
+    prep.set("decode_seconds", round(time.monotonic() - t_decode, 4))
+    await prep.__aexit__(None, None, None)
+    audio_seconds = pcm.shape[0] / 16_000.0
 
+    load_span = _diarization_span(state, "diarization_load", "diarization.load", audio_seconds)
+    load_span.set("state", "warm" if _diarizer_loaded(state.diarizer) else "cold")
     try:
-        await state.diarizer.ensure_loaded()
+        t_load = time.monotonic()
+        async with load_span:
+            await state.diarizer.ensure_loaded()
+            load_span.set("load_seconds", round(time.monotonic() - t_load, 4))
+            load_span.set("device", _diarizer_device(state.diarizer))
     except DiarizationUnavailableError as exc:
         _diarizer_unavailable.add(1, {"engine": state.diarizer.engine})
         raise await fail(JobErrorKind.DIARIZATION_UNAVAILABLE, str(exc)) from exc
     diar_t0 = time.monotonic()
+    infer_span = _diarization_span(state, "diarization_infer", "diarization.infer", audio_seconds)
     try:
-        diar, used_layout = await _diarize_capture(
-            state, pcm, stereo, _hints(payload), job_id=job_id
-        )
+        async with infer_span:
+            infer_span.set("device", _diarizer_device(state.diarizer))
+            if settings.dev_fault_diarization:
+                raise RuntimeError("dev fault: diarization")
+            diar, used_layout = await _diarize_capture(
+                state, pcm, stereo, _hints(payload), job_id=job_id
+            )
+            infer_span.set("infer_seconds", round(time.monotonic() - diar_t0, 4))
+            infer_span.set("layout", used_layout)
+            _note_diarization(infer_span, diar)
     except Exception as exc:  # noqa: BLE001 — deterministic for a recording
         raise await fail(JobErrorKind.DIARIZATION_FAILED, str(exc)) from exc
 
@@ -1505,7 +1798,12 @@ async def _rediarize_one(state: WorkerState, payload: JobEnqueuePayload) -> None
             ]
         }
     )
-    relabelled = _apply_diarization(stripped, diar)
+    async with telemetry.span("postprocess_attribute", "asr.speaker_attribution") as att:
+        t_att = time.monotonic()
+        relabelled = _apply_diarization(stripped, diar)
+        att.update(
+            duration_seconds=round(time.monotonic() - t_att, 4), items=len(relabelled.segments)
+        )
     stats = _diarization_stats(
         relabelled, diar, time.monotonic() - diar_t0, channel_layout=used_layout
     )
@@ -1517,12 +1815,18 @@ async def _rediarize_one(state: WorkerState, payload: JobEnqueuePayload) -> None
 
     new_key = revision_key(tenant_id, job_id, target_rev)
     try:
-        await state.transcript_store.put(
-            key=new_key,
-            plaintext=relabelled.model_dump_json().encode("utf-8"),
-            tenant_id=tenant_id,
-            aad=job_id.bytes,
-        )
+        async with telemetry.span("persist", "asr.persist") as persist:
+            t_put = time.monotonic()
+            await state.transcript_store.put(
+                key=new_key,
+                plaintext=relabelled.model_dump_json().encode("utf-8"),
+                tenant_id=tenant_id,
+                aad=job_id.bytes,
+            )
+            persist.update(
+                duration_seconds=round(time.monotonic() - t_put, 4),
+                items=len(relabelled.segments),
+            )
     except Exception as exc:  # noqa: BLE001
         raise await fail(JobErrorKind.RESULT_STORE_FAILED, str(exc)) from exc
 
@@ -1868,3 +2172,293 @@ def _release_cuda_cache() -> None:
             torch.cuda.empty_cache()
     except Exception:
         pass
+
+
+# ── Telemetry (telemetry sprint 2): spans for every worker stage ──────────
+# Counts, durations and enums only; nothing here changes what the job does.
+
+_MAX_LIST = 500  # list attributes are capped; the overflow is flagged
+
+
+def _capped(values: list[float]) -> tuple[list[float], bool]:
+    return [round(v, 3) for v in values[:_MAX_LIST]], len(values) > _MAX_LIST
+
+
+def _whisper_model(provider: Any) -> Any:
+    """The loaded faster-whisper ``WhisperModel`` of an in-process provider, else None."""
+    return getattr(getattr(provider, "engine", None), "_model", None)
+
+
+def _inproc(provider: Any) -> bool:
+    return getattr(provider, "engine", None) is not None
+
+
+def _asr_device(provider: Any) -> telemetry.Device | None:
+    if _inproc(provider):
+        return telemetry.observe_device(_whisper_model(provider), settings.asr_device)
+    return None  # an HTTP backend does not report its device
+
+
+def _quantization(compute_type: str | None) -> str | None:
+    return compute_type if compute_type and compute_type.startswith(("int8", "int16")) else None
+
+
+def _asr_model_init(provider: Any) -> None:
+    """ASR loads at worker start (``build_state``), so a run sees it ``warm``; the startup
+    load time is reported alongside, not as this run's load."""
+    with telemetry.span("model_init", "asr.model") as s:
+        t0 = time.monotonic()
+        loaded = bool(getattr(provider, "is_loaded", True))
+        s.update(
+            model_kind="asr",
+            model_name=getattr(provider, "model_name", None),
+            state="warm" if loaded else "cold",
+            load_seconds=round(time.monotonic() - t0, 6),
+            backend=settings.asr_backend,
+            startup_load_seconds=round(float(getattr(provider, "warmup_seconds", 0.0) or 0.0), 3),
+        )
+        s.missing("warmup_seconds", "not_applicable")  # the warm-up ran at startup
+        if settings.asr_model_revision:
+            s.set("model_revision", settings.asr_model_revision)
+        else:
+            s.missing("model_revision", "unavailable")
+        if _inproc(provider):
+            s.set("compute_type", settings.asr_compute_type)
+            quant = _quantization(settings.asr_compute_type)
+            if quant:
+                s.set("quantization", quant)
+            else:
+                s.missing("quantization", "not_applicable")
+            device = _asr_device(provider)
+            s.set("device", device.model_dump() if device else None)
+        else:
+            for key in ("compute_type", "quantization", "device"):
+                s.missing(key, "unavailable")
+
+
+async def _vad_model_init() -> None:
+    """Silero loads lazily on the first VAD call; that load is timed here, apart from VAD."""
+    with telemetry.span("model_init", "vad.model") as s:
+        cold = vad._model is None
+        t0 = time.monotonic()
+        if cold:
+            await asyncio.to_thread(vad._ensure_loaded)
+        s.update(
+            model_kind="vad",
+            model_name="silero-vad" if vad._model != "stub" else "stub",
+            state="cold" if cold else "warm",
+            load_seconds=round(time.monotonic() - t0, 6),
+        )
+        device = telemetry.observe_device(vad._model, "cpu") if vad._model != "stub" else None
+        s.set("device", device.model_dump() if device else None)
+        for key in ("model_revision", "quantization", "compute_type"):
+            s.missing(key, "not_applicable" if key != "model_revision" else "unavailable")
+        s.missing("warmup_seconds", "not_applicable")
+
+
+def _note_vad(s: telemetry.Span, heard: vad.SpeechRuns, seconds: float) -> None:
+    lengths = [(r.end_ms - r.start_ms) / 1000 for r in heard.runs]
+    capped, truncated = _capped(lengths)
+    s.update(
+        backend="stub" if heard.stub else "silero",
+        duration_seconds=round(seconds, 4),
+        speech_seconds=round(sum(lengths), 3),
+        run_count=len(lengths),
+        run_lengths_seconds=capped,
+        truncated=truncated,
+        threshold=vad.DEFAULT_THRESHOLD,
+        floor_used=heard.floor_used,
+    )
+
+
+def _asr_primary_span(provider: Any) -> telemetry.Span:
+    s = telemetry.span("asr_primary", "asr.transcribe_runs")
+    device = _asr_device(provider)
+    s.update(backend=settings.asr_backend, model=getattr(provider, "model_name", None))
+    if device is not None:
+        s.set("device", device.model_dump())
+    else:
+        s.missing("device", "unavailable")
+    if _inproc(provider):
+        s.update(compute_type=settings.asr_compute_type, beam_size=settings.asr_beam_size)
+    else:
+        s.missing("compute_type", "unavailable")
+        s.missing("beam_size", "unavailable")
+    return s
+
+
+def _words(segments: Sequence[Segment]) -> int:
+    return sum(len(seg.words) if seg.words else len(seg.text.split()) for seg in segments)
+
+
+def _note_asr_primary(
+    s: telemetry.Span, out: TranscriptionOutput, chunk_seconds: list[float]
+) -> None:
+    capped, truncated = _capped(chunk_seconds)
+    fed = sum(chunk_seconds)
+    s.update(
+        wall_seconds=round((time.monotonic_ns() - s._start_ns) / 1e9, 4),
+        audio_processed_seconds=round(fed, 3),
+        chunk_count=len(chunk_seconds),
+        chunk_seconds=capped,
+        truncated=truncated,
+        word_count=_words(out.segments),
+        segment_count=len(out.segments),
+    )
+    telemetry.add_audio_processed(fed)
+
+
+class _MeasuredLID:
+    """Each language-ID call is its own ``language_detection`` span."""
+
+    def __init__(self, lid: Any, model: str | None) -> None:
+        self._lid = lid
+        self._model = model
+        self.source = lid.source
+
+    async def _call(self, name: str, fn: Any, pcm: np.ndarray) -> Any:
+        with telemetry.span("language_detection", name) as s:
+            t0 = time.monotonic()
+            guess = await fn(pcm)
+            s.update(
+                model=self._model, call_count=1, duration_seconds=round(time.monotonic() - t0, 4)
+            )
+            if guess is None:
+                s.missing("detected", "unavailable")
+                s.missing("decided_language", "unavailable")
+            else:
+                probs = sorted(guess.probabilities.items(), key=lambda kv: -kv[1])[:3]
+                s.set(
+                    "detected",
+                    [{"lang": k, "confidence": round(v, 4)} for k, v in probs]
+                    or [{"lang": guess.language, "confidence": round(guess.probability, 4)}],
+                )
+                s.set("decided_language", guess.language)
+            s.set("audio_seconds", round(len(pcm) / 16_000, 3))
+            return guess
+
+    async def recording_language(self, sample: np.ndarray) -> Any:
+        return await self._call("lid.recording", self._lid.recording_language, sample)
+
+    async def run_language(self, pcm: np.ndarray) -> Any:
+        return await self._call("lid.run", self._lid.run_language, pcm)
+
+
+async def _measured_lid(provider: Any) -> Any:
+    """The chunk planner's language identifier, measured; an HTTP backend's local LID model
+    loads lazily here and gets its own ``model_init``."""
+    if _inproc(provider):
+        return _MeasuredLID(
+            await chunks.identifier_for(provider), getattr(provider, "model_name", None)
+        )
+    with telemetry.span("model_init", "lid.model") as s:
+        cold = chunks._local_model is None and not chunks._local_model_failed
+        t0 = time.monotonic()
+        lid = await chunks.identifier_for(provider)
+        s.update(
+            model_kind="lang",
+            model_name=settings.asr_lid_model,
+            state="cold" if cold else "warm",
+            load_seconds=round(time.monotonic() - t0, 6),
+            compute_type="int8",
+            quantization="int8",
+        )
+        device = (
+            telemetry.observe_device(chunks._local_model, "cpu") if chunks._local_model else None
+        )
+        s.set("device", device.model_dump() if device else None)
+        s.missing("model_revision", "unavailable")
+        s.missing("warmup_seconds", "not_applicable")
+    return _MeasuredLID(lid, settings.asr_lid_model)
+
+
+@contextlib.contextmanager
+def _cleanup_span(name: str, output: TranscriptionOutput) -> Iterator[telemetry.Span]:
+    t0 = time.monotonic()
+    with telemetry.span("postprocess_cleanup", name) as s:
+        s.set("segments_in", len(output.segments))
+        try:
+            yield s
+        finally:
+            s.set("duration_seconds", round(time.monotonic() - t0, 4))
+
+
+def _recovery_span(engine: Any, cause: str, seconds: float) -> telemetry.Span:
+    s = telemetry.span("asr_recovery", f"asr.second_pass.{cause}")
+    device = _asr_device(engine)
+    s.update(
+        trigger_reason=cause,
+        attempt=1,
+        audio_reprocessed_seconds=round(seconds, 3),
+        backend=settings.asr_backend,
+        model=getattr(engine, "model_name", None),
+    )
+    if device is not None:
+        s.set("device", device.model_dump())
+    else:
+        s.missing("device", "unavailable")
+    telemetry.add_audio_processed(seconds)
+    return s
+
+
+async def _end_recovery(s: telemetry.Span, t0: float, exc: BaseException | None) -> None:
+    s.set("wall_seconds", round(time.monotonic() - t0, 4))
+    if exc is not None:
+        s.missing("recovered_words", "error")
+        await s.__aexit__(type(exc), exc, None)
+    else:
+        await s.__aexit__(None, None, None)
+
+
+def _diarizer_loaded(d: Any) -> bool:
+    if getattr(d, "loaded", None) is not None:
+        return bool(d.loaded)
+    return getattr(d, "_pipeline", None) is not None or bool(getattr(d, "_ready", False))
+
+
+def _diarizer_device(d: Any) -> dict[str, str] | None:
+    if _remote(d):
+        return telemetry.Device(value="remote", observation="configured").model_dump()
+    loaded = getattr(d, "_pipeline", None) or getattr(getattr(d, "_embedder", None), "_model", None)
+    device = telemetry.observe_device(loaded, settings.diar_device)
+    return device.model_dump() if device else None
+
+
+def _diarization_span(state: Any, stage: str, name: str, audio_seconds: float) -> telemetry.Span:
+    s = telemetry.span(stage, name)
+    d = state.diarizer
+    s.update(
+        backend=getattr(d, "engine", None),
+        model=getattr(d, "engine_version", None) or getattr(d, "engine", None),
+        audio_seconds=round(audio_seconds, 3),
+    )
+    if stage == "diarization_load":
+        s.missing("speakers_detected", "not_applicable")
+        s.missing("unknown_speaker_share", "not_applicable")
+    return s
+
+
+def _note_diarization(s: telemetry.Span, diar: OfflineDiarization) -> None:
+    from diarization import UNKNOWN
+
+    total = sum(seg.end_ms - seg.start_ms for seg in diar.segments)
+    unknown = sum(seg.end_ms - seg.start_ms for seg in diar.segments if seg.label == UNKNOWN)
+    s.update(
+        speakers_detected=len({seg.label for seg in diar.segments if seg.label != UNKNOWN}),
+        unknown_speaker_share=round(unknown / total, 4) if total else None,
+    )
+    if not total:
+        s.missing("unknown_speaker_share", "not_applicable")
+
+
+def _skipped_span(stage: str, name: str, reason: str) -> None:
+    with telemetry.span(stage, name) as s:
+        s.status = "skipped"
+        s.set("skip_reason", reason)
+        for key in ("duration_seconds", "items"):
+            s.missing(key, "not_applicable")
+
+
+async def _in_span(s: telemetry.Span, coro: Any) -> Any:
+    async with s:
+        return await coro

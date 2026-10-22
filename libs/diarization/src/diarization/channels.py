@@ -21,7 +21,6 @@ _SILENCE_DB = -120.0
 
 NONE, LOCAL, REMOTE, BOTH = 0, 1, 2, 3
 Side = Literal["local", "remote", "both", "none"]
-_SIDE_NAMES: dict[int, Side] = {NONE: "none", LOCAL: "local", REMOTE: "remote", BOTH: "both"}
 
 
 class Segmenter(Protocol):
@@ -212,6 +211,3 @@ def _overall(windows: list[LeakEstimate]) -> LeakEstimate:
         round(float(np.median([w.gain_db for w in leaky])), 2),  # type: ignore[misc]
         int(np.median([w.delay_ms for w in leaky])),  # type: ignore[misc]
     )
-
-
-SIDE_NAMES = _SIDE_NAMES

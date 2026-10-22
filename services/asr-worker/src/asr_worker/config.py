@@ -258,6 +258,19 @@ class Settings(BaseSettings):
 
     worker_consumer_name: str = Field(default="worker-1", alias="MD_ASR_WORKER_NAME")
 
+    # ── Pipeline telemetry (telemetry sprints; libs/telemetry) ──────────
+    telemetry_enabled: bool = Field(default=True, alias="MDX_TELEMETRY_ENABLED")
+    telemetry_retention_days: int = Field(default=90, ge=1, alias="MDX_TELEMETRY_RETENTION_DAYS")
+    # The commit this image was built from (Dockerfile ARG BUILD_SHA), recorded per run.
+    build_sha: str = Field(default="", alias="MDX_BUILD_SHA")
+    # Dev-only fault (telemetry sprint 5, S5): diarization raises, to see a failed stage in
+    # telemetry. Ignored outside development.
+    dev_fault_diarization_flag: bool = Field(default=False, alias="MDX_DEV_FAULT_DIARIZATION")
+
+    @property
+    def dev_fault_diarization(self) -> bool:
+        return self.dev_fault_diarization_flag and self.environment == "development"
+
 
 # pyannote telemetry and HF hub access forced off at import, before pyannote can be
 # imported; an inherited "true" must not win. The v2 engine re-checks these.

@@ -28,6 +28,11 @@ CLAIM: Final = "claim"
 TABLE_ROW: Final = "table_row"
 
 _HEADING: Final = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
+# A line that is only bold text (``**ÜBERBLICK**``, ``__Überblick:__``, ``**Überblick**:``):
+# the writer's heading without the ``##``. A bold span inside a longer line stays text.
+_BOLD_HEADING: Final = re.compile(
+    r"^\s*(?:\*\*([^*]*[^*\s:][^*]*)\*\*|__([^_]*[^_\s:][^_]*)__)\s*:?\s*$"
+)
 _BULLET: Final = re.compile(r"^\s*[-*•]\s+(.*)$")
 _TEMPLATE_LINE: Final = re.compile(
     r"^\s*\*{0,2}Template\*{0,2}\s*:\s*\*{0,2}\s*`?([\w-]+)`?\*{0,2}\s*$", re.I
@@ -257,6 +262,11 @@ def parse(markdown: str, turns: list[Any]) -> ParsedNote:
         if head:
             flush_paragraph()
             current = section_for(head.group(2), len(head.group(1)))
+            continue
+        bold = _BOLD_HEADING.match(line)
+        if bold:
+            flush_paragraph()
+            current = section_for((bold.group(1) or bold.group(2)).strip().rstrip(":").strip(), 2)
             continue
         tpl = _TEMPLATE_LINE.match(line)
         if tpl and note.template_name is None:

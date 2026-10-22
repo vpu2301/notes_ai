@@ -39,7 +39,16 @@ from .registry import (
     ResolvedBackend,
     WorkspaceModelSettings,
 )
-from .usage import UsageRecord, UsageSink, emit, set_usage_sink
+from .usage import (
+    AttemptRecord,
+    AttemptSink,
+    UsageRecord,
+    UsageSink,
+    emit,
+    emit_attempt,
+    set_attempt_sink,
+    set_usage_sink,
+)
 
 __all__ = [
     "ASRProvider",
@@ -68,13 +77,17 @@ __all__ = [
     "ShouldCancel",
     "SpeechRun",
     "TranscriptionCancelledError",
+    "AttemptRecord",
+    "AttemptSink",
     "UsageRecord",
     "UsageSink",
     "WorkspaceModelSettings",
     "build_asr_provider",
     "build_chat_provider",
     "emit",
+    "emit_attempt",
     "load_config",
     "parse_config",
+    "set_attempt_sink",
     "set_usage_sink",
 ]

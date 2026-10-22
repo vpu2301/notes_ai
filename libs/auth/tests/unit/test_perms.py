@@ -326,3 +326,19 @@ def test_guest_reaches_notes_and_nothing_else():
         ("autocomplete.read", "phrase"),
     ):
         assert not can("guest", action, target)
+
+
+def test_telemetry_reads_and_the_platform_admin():
+    # Recording-scoped reads for the people who can reach a recording; the cross-tenant
+    # dashboard for the platform admin alone, who holds no workspace or content permission.
+    for role in ("tenant_admin", "member", "viewer", "platform_admin"):
+        assert can(role, "telemetry.read", "telemetry") is True, role
+    for role in ("auditor", "service", "device", "guest"):
+        assert can(role, "telemetry.read", "telemetry") is False, role
+    for role in sorted(KNOWN_ROLES - {"platform_admin"}):
+        assert can(role, "telemetry.read_all", "telemetry") is False, role
+    assert can("platform_admin", "telemetry.read_all", "telemetry") is True
+    assert {(a, t) for (r, a, t) in ALLOW if r == "platform_admin"} == {
+        ("telemetry.read", "telemetry"),
+        ("telemetry.read_all", "telemetry"),
+    }

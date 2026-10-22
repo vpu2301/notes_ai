@@ -5,11 +5,9 @@ set -euo pipefail
 
 AUTH_URL="${AUTH_URL:-http://localhost:8000}"
 ASR_URL="${ASR_URL:-http://localhost:8001}"
-DICTATION_URL="${DICTATION_URL:-http://localhost:8002}"
 NOTIFICATION_URL="${NOTIFICATION_URL:-http://localhost:8004}"
 NLP_URL="${NLP_URL:-http://localhost:8005}"
 NOTE_URL="${NOTE_URL:-http://localhost:8006}"
-AUTOCOMPLETE_URL="${AUTOCOMPLETE_URL:-http://localhost:8007}"
 GENERATION_URL="${GENERATION_URL:-http://localhost:8009}"
 
 JAEGER_URL="${JAEGER_URL:-http://localhost:16686}"
@@ -53,11 +51,9 @@ echo ""
 echo "── Application services (asr-worker is a queue consumer — no HTTP) ─"
 check "auth-service         /healthz" "$AUTH_URL/healthz"         '"status":"ok"'
 check "asr-service          /healthz" "$ASR_URL/healthz"          '"status":"ok"'
-check "dictation-service    /healthz" "$DICTATION_URL/healthz"    '"status":"ok"'
 check "notification-service /healthz" "$NOTIFICATION_URL/healthz" '"status":"ok"'
 check "nlp-service          /healthz" "$NLP_URL/healthz"          '"status":"ok"'
 check "note-service         /healthz" "$NOTE_URL/healthz"         '"status":"ok"'
-check "autocomplete-service /healthz" "$AUTOCOMPLETE_URL/healthz" '"status":"ok"'
 check "generation-service   /healthz" "$GENERATION_URL/healthz"   '"status":"ok"'
 
 echo ""

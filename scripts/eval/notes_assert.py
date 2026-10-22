@@ -17,9 +17,8 @@ import json
 import re
 import sys
 import unicodedata
-from collections import Counter
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _normalize  # noqa: E402
@@ -435,123 +434,6 @@ def add_overview(want: dict[str, Any], produced: dict[str, Any], add: Any) -> No
 
 def family(name: str) -> str:
     return name.split("[", 1)[0].split(".", 1)[0]
-
-
-# Release targets (docs/development/ai-notes-quality/stabilization/README.md): acceptance
-# targets, not measured performance.
-TARGET_SUPPORTED: Final = 0.95
-TARGET_RECALL: Final = 0.90
-TARGET_DUPLICATES: Final = 0.05
-# Check families whose failure is a critical distortion, never averaged away.
-CRITICAL_FAMILIES: Final = frozenset(
-    {"must_not_contain", "same_line", "source_cited", "framing_must_not_contain",
-     "framing_must_contain_any", "no_grammar_corrections", "hedged_must_keep"}
-)  # fmt: skip
-DUPLICATE_JACCARD: Final = 0.8
-
-
-def _tokens(text: str) -> frozenset[str]:
-    return frozenset(w for w in re.findall(r"\w+", _fold(text)) if len(w) > 2)
-
-
-def duplicate_bullets(lines: list[dict[str, Any]]) -> tuple[int, int]:
-    """``(bullets repeating an earlier bullet, bullets)``: Jaccard >= 0.8 on content words."""
-    bullets = [
-        _tokens(ln["text"])
-        for ln in lines
-        if ln.get("kind") in ("bullet", "key_point") and ln.get("text")
-    ]
-    repeats = sum(
-        1
-        for i, b in enumerate(bullets)
-        if b and any(len(b & a) / len(b | a) >= DUPLICATE_JACCARD for a in bullets[:i] if a)
-    )
-    return repeats, len(bullets)
-
-
-class Report:
-    """The release-target summary over every run, each figure with its denominator."""
-
-    def __init__(self) -> None:
-        self.runs = 0
-        self.critical: list[str] = []
-        self.weight_covered = 0.0
-        self.weight_total = 0.0
-        self.final = Counter[str]()
-        self.duplicates = [0, 0]
-        self.seconds = 0.0
-        self.tokens = 0
-        self.fallbacks = 0
-        self.incomplete = 0
-
-    def add(
-        self,
-        label: str,
-        checklist: dict[str, Any],
-        results: list[tuple[str, bool, str]],
-        produced: dict[str, Any],
-    ) -> None:
-        self.runs += 1
-        for name, ok, _sprint in results:
-            if not ok and family(name) in CRITICAL_FAMILIES:
-                self.critical.append(f"{label}: {name}")
-        weights = {p["id"]: float(p.get("weight", 1)) for p in checklist.get("propositions", [])}
-        for name, ok, _sprint in results:
-            if name.startswith("proposition["):
-                key = name[len("proposition[") : -1]
-                self.weight_total += weights.get(key, 1.0)
-                self.weight_covered += weights.get(key, 1.0) if ok else 0.0
-        stats = produced.get("stats") or {}
-        final = stats.get("final_check") or {}
-        if final.get("ran"):
-            self.final.update(
-                {
-                    k: int(v)
-                    for k, v in final.items()
-                    if isinstance(v, int) and not isinstance(v, bool)
-                }
-            )
-        repeats, bullets = duplicate_bullets(produced.get("lines") or [])
-        self.duplicates[0] += repeats
-        self.duplicates[1] += bullets
-        self.seconds += float(produced.get("seconds") or 0)
-        self.tokens += int(produced.get("input_tokens") or 0) + int(
-            produced.get("output_tokens") or 0
-        )
-        self.fallbacks += int(bool(stats.get("summary_fallback") or stats.get("topics_fallback")))
-        self.incomplete += int(bool(stats.get("incomplete")))
-
-    def print(self) -> None:
-        def pct(a: float, b: float) -> str:
-            return f"{a / b:.0%} ({a:g}/{b:g})" if b else "not measured (0)"
-
-        f = self.final
-        checked = (
-            f["supported"]
-            + f["repaired"]
-            + f["contradicted"]
-            + f["insufficient_evidence"]
-            + f["undecided"]
-        )
-        print(f"\n== release targets over {self.runs} runs (acceptance targets, not a claim) ==")
-        print(f"critical sentinel failures: {len(self.critical)} (target 0)")
-        for line in self.critical:
-            print(f"  {line}")
-        print(
-            f"final claims: {f['claims']} asserted; {f['fact_text']} verbatim verified facts; "
-            f"{checked} checked by meaning, of which supported or repaired "
-            f"{pct(f['supported'] + f['repaired'], checked)} (target {TARGET_SUPPORTED:.0%}); "
-            f"restored to their fact {f['restored']}; held for review {f['unverified']}"
-        )
-        print(
-            f"weighted important-proposition recall: {pct(self.weight_covered, self.weight_total)} "
-            f"(target {TARGET_RECALL:.0%}; only cases with annotated propositions)"
-        )
-        print(f"duplicate bullets: {pct(*self.duplicates)} (target <= {TARGET_DUPLICATES:.0%})")
-        print(
-            f"runs incomplete: {self.incomplete}/{self.runs}; with a composition fallback: "
-            f"{self.fallbacks}/{self.runs}; time {self.seconds:.0f}s; tokens {self.tokens}"
-        )
 
 
 DEFAULT_STORE_DSN = "postgresql://postgres:postgres@localhost:5432/notes"

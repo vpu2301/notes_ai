@@ -27,15 +27,6 @@ export function NotesIcon({ size = 16 }: IconProps) {
   );
 }
 
-export function InboxIcon({ size = 16 }: IconProps) {
-  return (
-    <svg {...base(size)}>
-      <path d="M3 11.5 5 4.5h10l2 7v4H3z" />
-      <path d="M3 11.5h4l1.2 2h3.6l1.2-2h4" />
-    </svg>
-  );
-}
-
 export function MicIcon({ size = 16 }: IconProps) {
   return (
     <svg {...base(size)}>
@@ -149,22 +140,6 @@ export function CheckIcon({ size = 16 }: IconProps) {
   return (
     <svg {...base(size)}>
       <path d="m4 10.5 4 4 8-9" />
-    </svg>
-  );
-}
-
-export function ChevronLeftIcon({ size = 14 }: IconProps) {
-  return (
-    <svg {...base(size)}>
-      <path d="m12.5 4.5-5 5.5 5 5.5" />
-    </svg>
-  );
-}
-
-export function ChevronRightIcon({ size = 14 }: IconProps) {
-  return (
-    <svg {...base(size)}>
-      <path d="m7.5 4.5 5 5.5-5 5.5" />
     </svg>
   );
 }
@@ -300,15 +275,6 @@ export function AlertIcon({ size = 16 }: IconProps) {
     <svg {...base(size)}>
       <path d="M10 3.25 17.25 16H2.75z" />
       <path d="M10 8v3.5M10 13.75v.25" />
-    </svg>
-  );
-}
-
-export function ClockIcon({ size = 16 }: IconProps) {
-  return (
-    <svg {...base(size)}>
-      <circle cx="10" cy="10" r="6.75" />
-      <path d="M10 6.5V10l2.5 1.5" />
     </svg>
   );
 }

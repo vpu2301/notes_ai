@@ -30,30 +30,6 @@ services:
               count: 1
               capabilities: [gpu]
 
-  dictation-service:
-    build:
-      context: ../..
-      dockerfile: services/dictation-service/Dockerfile
-    runtime: nvidia
-    environment:
-      MD_ASR_DEVICE: cuda
-      # Baked weights; NEVER a bare HF id (it would resolve over the network).
-      MD_ASR_MODEL: /opt/models/whisper-large-v3
-      MD_ASR_COMPUTE_TYPE: float16
-      # ECAPA shares the GPU; model dir and digests come from the image ENV.
-      MDX_DIAR_DEVICE: cuda
-      HF_HUB_OFFLINE: "1"
-      TRANSFORMERS_OFFLINE: "1"
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
 secrets:
   hf_token:
     environment: HF_TOKEN

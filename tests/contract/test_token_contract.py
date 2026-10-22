@@ -28,7 +28,6 @@ SERVICES = [
     ("note_service", "note_service.deps", "note_service.config"),
     ("asr_service", "asr_service.deps", "asr_service.config"),
     ("nlp_service", "nlp_service.deps", "nlp_service.config"),
-    ("dictation_service", "dictation_service.deps", "dictation_service.config"),
     ("notification_service", "notification_service.deps", "notification_service.config"),
 ]
 

@@ -11,8 +11,8 @@
 
 ## What it does
 
-- **Voice notes & dictation** — real-time streaming speech-to-text over WebSocket
-  (faster-whisper), plus a batch transcription pipeline for uploaded audio.
+- **Transcription** — a batch transcription pipeline (faster-whisper) for recorded
+  and uploaded audio.
 - **Ambient meeting capture** — speaker diarization (who said what) for any
   number of speakers, from a laptop/phone in the room, a dedicated
   meeting-room device (least-privilege `device` identity), or an uploaded
@@ -25,8 +25,8 @@
   diff and tamper-evident hash-chaining, full-text search with synonyms, PDF export
   with tenant branding, audio replay clips.
 - **Text intelligence** — deterministic NLP post-processing (voice commands,
-  punctuation, number/date normalization, abbreviations), phrase autocomplete,
-  and inline AI ghost-text completion (local LLM).
+  punctuation, number/date normalization, abbreviations) and inline AI
+  ghost-text completion (local LLM).
 - **Sharing** — notes are private by default; make one visible to the whole
   workspace, share it with a colleague by e-mail (notification + mail), hand out
   a public read-only link, download it as PDF or Markdown, or delete it.
@@ -56,10 +56,8 @@ notes_ai/
 │   ├── auth-service/       # Identity, tenants, MFA, sessions, audit read API
 │   ├── asr-service/        # Batch transcription API (upload → job → transcript)
 │   ├── asr-worker/         # Whisper inference worker (Redis Streams consumer)
-│   ├── dictation-service/  # Real-time streaming ASR over WebSocket + diarization
 │   ├── nlp-service/        # Post-processing pipeline (punctuation, normalization…)
 │   ├── note-service/       # Notes, templates, versions, diff, search, PDF
-│   ├── autocomplete-service/ # Phrase/snippet suggestions (MARISA trie)
 │   ├── generation-service/ # Inline ghost-text completion (local LLM)
 │   └── notification-service/ # Feed, WebSocket push, email
 ├── libs/                   # Internal shared Python packages (uv workspace members)
@@ -153,15 +151,13 @@ explicitly, which disables the override — so it stays infra-only, unchanged.
 |---------|-----|-------|
 | auth-service | `http://localhost:8000` | the SPA expects this origin |
 | asr-service | `http://localhost:8001` | batch transcription submit/status |
-| dictation-service | `http://localhost:8002` | streaming ASR (WebSocket), meeting mode |
 | notification-service | `http://localhost:8004` | feed + WebSocket push + email (Mailpit dev sink on :8025) |
 | nlp-service | `http://localhost:8005` | post-processing pipeline |
 | note-service | `http://localhost:8006` | notes, templates, versions, search, PDF |
-| autocomplete-service | `http://localhost:8007` | phrase suggestions |
 | generation-service | `http://localhost:8009` | inline completion (needs a llama-server/Ollama backend, ADR-0036) |
 | asr-worker | — | Redis-stream consumer (no HTTP port) |
 
-> **First build downloads models.** `asr-worker` and `dictation-service` bake
+> **First build downloads models.** `asr-worker` bakes
 > pinned `faster-whisper` weights from Hugging Face at build time (offline at
 > runtime), so the first `docker compose build` needs network and takes longer.
 > All services run CPU-only here; add `-f infra/compose/gpu.yml` for the CUDA
@@ -199,13 +195,37 @@ root folders:
   iOS 17+; `ios/scripts/check.sh` compiles it without a simulator. See
   `ios/README.md`.
 
+## Local admin dashboard
+
+Pipeline telemetry (per-run timings, backends, LLM usage; never content) has an admin
+dashboard in the web app:
+
+1. Start the backend (`make dev-up`; migrations up to `0094_telemetry_admin` apply on start)
+   and the web dev server (`cd web && npm run dev`).
+2. Open http://localhost:5173/admin/dashboard. A run's page is
+   `/admin/dashboard/runs/<processing_run_id>`; each run has **Export diagnostics** (the
+   Markdown report) and **Copy as Markdown**.
+3. Sign in with an account whose token carries the `platform_admin` role. Other accounts see
+   "Not available"; the API (`/v1/telemetry/*`, `/v1/admin/telemetry/overview` in
+   note-service) refuses them as well.
+
+**Not built yet:** the dev-only `admin` / `admin` sign-in (bootstrap user, dev login endpoint,
+and adding `platform_admin` to session tokens) is waiting for the owner's approval of the
+auth-service change. Until then no dev account carries `platform_admin`, so the dashboard
+shows "Not available" for everyone. Design: `telemetry-sprints/design/ADMIN.md` §3.
+
+Without the dashboard, any member can export the report of their own recording: the note's
+⋯ menu has **Export diagnostics** and **Copy diagnostics as Markdown** on the web, and
+**Export diagnostics…** in the Mac and iOS apps. Workspace admins can export any recording
+in their workspace.
+
 ## API documentation
 
 - Every service serves interactive docs at `http://localhost:<port>/docs` (Swagger UI).
 - Committed OpenAPI snapshots live in [`docs/api/`](docs/api/) — one JSON per
   service, kept fresh by `make openapi-dump` and gated by `make openapi-check` in CI.
-- WebSocket protocols (dictation v1/v2, notifications v1) are defined by the
-  message models in `dictation_service.protocol` and `notification_service.ws.protocol`.
+- The WebSocket protocol (notifications v1) is defined by the message models in
+  `notification_service.ws.protocol`.
 
 ---
 

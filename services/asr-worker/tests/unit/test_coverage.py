@@ -173,12 +173,12 @@ async def test_a_worse_second_attempt_is_discarded(monkeypatch: pytest.MonkeyPat
 async def test_a_low_confidence_second_attempt_is_not_kept(monkeypatch: pytest.MonkeyPatch) -> None:
     guess = [
         Segment(
-            text="Thank you for watching",
+            text="See you next time",
             start_ms=0,
             end_ms=2_000,
             words=[
                 WordTiming(text=w, start_ms=k * 500, end_ms=k * 500 + 400, probability=0.1)
-                for k, w in enumerate(["Thank", "you", "for", "watching"])
+                for k, w in enumerate(["See", "you", "next", "time"])
             ],
             avg_confidence=0.1,
         )
