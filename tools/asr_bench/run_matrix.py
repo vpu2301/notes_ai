@@ -71,10 +71,12 @@ def open_runs() -> int:
     return int(out.stdout.strip() or 0)
 
 
-def wait_idle(asr: httpx.Client, timeout_s: float) -> None:
-    """Until no job of the caller is queued or running and no run is open on the stack."""
+def wait_idle(timeout_s: float) -> None:
+    """Until no job of the caller is queued or running and no run is open on the stack.
+    Logs in on every poll: a wait behind another workspace's long job outlives a token."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
+        asr, _ = bench.clients(bench.login())
         jobs = asr.get("/asr/jobs").raise_for_status().json()
         if not any(j["status"] in ("queued", "running") for j in jobs) and open_runs() == 0:
             return
@@ -145,14 +147,13 @@ def main() -> None:
     restarts = a.restart_cmd or [DEFAULT_RESTART]
     out = bench.EVIDENCE / a.sprint / a.condition
     out.mkdir(parents=True, exist_ok=True)
-    asr, note = bench.clients(bench.login())
 
     for recording in a.recordings:
         path = audio_file(recording)
         # Warm: run 0 warms the worker and is kept but excluded.
         reps = range(1, a.repeat + 1) if a.cold else range(0, a.repeat + 1)
         for n in reps:
-            wait_idle(asr, a.timeout)
+            wait_idle(a.timeout)
             if a.cold:
                 for cmd in restarts:
                     subprocess.run(shlex.split(cmd), check=True, cwd=bench.REPO)
