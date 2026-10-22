@@ -50,11 +50,26 @@ def login(email: str = EMAIL, password: str = PASSWORD) -> str:
     return str(r.json()["access_token"])
 
 
+class _Bearer(httpx.Auth):
+    """Bearer token that logs in again on a 401: a 15-minute recording on CPU outlives one."""
+
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+    def auth_flow(self, request: httpx.Request):  # type: ignore[no-untyped-def]
+        request.headers["Authorization"] = f"Bearer {self.token}"
+        response = yield request
+        if response.status_code == 401:
+            self.token = login()
+            request.headers["Authorization"] = f"Bearer {self.token}"
+            yield request
+
+
 def clients(token: str) -> tuple[httpx.Client, httpx.Client]:
-    headers = {"Authorization": f"Bearer {token}"}
+    auth = _Bearer(token)
     return (
-        httpx.Client(base_url=ASR_URL, headers=headers, timeout=120),
-        httpx.Client(base_url=NOTE_URL, headers=headers, timeout=60),
+        httpx.Client(base_url=ASR_URL, auth=auth, timeout=120),
+        httpx.Client(base_url=NOTE_URL, auth=auth, timeout=60),
     )
 
 
