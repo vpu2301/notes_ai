@@ -1,0 +1,529 @@
+{
+ "telemetry_schema_version": 1,
+ "processing_run": {
+  "null_reasons": {
+   "user_wait_seconds": "not_measured",
+   "time_to_notes_seconds": "not_measured",
+   "time_to_transcript_seconds": "not_measured",
+   "time_to_speaker_labels_seconds": "not_measured"
+  },
+  "processing_run_id": "f2e27fc8-efdc-4d1f-9ffe-ffcc13065477",
+  "tenant_id": "00000000-0000-0000-0000-00000000000b",
+  "recording_id": "7967deba-52de-45d6-a0e2-1356966ffc9c",
+  "note_id": null,
+  "note_generation_id": null,
+  "kind": "initial",
+  "reprocess_scope": null,
+  "trigger": "user",
+  "telemetry_schema_version": 1,
+  "attempts": 1,
+  "status": "succeeded",
+  "error_category": null,
+  "submitted_at": "2026-10-22T15:07:06.484579Z",
+  "started_at": "2026-10-22T15:07:28.311387Z",
+  "finished_at": "2026-10-22T15:45:07.939866Z",
+  "processing_wall_seconds": 2307.33719,
+  "user_wait_seconds": null,
+  "user_wait_cross_device": null,
+  "time_to_transcript_seconds": null,
+  "time_to_speaker_labels_seconds": null,
+  "time_to_notes_seconds": null,
+  "rtf": 2.563707988888889,
+  "speedup": 0.3900600241267727,
+  "audio_duration_seconds": 900.0,
+  "asr_audio_processed_seconds": 866.138,
+  "created_by": "0c000000-0000-0000-0000-00000000000b",
+  "concurrent_runs_at_start": 0,
+  "other_model_activity": [],
+  "telemetry_overhead_seconds": 0.079704,
+  "telemetry_buffer_peak_bytes": 1470,
+  "retention_until": "2027-01-20T15:07:06.484579Z",
+  "trace_id": "bf8832d962c2ae60b076f8cc512a4566"
+ },
+ "run_context": {
+  "null_reasons": {
+   "app_build": "unavailable",
+   "chip_model": "not_supported",
+   "device_llm": "not_applicable",
+   "container_mem_limit": "unavailable"
+  },
+  "processing_run_id": "f2e27fc8-efdc-4d1f-9ffe-ffcc13065477",
+  "tenant_id": "00000000-0000-0000-0000-00000000000b",
+  "telemetry_schema_version": 1,
+  "app_commit": "ce7f25a",
+  "app_build": null,
+  "os_name": "Linux",
+  "os_version": "7.0.14-linuxkit",
+  "arch": "aarch64",
+  "chip_model": null,
+  "memory_total_bytes": 14636097536,
+  "execution_mode": "container",
+  "effective_config": {
+   "asr_backend": "inproc_cpu_asr",
+   "asr_model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+   "asr_lid_model": "/opt/models/whisper-tiny",
+   "asr_compute_type": "int8"
+  },
+  "device_asr": {
+   "value": "cpu",
+   "observation": "observed"
+  },
+  "device_diarization": {
+   "value": "cpu",
+   "observation": "configured"
+  },
+  "device_llm": null,
+  "memory_pressure_start": "some_avg10=0.07",
+  "memory_pressure_end": "some_avg10=0.00",
+  "process_rss_start": 2451648512,
+  "process_rss_end": 2354130944,
+  "swap_used_start": 740835328,
+  "swap_used_end": 1059717120,
+  "container_mem_limit": null
+ },
+ "spans": [
+  {
+   "span_id": "bc2c499e-10ee-42b7-ad03-1e5168f16f44",
+   "processing_run_id": "f2e27fc8-efdc-4d1f-9ffe-ffcc13065477",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "357b9312-6143-4391-9367-a35644aae9ba",
+   "stage": "queue",
+   "name": "asr.queue_wait",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": null,
+   "end_monotonic_ns": null,
+   "start_wall_utc": "2026-10-22T15:07:06.494000Z",
+   "end_wall_utc": "2026-10-22T15:07:28.326443Z",
+   "clock_source": "wall",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "queue_name": "asr:jobs",
+    "redelivery": false,
+    "started_at": "2026-10-22T15:07:28.326443+00:00",
+    "enqueued_at": "2026-10-22T15:07:06.494000+00:00",
+    "queue_wait_seconds": 21.8324,
+    "queue_depth_at_enqueue": 0
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "08c63d25-8357-40ee-b41a-2edebcea3c71",
+   "processing_run_id": "f2e27fc8-efdc-4d1f-9ffe-ffcc13065477",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "befe5d5b-32e3-4fe0-a5c9-422af5c4259e",
+   "stage": "queue",
+   "name": "asr.queue_wait",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": null,
+   "end_monotonic_ns": null,
+   "start_wall_utc": "2026-10-22T15:07:06.494000Z",
+   "end_wall_utc": "2026-10-22T15:45:08.050181Z",
+   "clock_source": "wall",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "queue_name": "asr:jobs",
+    "redelivery": true,
+    "started_at": "2026-10-22T15:45:08.050181+00:00",
+    "enqueued_at": "2026-10-22T15:07:06.494000+00:00",
+    "queue_wait_seconds": 2281.5562,
+    "queue_depth_at_enqueue": 0
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "ae546fc7-8550-4ddc-b7cf-1733dcab3dad",
+   "processing_run_id": "f2e27fc8-efdc-4d1f-9ffe-ffcc13065477",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "357b9312-6143-4391-9367-a35644aae9ba",
+   "stage": "audio_prep",
+   "name": "asr.audio_prep",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 12885651415363,
+   "end_monotonic_ns": 12887149761614,
+   "start_wall_utc": "2026-10-22T15:07:28.344876Z",
+   "end_wall_utc": "2026-10-22T15:07:29.843359Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "bytes": 26442134,
+    "_reasons": {
+     "decrypt_seconds": "not_supported",
+     "resample_seconds": "not_supported",
+     "source_sample_rate_hz": "unavailable"
+    },
+    "channel_layout": "mono",
+    "decode_seconds": 1.0401,
+    "decrypt_seconds": null,
+    "resample_seconds": null,
+    "retrieve_seconds": 0.4581,
+    "source_sample_rate_hz": null,
+    "target_sample_rate_hz": 16000
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "fe1344eb-c06f-47f0-b6eb-a59273c7196d",
+   "processing_run_id": "f2e27fc8-efdc-4d1f-9ffe-ffcc13065477",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "357b9312-6143-4391-9367-a35644aae9ba",
+   "stage": "model_init",
+   "name": "asr.model",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 12887157283531,
+   "end_monotonic_ns": 12887157504572,
+   "start_wall_utc": "2026-10-22T15:07:29.850743Z",
+   "end_wall_utc": "2026-10-22T15:07:29.851022Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "state": "warm",
+    "device": {
+     "value": "cpu",
+     "observation": "observed"
+    },
+    "backend": "inproc_cpu_asr",
+    "_reasons": {
+     "warmup_seconds": "not_applicable"
+    },
+    "model_kind": "asr",
+    "model_name": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "compute_type": "int8",
+    "load_seconds": 2e-05,
+    "quantization": "int8",
+    "model_revision": "edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "warmup_seconds": null,
+    "startup_load_seconds": 24.349
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "bebc4e5d-2fc3-4fc9-bfbc-b9876102010c",
+   "processing_run_id": "f2e27fc8-efdc-4d1f-9ffe-ffcc13065477",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "357b9312-6143-4391-9367-a35644aae9ba",
+   "stage": "asr_primary",
+   "name": "asr.transcribe_runs",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 13519919411361,
+   "end_monotonic_ns": 15023779472505,
+   "start_wall_utc": "2026-10-22T15:18:02.615179Z",
+   "end_wall_utc": "2026-10-22T15:43:06.440882Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "device": {
+     "value": "cpu",
+     "observation": "observed"
+    },
+    "backend": "inproc_cpu_asr",
+    "beam_size": 5,
+    "truncated": false,
+    "word_count": 2542,
+    "chunk_count": 61,
+    "compute_type": "int8",
+    "wall_seconds": 1503.859,
+    "chunk_seconds": [
+     1.852,
+     10.684,
+     14.908
+    ],
+    "segment_count": 223,
+    "audio_processed_seconds": 866.138
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "f2108503-e07a-4855-8b1d-9a8a850e7c7e",
+   "processing_run_id": "f2e27fc8-efdc-4d1f-9ffe-ffcc13065477",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "357b9312-6143-4391-9367-a35644aae9ba",
+   "stage": "diarization_load",
+   "name": "diarization.load",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 15024069415505,
+   "end_monotonic_ns": 15030975933841,
+   "start_wall_utc": "2026-10-22T15:43:06.730622Z",
+   "end_wall_utc": "2026-10-22T15:43:13.637441Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "model": "spkrec-ecapa-voxceleb@0f99f2d",
+    "state": "cold",
+    "device": {
+     "value": "cpu",
+     "observation": "configured"
+    },
+    "backend": "legacy-ecapa-ahc",
+    "_reasons": {
+     "speakers_detected": "not_applicable",
+     "unknown_speaker_share": "not_applicable"
+    },
+    "load_seconds": 6.9057,
+    "audio_seconds": 900.0,
+    "speakers_detected": null,
+    "unknown_speaker_share": null
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "14c41e90-239c-4c00-8519-44b47fe897fa",
+   "processing_run_id": "f2e27fc8-efdc-4d1f-9ffe-ffcc13065477",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "357b9312-6143-4391-9367-a35644aae9ba",
+   "stage": "diarization_infer",
+   "name": "diarization.infer",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 15030978315925,
+   "end_monotonic_ns": 15144805887560,
+   "start_wall_utc": "2026-10-22T15:43:13.639523Z",
+   "end_wall_utc": "2026-10-22T15:45:07.467805Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "model": "spkrec-ecapa-voxceleb@0f99f2d",
+    "device": {
+     "value": "cpu",
+     "observation": "configured"
+    },
+    "layout": "mono",
+    "backend": "legacy-ecapa-ahc",
+    "audio_seconds": 900.0,
+    "infer_seconds": 113.8257,
+    "speakers_detected": 5,
+    "unknown_speaker_share": 0.0967
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "06b05dbe-9596-4a21-bcf8-8e7f00bac7fc",
+   "processing_run_id": "f2e27fc8-efdc-4d1f-9ffe-ffcc13065477",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "357b9312-6143-4391-9367-a35644aae9ba",
+   "stage": "language_detection",
+   "name": "lid.run",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 12921719882880,
+   "end_monotonic_ns": 12932595582677,
+   "start_wall_utc": "2026-10-22T15:08:04.413922Z",
+   "end_wall_utc": "2026-10-22T15:08:15.290080Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "detected": [
+     {
+      "lang": "en",
+      "confidence": 0.9819
+     },
+     {
+      "lang": "cy",
+      "confidence": 0.0076
+     },
+     {
+      "lang": "la",
+      "confidence": 0.0032
+     }
+    ],
+    "call_count": 1,
+    "audio_seconds": 10.684,
+    "decided_language": "en",
+    "duration_seconds": 10.8755
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "1610e780-2b0f-4e51-8f43-045993c8e8d5",
+   "processing_run_id": "f2e27fc8-efdc-4d1f-9ffe-ffcc13065477",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "357b9312-6143-4391-9367-a35644aae9ba",
+   "stage": "language_detection",
+   "name": "lid.run",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 12932602652219,
+   "end_monotonic_ns": 12942372857847,
+   "start_wall_utc": "2026-10-22T15:08:15.296690Z",
+   "end_wall_utc": "2026-10-22T15:08:25.066939Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "detected": [
+     {
+      "lang": "en",
+      "confidence": 0.9953
+     },
+     {
+      "lang": "cy",
+      "confidence": 0.0025
+     },
+     {
+      "lang": "la",
+      "confidence": 0.0003
+     }
+    ],
+    "call_count": 1,
+    "audio_seconds": 14.908,
+    "decided_language": "en",
+    "duration_seconds": 9.7701
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "c37f88f6-86af-4dcd-ae94-29c8db005397",
+   "processing_run_id": "f2e27fc8-efdc-4d1f-9ffe-ffcc13065477",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "357b9312-6143-4391-9367-a35644aae9ba",
+   "stage": "language_detection",
+   "name": "lid.run",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 12942377185264,
+   "end_monotonic_ns": 12951877337685,
+   "start_wall_utc": "2026-10-22T15:08:25.071150Z",
+   "end_wall_utc": "2026-10-22T15:08:34.571437Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "detected": [
+     {
+      "lang": "en",
+      "confidence": 0.9956
+     },
+     {
+      "lang": "cy",
+      "confidence": 0.0023
+     },
+     {
+      "lang": "la",
+      "confidence": 0.0006
+     }
+    ],
+    "call_count": 1,
+    "audio_seconds": 8.444,
+    "decided_language": "en",
+    "duration_seconds": 9.5001
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "57bc2b9c-ef71-40c0-acca-43d8804d8304",
+   "processing_run_id": "f2e27fc8-efdc-4d1f-9ffe-ffcc13065477",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "bebc4e5d-2fc3-4fc9-bfbc-b9876102010c",
+   "stage": "asr_primary",
+   "name": "asr.chunk",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 13519924209027,
+   "end_monotonic_ns": 13531882658533,
+   "start_wall_utc": "2026-10-22T15:18:02.619976Z",
+   "end_wall_utc": "2026-10-22T15:18:14.578645Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "device": {
+     "value": "cpu",
+     "observation": "observed"
+    },
+    "backend": "faster_whisper",
+    "beam_size": 5,
+    "word_count": 5,
+    "chunk_count": 1,
+    "compute_type": "int8",
+    "wall_seconds": 11.9581,
+    "chunk_seconds": [
+     1.852
+    ],
+    "segment_count": 1,
+    "audio_processed_seconds": 1.852
+   },
+   "is_parallel_with": null
+  },
+  {
+   "span_id": "ca138369-203b-4563-a26e-b27eb9052214",
+   "processing_run_id": "f2e27fc8-efdc-4d1f-9ffe-ffcc13065477",
+   "tenant_id": "00000000-0000-0000-0000-00000000000b",
+   "parent_span_id": "bebc4e5d-2fc3-4fc9-bfbc-b9876102010c",
+   "stage": "asr_primary",
+   "name": "asr.chunk",
+   "attempt": 1,
+   "status": "ok",
+   "error_category": null,
+   "error_class": null,
+   "start_monotonic_ns": 13531889150116,
+   "end_monotonic_ns": 13549209908583,
+   "start_wall_utc": "2026-10-22T15:18:14.584919Z",
+   "end_wall_utc": "2026-10-22T15:18:31.913260Z",
+   "clock_source": "monotonic",
+   "process_id": 1,
+   "host": "e7ffe6e52347",
+   "attributes": {
+    "model": "/opt/models/whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "device": {
+     "value": "cpu",
+     "observation": "observed"
+    },
+    "backend": "faster_whisper",
+    "beam_size": 5,
+    "word_count": 39,
+    "chunk_count": 1,
+    "compute_type": "int8",
+    "wall_seconds": 17.3199,
+    "chunk_seconds": [
+     10.684
+    ],
+    "segment_count": 3,
+    "audio_processed_seconds": 10.684
+   },
+   "is_parallel_with": null
+  }
+ ],
+ "llm_calls": [],
+ "client_events": [],
+ "missing_measurements": []
+}
