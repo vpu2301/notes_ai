@@ -37,6 +37,8 @@ import bench  # noqa: E402
 DEFAULT_RESTART = "docker compose restart asr-worker"
 PG_CONTAINER = os.environ.get("ASR_BENCH_PG_CONTAINER", "notes-ai-postgres-1")
 TERMINAL = {"complete", "failed", "cancelled"}
+# What browsers send; httpx would guess `audio/x-flac`, which the upload allow-list refuses.
+MIME = {".flac": "audio/flac", ".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4"}
 POLL_S = 1.0
 
 
@@ -108,7 +110,9 @@ def one_run(
     with path.open("rb") as f:
         r = asr.post(
             "/asr/jobs",
-            files={"audio": (path.name, f)},
+            files={
+                "audio": (path.name, f, MIME.get(path.suffix.lower(), "application/octet-stream"))
+            },
             data={"language": "auto", "diarize": "true", "capture_source": "upload"},
         )
     r.raise_for_status()
