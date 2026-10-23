@@ -85,6 +85,18 @@ def wait_ac_power() -> None:
         time.sleep(60)
 
 
+def battery_since(start: float) -> bool:
+    """The power log shows the Mac on battery at any moment since ``start`` (epoch seconds)."""
+    try:
+        log = subprocess.run(["pmset", "-g", "log"], capture_output=True, text=True).stdout
+    except OSError:
+        return False
+    since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start))
+    return any(
+        line[:19] >= since and "Using Batt" in line for line in log.splitlines()
+    )
+
+
 def open_runs() -> int:
     """Runs open on the whole stack, every workspace (the API shows only the caller's jobs).
     A cold restart while another job runs would kill it."""
@@ -189,7 +201,10 @@ def main() -> None:
             asr, note = bench.clients(bench.login())
             free = host_mem_free_pct()
             source, low_power = power_state()
+            started = time.time()
             export = one_run(asr, note, path, f"asr-bench {recording} {a.condition}", a.timeout)
+            if battery_since(started):
+                source = "Battery"
             name = f"{recording}_{kind}_{n}"
             (out / f"{name}.md").write_text(export.pop("_report_md"))
             row = bench.row_from_run(export)
@@ -199,6 +214,8 @@ def main() -> None:
                 recording=recording, condition=a.condition, temp=kind, rep=n,
                 host_mem_free_pct=free, power_source=source, low_power_mode=low_power,
             )  # fmt: skip
+            if source != "AC" or low_power:
+                row["excluded"] = row["excluded"] or "not_on_ac_power"
             bench.append_csv(out / "runs.csv", row)
             print(
                 f"{name}: {row['status']} wall={row['pipeline_wall_seconds']} "
