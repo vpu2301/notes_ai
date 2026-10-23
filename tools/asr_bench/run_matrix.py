@@ -62,6 +62,29 @@ def host_mem_free_pct() -> float | None:
     return float(m.group(1)) if m else None
 
 
+def power_state() -> tuple[str | None, bool | None]:
+    """(``"AC"``/``"Battery"``, Low Power Mode on). Low Power Mode on battery roughly halves
+    CPU speed on this Mac, so a run is only comparable on AC with it off."""
+    try:
+        batt = subprocess.run(["pmset", "-g", "batt"], capture_output=True, text=True).stdout
+        cur = subprocess.run(["pmset", "-g"], capture_output=True, text=True).stdout
+    except OSError:
+        return None, None
+    source = "AC" if "AC Power" in batt else "Battery" if "Battery Power" in batt else None
+    m = re.search(r"lowpowermode\s+(\d)", cur)
+    return source, (m.group(1) == "1") if m else None
+
+
+def wait_ac_power() -> None:
+    """Until the Mac is on AC power with Low Power Mode off."""
+    warned = False
+    while (state := power_state()) not in (("AC", False), (None, None)):
+        if not warned:
+            print(f"waiting for AC power, Low Power Mode off (now {state})", flush=True)
+            warned = True
+        time.sleep(60)
+
+
 def open_runs() -> int:
     """Runs open on the whole stack, every workspace (the API shows only the caller's jobs).
     A cold restart while another job runs would kill it."""
@@ -158,12 +181,14 @@ def main() -> None:
         reps = range(1, a.repeat + 1) if a.cold else range(0, a.repeat + 1)
         for n in reps:
             wait_idle(a.timeout)
+            wait_ac_power()
             if a.cold:
                 for cmd in restarts:
                     subprocess.run(shlex.split(cmd), check=True, cwd=bench.REPO)
             # Tokens are short-lived; a 15-minute recording outlives one.
             asr, note = bench.clients(bench.login())
             free = host_mem_free_pct()
+            source, low_power = power_state()
             export = one_run(asr, note, path, f"asr-bench {recording} {a.condition}", a.timeout)
             name = f"{recording}_{kind}_{n}"
             (out / f"{name}.md").write_text(export.pop("_report_md"))
@@ -172,7 +197,7 @@ def main() -> None:
                 row["excluded"] = row["excluded"] or "warmup"
             row.update(
                 recording=recording, condition=a.condition, temp=kind, rep=n,
-                host_mem_free_pct=free,
+                host_mem_free_pct=free, power_source=source, low_power_mode=low_power,
             )  # fmt: skip
             bench.append_csv(out / "runs.csv", row)
             print(

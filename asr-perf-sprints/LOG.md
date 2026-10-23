@@ -16,6 +16,9 @@
   2. 400 `mime_not_allowed`: httpx sends `.flac` as `audio/x-flac`. Fixed: explicit browser MIME types.
   3. 17:55 UTC: right after my cold restart and submit, another session recreated `asr-service` and `asr-worker` (same images) with **`MDX_TELEMETRY_ENABLED=false`**, for its telemetry overhead runs (`telemetry-sprints/evidence/overhead/`). The harness's status poll died on the restart. I cancelled my job (`5e12a3b1`) so it wouldn't distort that session's measurement.
   **Baseline blocked:** two sessions share one dev stack with conflicting needs (theirs: telemetry off, back-to-back 900 s jobs; this one: telemetry on, an idle stack, worker restarts). The owner has to sequence them.
+- 2026-10-22: Owner had the other session's 3600 s job (`90c8ada2`) cancelled; baseline started 20:33 UTC. 10 cold runs succeeded (all recordings × 2, `concurrent_runs_at_start` 0), committed as `fe8fa64`. A 401 mid-run on en-15m (token outlived) was fixed with re-login on 401 (`6323ffc`); the orphaned job was cancelled and en-15m restarted.
+- 2026-10-23: Warm runs started 09:36 UTC; stopped 11:10 UTC after 14 rows. **The Mac was on battery with Low Power Mode on** (`pmset`: battery profile `lowpowermode 1`). Power log vs run times: only the two mix-de-en-3m cold runs (23:13–23:25 local) ran on AC; every other run so far was on battery. ASR rtf on AC ≈ 0.8–0.9; on battery/Low Power Mode ≈ 1.6–2.0. The power state is an uncontrolled variable in all of these runs, so they cannot be the baseline. The dev stack had also stopped overnight when the battery reached 10 % and the Mac slept.
+- 2026-10-23: `run_matrix.py` now records `power_source` and `low_power_mode` per row and waits for AC power with Low Power Mode off before each run.
 
 ## Observed, out of scope (not fixed here)
 

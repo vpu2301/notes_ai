@@ -35,7 +35,7 @@ ROW_FIELDS = (
     "lid_call_count", "lid_total_seconds", "time_to_asr_start_seconds",
     "diarization_load_seconds", "diarization_infer_seconds", "pipeline_wall_seconds",
     "user_wait_seconds", "rss_peak_bytes", "swap_delta_bytes", "asr_audio_processed_seconds",
-    "telemetry_overhead_seconds", "host_mem_free_pct",
+    "telemetry_overhead_seconds", "host_mem_free_pct", "power_source", "low_power_mode",
 )  # fmt: skip
 
 
