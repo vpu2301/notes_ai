@@ -19,6 +19,7 @@
 - 2026-10-22: Owner had the other session's 3600 s job (`90c8ada2`) cancelled; baseline started 20:33 UTC. 10 cold runs succeeded (all recordings × 2, `concurrent_runs_at_start` 0), committed as `fe8fa64`. A 401 mid-run on en-15m (token outlived) was fixed with re-login on 401 (`6323ffc`); the orphaned job was cancelled and en-15m restarted.
 - 2026-10-23: Warm runs started 09:36 UTC; stopped 11:10 UTC after 14 rows. **The Mac was on battery with Low Power Mode on** (`pmset`: battery profile `lowpowermode 1`). Power log vs run times: only the two mix-de-en-3m cold runs (23:13–23:25 local) ran on AC; every other run so far was on battery. ASR rtf on AC ≈ 0.8–0.9; on battery/Low Power Mode ≈ 1.6–2.0. The power state is an uncontrolled variable in all of these runs, so they cannot be the baseline. The dev stack had also stopped overnight when the battery reached 10 % and the Mac slept.
 - 2026-10-23: `run_matrix.py` now records `power_source` and `low_power_mode` per row and waits for AC power with Low Power Mode off before each run.
+- 2026-10-23: Baseline rerun on AC power, Low Power Mode off (13:17–19:05 local): 10 cold + 15 warm counted runs, all attempt 1, no concurrency. The harness held the queue twice while the Mac was on battery (16 s at 13:32; 14:03–15:41) and one en-15m cold run that started on AC and then ran on battery was cancelled and replaced. References frozen from warm run 1; drift 0 on every run; against the TTS script WER 0–2.8 %. Medians in `BASELINE.md`.
 
 ## Observed, out of scope (not fixed here)
 
